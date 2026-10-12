@@ -462,9 +462,9 @@ export const ModsTableSwitch = ({
         cell: ({ mod, name }) => (
           <ModRowActions
             actions={actionsFor(mod.id)}
+            busy={busyFor(mod)}
             enabled={isEnabled(mod)}
             installLabel={t("Install {{name}}", { name })}
-            busy={busyFor(mod)}
             isLoading={changing.has(mod.id)}
             label={t("{{name}} enabled", { name })}
             modId={mod.id}
@@ -521,6 +521,7 @@ export const ModsTableSwitch = ({
     [
       actionsFor,
       alternatives,
+      busyFor,
       changing,
       dataColumns,
       install,
