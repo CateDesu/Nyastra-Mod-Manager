@@ -8,6 +8,7 @@ import { Html } from "@/ui/components/html/Html";
 import { Icon } from "@/ui/components/icon/Icon";
 import { Markdown } from "@/ui/components/markdown/Markdown";
 import { ToolbarButton } from "@/ui/components/toolbar/ToolbarButton";
+import { TitledTooltip } from "@/ui/components/tooltip/TitledTooltip";
 import { Tooltip } from "@/ui/components/tooltip/Tooltip";
 import { activeGameId } from "@/util/selectors";
 
@@ -25,15 +26,6 @@ interface IChangelog {
   format: "html" | "text";
   content: string;
 }
-
-/** A tooltip's bold title over what it means, as the design words these: 240px wide. */
-const TitledTooltip = ({ title, body }: { title: string; body: string }) => (
-  <div className="nxm-tooltip-content max-w-60">
-    <p className="font-semibold">{title}</p>
-
-    <p>{body}</p>
-  </div>
-);
 
 /**
  * What there is to say about updating a mod: its update state, and the newest version's
