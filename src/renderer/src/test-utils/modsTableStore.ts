@@ -23,15 +23,19 @@ export const makeModsTableStore = ({
   categories = {},
   modState,
   mods = {},
+  activity = {},
 }: {
   tables?: IModsTableTestTables;
   downloads?: { [id: string]: Partial<IDownload> };
   categories?: ICategoryDictionary;
   modState?: { [modId: string]: { enabled: boolean } };
   mods?: { [modId: string]: object };
+  /** What's under way, by group, as `session.base.activity` lists it. */
+  activity?: { [group: string]: string[] };
 } = {}) => {
   const initial = {
     settings: { tables, toolbars: {}, profiles: { activeProfileId: "profile" } },
+    session: { base: { activity } },
     persistent: {
       profiles: { profile: { gameId: MODS_TABLE_TEST_GAME, modState } },
       downloads: { files: downloads },
