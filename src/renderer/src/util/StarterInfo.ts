@@ -80,9 +80,6 @@ async function shouldRunWithProton(
   info: IStarterInfo,
   api: IExtensionApi,
 ): Promise<ISteamEntry | undefined> {
-  if (process.platform === "win32") {
-    return undefined;
-  }
   if (!isWindowsExecutable(info.exePath)) {
     return undefined;
   }
@@ -191,8 +188,7 @@ class StarterInfo implements IStarterInfo {
       await StarterInfo.runThroughLauncher(launcherResult.launcher, info, api, infoObj);
       // assuming that runThroughLauncher returns immediately on handing things off
       // to the launcher
-      const isLinuxSteamLauncher =
-        process.platform !== "win32" && launcherResult.launcher === "steam";
+      const isLinuxSteamLauncher = launcherResult.launcher === "steam";
       // Keep existing Linux Steam behavior unless running under Flatpak, where we now
       // emulate stop events to avoid stale running state.
       if (!isLinuxSteamLauncher || process.env.IS_FLATPAK === "true") {

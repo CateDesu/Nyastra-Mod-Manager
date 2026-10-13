@@ -9,7 +9,7 @@
  * loudly if any future builder upgrade regresses the layout again.
  *
  * Usage:
- *   node scripts/verify-packaged-asar.mjs [--deploy src/main/dist/node_modules] [--asar dist/win-unpacked/resources/app.asar]
+ *   node scripts/verify-packaged-asar.mjs [--deploy src/main/dist/node_modules] [--asar dist/linux-unpacked/resources/app.asar]
  *
  * Checks every nested package (node_modules/<pkg>/node_modules/<dep>) in the
  * deploy tree: if the asar contains that slot, its version must match. Slots
@@ -36,7 +36,7 @@ function arg(name, fallback) {
 }
 
 const deployRoot = path.resolve(arg("deploy", "src/main/dist/node_modules"));
-const asarPath = path.resolve(arg("asar", "dist/win-unpacked/resources/app.asar"));
+const asarPath = path.resolve(arg("asar", "dist/linux-unpacked/resources/app.asar"));
 
 if (!fs.existsSync(deployRoot) || !fs.existsSync(asarPath)) {
   console.error(`missing input: ${!fs.existsSync(deployRoot) ? deployRoot : asarPath}`);

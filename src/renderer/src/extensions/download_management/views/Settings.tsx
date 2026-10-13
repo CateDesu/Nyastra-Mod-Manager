@@ -297,17 +297,7 @@ class Settings extends ComponentEx<IProps, IComponentState> {
   private isPathSensible(input: string): boolean {
     const sanitizeSep = new RegExp("/", "g");
     const trimTrailingSep = new RegExp(`\\${path.sep}*$`, "g");
-    if (process.platform === "win32") {
-      // Ensure the user isn't trying to set the partition's root path
-      //  as the staging folder.
-      input = input.replace(sanitizeSep, path.sep).replace(trimTrailingSep, "");
-      const splitInp = input.split(path.sep);
-      return splitInp.length > 1
-        ? true
-        : splitInp[0].length === 2 && splitInp[0][1] === ":"
-          ? false
-          : true;
-    } else {
+    {
       // Currently not imposing any restrictions on non-windows platforms.
       return true;
     }

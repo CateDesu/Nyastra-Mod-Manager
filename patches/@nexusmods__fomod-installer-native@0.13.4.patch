@@ -1,0 +1,16 @@
+diff --git a/install.js b/install.js
+index 245a20d8c15d3261f0d993b711abf41dfe31032e..95c5b413565f317e5e457db34da10b483f80e231 100644
+--- a/install.js
++++ b/install.js
+@@ -26,6 +26,11 @@ if (fs.existsSync(platformDir)) {
+   });
+ }
+ 
++// Vortex relocates the Linux N-API prebuild in its own postinstall.
++if (process.platform === 'linux') {
++  process.exit(0);
++}
++
+ try {
+   // Try to load the addon — works if a prebuild matches this platform
+   require('node-gyp-build')(__dirname);

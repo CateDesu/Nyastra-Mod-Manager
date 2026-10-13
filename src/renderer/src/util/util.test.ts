@@ -5,7 +5,7 @@ import * as util from "./util";
 // for the tests regarding invalid filename detection/sanitation we need a consistent
 // platform and windows is just way more "interesting" in this regard
 vi.mock("process", () => ({
-  platform: "win32",
+  platform: "linux",
 }));
 
 describe("objDiff", () => {
@@ -242,26 +242,7 @@ describe("objDiff", () => {
 
 describe("isFilenameValid", () => {
   it("reports invalid filenames", () => {
-    const invalidNames =
-      process.platform === "win32"
-        ? [
-            "FOO/BAR.txt",
-            "foo?bar.txt",
-            "foo*bar.txt",
-            "foo:bar.txt",
-            "foo|bar.txt",
-            'foo"bar.txt',
-            "foo<bar.txt",
-            "foo>bar.txt",
-            "CON",
-            "COM3",
-            "LPT4",
-            "NUL.txt",
-            "aux.exe",
-            "..",
-            ".",
-          ]
-        : ["..", "."];
+    const invalidNames = ["..", ".", "foo/bar", "foo\0bar", ""];
 
     invalidNames.forEach((name) => {
       expect(util.isFilenameValid(name)).toBe(false);
@@ -269,36 +250,10 @@ describe("isFilenameValid", () => {
   });
 
   it("allows valid names", () => {
-    const validNames =
-      process.platform === "win32"
-        ? ["foobar.txt", "foo.bar.txt", "foo%bar.txt", "fööbär.txt", "null.txt", "..foobar.txt"]
-        : [];
+    const validNames = ["foobar.txt", "foo.bar.txt", "fööbär.txt", "foo:bar", "foo?bar", "CON"];
 
     validNames.forEach((name) => {
       expect(util.isFilenameValid(name)).toBe(true);
-    });
-  });
-});
-
-const describeOnWindows = process.platform === "win32" ? describe : describe.skip;
-
-describeOnWindows("isPathValid", () => {
-  it("reports invalid path", () => {
-    const invalidNames = ["foo\\b/ar.txt", "con\\bar.txt", "foo\\..\\bar.txt", "\\foo\\bar"];
-    invalidNames.forEach((name) => {
-      expect(util.isPathValid(name)).toBe(false);
-    });
-  });
-  it("allows valid names", () => {
-    const validNames = ["foo\\bar.txt", "c:\\conx\\bar.txt", "\\\\server\\foo\\bar", "foo\\bar\\"];
-    validNames.forEach((name) => {
-      expect(util.isPathValid(name)).toBe(true);
-    });
-  });
-  it("can be set to allow relative paths", () => {
-    const validNames = ["c:\\conx\\..\\bar.txt"];
-    validNames.forEach((name) => {
-      expect(util.isPathValid(name, true)).toBe(true);
     });
   });
 });
@@ -318,18 +273,6 @@ describe("unique", () => {
       { k: 1, v: 1 },
       { k: 2, v: 1 },
     ]);
-  });
-});
-
-describeOnWindows("sanitizeFilename", () => {
-  it("sanitizes disallowed Windows characters", () => {
-    expect(util.sanitizeFilename("foo*bar")).toBe("foo_42_bar");
-  });
-  it("sanitizes reserved Windows names", () => {
-    expect(util.sanitizeFilename("LPT1.txt")).toBe("_reserved_LPT1.txt");
-  });
-  it("sanitizes invalid trailing character on Windows", () => {
-    expect(util.sanitizeFilename("foobar.")).toBe("foobar._");
   });
 });
 

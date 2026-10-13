@@ -2,7 +2,6 @@ import * as path from "path";
 
 import { isErrorWithSystemCode, unknownToError } from "@vortex/shared";
 import { generate as shortid } from "shortid";
-import type * as winapiT from "winapi-bindings";
 
 import { log } from "../../logging";
 import type { IDialogResult } from "../../types/IDialog";
@@ -19,8 +18,6 @@ import { suggestStagingPath } from "../gamemode_management/util/discovery";
 import { setInstallPath } from "./actions/settings";
 import { fallbackPurge } from "./util/activationStore";
 import { resolveInstallPath } from "./util/getInstallPath";
-
-const winapi: typeof winapiT = lazyRequire(() => require("winapi-bindings"));
 
 export const STAGING_DIR_TAG = "__vortex_staging_folder";
 
@@ -141,19 +138,7 @@ async function ensureStagingDirectoryImpl(
     }
   }
 
-  let partitionExists = true;
-  try {
-    winapi.GetVolumePathName(instPath);
-  } catch (err) {
-    // On Windows, error number 2 (0x2) translates to ERROR_FILE_NOT_FOUND.
-    //  the only way for this error to be reported at this point is when
-    //  the destination path is pointing towards a non-existing partition.
-    // If it's a non-existing partition, we want the reinitialization dialog
-    //  to appear so that the user can re-configure his game's staging folder.
-    if (isErrorWithSystemCode(err) && err.systemCode === 2) {
-      partitionExists = false;
-    }
-  }
+  const partitionExists = true;
   let dirExists = false;
 
   try {

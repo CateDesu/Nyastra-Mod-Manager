@@ -21,7 +21,7 @@ import type {
 } from "../mod_management/types/IDeploymentMethod";
 
 class DeploymendMethod extends LinkingDeployment {
-  public compatible: string[] = ["symlink_activator_elevated"];
+  public compatible: string[] = [];
 
   public priority: number = 10;
 
@@ -276,10 +276,7 @@ class DeploymendMethod extends LinkingDeployment {
   }
 
   private isUnsupportedGame(gameId: string): boolean {
-    const unsupportedGames =
-      process.platform === "win32"
-        ? ["nomanssky", "stateofdecay", "factorio"]
-        : ["nomanssky", "stateofdecay"];
+    const unsupportedGames = ["nomanssky", "stateofdecay"];
 
     return unsupportedGames.indexOf(gameId) !== -1;
   }

@@ -30,7 +30,7 @@
     "redux-act": "catalog:",
     "redux-thunk": "catalog:",
     "@nexusmods/vortex-api": "workspace:*",
-    "vortex-parse-ini": "catalog:"
+    "vortex-parse-ini": "workspace:*"
   },
   "nx": {
     "tags": [

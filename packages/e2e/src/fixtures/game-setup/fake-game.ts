@@ -20,9 +20,9 @@ export const GAME_CONFIGS = {
   stardewvalley: {
     gameId: "stardewvalley",
     gameName: "Stardew Valley",
-    executable: process.platform === "win32" ? "Stardew Valley.exe" : "StardewValley",
+    executable: "StardewValley",
     requiredFiles: [
-      process.platform === "win32" ? "Stardew Valley.exe" : "StardewValley",
+      "StardewValley",
       "Stardew Valley.deps.json",
       "Stardew Valley.dll",
       "Stardew Valley.pdb",

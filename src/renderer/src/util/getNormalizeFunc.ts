@@ -38,12 +38,12 @@ export interface INormalizeParameters {
 
 function isCaseSensitiveFailed(testPath: string, reason: string): PromiseBB<boolean> {
   if (testPath === undefined) {
-    return PromiseBB.resolve(process.platform !== "win32");
+    return PromiseBB.resolve(true);
   }
   const parentPath = path.dirname(testPath);
   if (parentPath === testPath) {
     // on windows, assume case insensitive, everywhere else: case sensitive
-    return PromiseBB.resolve(process.platform !== "win32");
+    return PromiseBB.resolve(true);
   } else {
     return isCaseSensitive(parentPath);
   }
@@ -114,9 +114,6 @@ function getNormalizeFunc(
     .then((caseSensitive) => {
       let funcOut = caseSensitive ? (input: string) => input : genNormalizeCase();
 
-      if (parameters["separators"] !== false && process.platform === "win32") {
-        funcOut = genNormalizeSeparator(funcOut);
-      }
       if (parameters["unicode"] !== false) {
         funcOut = genNormalizeUnicode(funcOut);
       }

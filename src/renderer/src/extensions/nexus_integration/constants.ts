@@ -25,7 +25,9 @@ export const getOAuthRedirectUrl = (port: number) => `${OAUTH_REDIRECT_BASE}:${p
 // Deprecated: Use getOAuthRedirectUrl() instead
 export const OAUTH_REDIRECT_URL = "http://127.0.0.1:PORT";
 
-export const OAUTH_CLIENT_ID = "vortex_loopback";
+// Filled with the public client ID issued by Nexus Mods before release.
+export const OAUTH_CLIENT_ID = "";
+export const SSO_APPLICATION = "";
 export const NEXUS_PUBLIC_KEY =
   "-----BEGIN PUBLIC KEY-----\n" +
   "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDhKHxCWOeUy38S3UOBOB11SNd/\n" +

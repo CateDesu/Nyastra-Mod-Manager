@@ -1,26 +1,61 @@
 <!doctype html>
-<html>
+<html lang="en">
     <head>
         <meta charset="UTF-8" />
-        <title>Vortex</title>
+        <title>Nyastra's Mod Manager</title>
         <style>
-            .fade-out {
-                opacity: 1;
+            @font-face {
+                font-family: Montserrat;
+                src: url("assets/fonts/Montserrat-Bold.ttf");
+                font-weight: 700;
+            }
+
+            body {
+                margin: 0;
+                overflow: hidden;
+            }
+
+            #splash {
+                box-sizing: border-box;
+                display: flex;
+                align-items: center;
+                gap: 20px;
+                width: 475px;
+                height: 166px;
+                padding: 32px;
+                background: #1d1d21;
+                color: #f4f4f5;
+                font-family: Montserrat, sans-serif;
                 -webkit-user-drag: none;
+            }
+
+            img {
+                width: 80px;
+                height: 80px;
+            }
+
+            h1 {
+                margin: 0 0 8px;
+                font-size: 36px;
+            }
+
+            p {
+                margin: 0;
+                color: #d98f40;
+                font-size: 16px;
+                letter-spacing: 2px;
             }
         </style>
     </head>
 
-    <body
-        id="bg"
-        style="
-            background-color: transparent;
-            overflow: visible;
-            display: table-cell;
-            overflow: hidden;
-        "
-    >
-        <img id="splash" class="fade-out" src="assets/images/splash.png" />
+    <body id="bg">
+        <div id="splash">
+            <img alt="" src="assets/images/nyastra.png" />
+            <div>
+                <h1>Nyastra's</h1>
+                <p>MOD MANAGER</p>
+            </div>
+        </div>
 
         <script>
             require("./splash.js");

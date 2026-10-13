@@ -15,11 +15,7 @@ class TrayIcon {
   private mInitialized: boolean = false;
 
   constructor() {
-    this.mImagePath = path.resolve(
-      getVortexPath("assets"),
-      "images",
-      process.platform === "win32" ? "vortex.ico" : "vortex.png",
-    );
+    this.mImagePath = path.resolve(getVortexPath("assets"), "images", "nyastra.png");
     try {
       this.initTrayIcon();
     } catch {

@@ -15,10 +15,6 @@ export interface MixpanelEvent {
  */
 export function mapPlatformToMixpanel(platform: string): string {
   switch (platform) {
-    case "win32":
-      return "Windows";
-    case "darwin":
-      return "Mac OS X";
     case "linux":
       return "Linux";
     default:

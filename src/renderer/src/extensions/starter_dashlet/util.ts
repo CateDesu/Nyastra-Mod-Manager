@@ -63,7 +63,7 @@ function setJumpList(categories: Electron.JumpListCategory[]): Promise<void> {
 }
 
 export function updateJumpList(starters: IStarterInfo[]) {
-  if (process.platform !== "win32") {
+  {
     return;
   }
 

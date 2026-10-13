@@ -32,7 +32,7 @@ interface LevelDown {
 }
 
 const EXT_DIR = path.resolve(import.meta.dirname, "../../build/duckdb-extensions");
-const PLATFORM = process.platform === "win32" ? "windows_amd64" : "linux_amd64";
+const PLATFORM = "linux_amd64";
 
 // A download key with its middle bytes mangled: 0xFF bytes (never valid UTF-8
 // lead bytes) decode to U+FFFD on a VARCHAR read, so re-encoding the read-back

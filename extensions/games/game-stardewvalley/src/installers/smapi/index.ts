@@ -15,9 +15,7 @@ import { _SMAPI_BUNDLED_MODS, getBundledMods } from "../../common";
 import type { IInstallerTestResult } from "../../types";
 import { classifyArchive, makeInstallerTestResult } from "../archiveClassifier";
 import { linuxSMAPIPlatform } from "./linux";
-import { macosSMAPIPlatform } from "./macos";
 import type { ISMAPIPlatformVariant } from "./types";
-import { windowsSMAPIPlatform } from "./windows";
 
 /**
  * Resolve which SMAPI platform variant to use for installer behaviour.
@@ -30,12 +28,8 @@ export function resolveSMAPIPlatform(
   nodePlatform: NodeJS.Platform = process.platform,
 ): ISMAPIPlatformVariant {
   switch (nodePlatform) {
-    case "win32":
-      return windowsSMAPIPlatform;
     case "linux":
       return linuxSMAPIPlatform;
-    case "darwin":
-      return macosSMAPIPlatform;
     default:
       throw new Error(`Unsupported platform for SMAPI installer: ${nodePlatform}`);
   }
@@ -221,5 +215,5 @@ function isCorrectPlatformPath(filePath: string, platformFolder: string): boolea
   return segments.includes(platformFolder.toLowerCase());
 }
 
-export { windowsSMAPIPlatform, linuxSMAPIPlatform, macosSMAPIPlatform };
+export { linuxSMAPIPlatform };
 export type { ISMAPIPlatformVariant } from "./types";

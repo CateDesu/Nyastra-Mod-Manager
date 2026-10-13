@@ -40,8 +40,7 @@
     "redux-act": "catalog:",
     "shortid": "catalog:",
     "turbowalk": "catalog:",
-    "vortex-parse-ini": "catalog:",
-    "winapi-bindings": "catalog:",
+    "vortex-parse-ini": "workspace:*",
     "xml2js": "catalog:"
   },
   "nx": {

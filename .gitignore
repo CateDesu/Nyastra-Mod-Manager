@@ -19,6 +19,7 @@ BuildPatchTool*
 
 # User-specific files
 *.suo
+/mods/
 
 # auto generated
 auto.gypi

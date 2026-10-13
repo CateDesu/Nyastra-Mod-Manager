@@ -83,7 +83,6 @@ import {
   getModRequirementsInfo,
   MY_COLLECTIONS_SEARCH_QUERY,
 } from "./util/graphQueries";
-import submitFeedback from "./util/submitFeedback";
 import type { SubmitCollectionOptions } from "./util_v3/submitCollectionV3";
 import { submitCollectionV3 } from "./util_v3/submitCollectionV3";
 
@@ -1167,9 +1166,7 @@ export function onSubmitFeedback(nexus: Nexus) {
     anonymous: boolean,
     callback: (err: Error, response?: IFeedbackResponse) => void,
   ) => {
-    submitFeedback(nexus, title, message, feedbackFiles, anonymous, hash)
-      .then((response) => callback(null, response))
-      .catch((err) => callback(err));
+    callback(new ProcessCanceled("Use the Nyastra GitHub issue tracker for support"));
   };
 }
 

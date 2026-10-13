@@ -17,7 +17,6 @@ import {
 } from "react-bootstrap";
 import type * as Redux from "redux";
 import type { ThunkDispatch } from "redux-thunk";
-import * as winapi from "winapi-bindings";
 
 import { showDialog } from "../../../actions/notifications";
 import { ComponentEx, connect, translate } from "../../../controls/ComponentEx";
@@ -871,17 +870,7 @@ class Settings extends ComponentEx<IProps, IComponentState> {
   private isPathSensible(input: string): boolean {
     const sanitizeSep = new RegExp("/", "g");
     const trimTrailingSep = new RegExp(`\\${path.sep}*$`, "g");
-    if (process.platform === "win32") {
-      // Ensure the user isn't trying to set the partition's root path
-      //  as the staging folder.
-      input = input.replace(sanitizeSep, path.sep).replace(trimTrailingSep, "");
-      const splitInp = input.split(path.sep);
-      return splitInp.length > 1
-        ? true
-        : splitInp[0].length === 2 && splitInp[0][1] === ":"
-          ? false
-          : true;
-    } else {
+    {
       // Currently not imposing any restrictions on non-windows platforms.
       return true;
     }
@@ -1045,7 +1034,7 @@ class Settings extends ComponentEx<IProps, IComponentState> {
       // stat the volume root rather than the full mod path — the mod directory
       // may not exist yet (e.g. first-time setup), but we only need the device id
       const [modPathStats, userDataStats] = await Promise.all([
-        fs.statAsync(path.parse(modPaths[""]).root),
+        fs.statAsync(path.dirname(modPaths[""])),
         window.api.app.getPath("userData").then((userDataPath) => fs.statAsync(userDataPath)),
       ]);
 
@@ -1053,7 +1042,7 @@ class Settings extends ComponentEx<IProps, IComponentState> {
       if (modPathStats.dev === userDataStats.dev) {
         suggestion = path.join("{USERDATA}", "{game}", "mods");
       } else {
-        const volume = winapi.GetVolumePathName(modPaths[""]);
+        const volume = path.dirname(modPaths[""]);
         suggestion = path.join(volume, suggestInstallPathDirectory, "{game}");
       }
       this.changePath(suggestion);

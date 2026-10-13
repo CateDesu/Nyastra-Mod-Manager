@@ -46,21 +46,6 @@ vi.mock("fs", () => ({
   },
 }));
 
-vi.mock("winapi-bindings", () => ({
-  GetVolumePathName: (input: string) => {
-    const res = path.dirname(input);
-    if (res === "/missing") {
-      throw Object.assign(new Error("fake error"), {
-        code: "ENOTFOUND",
-        systemCode: 2,
-      });
-    }
-    return res;
-  },
-  ShellExecuteEx: () => {},
-  RegGetValue: () => ({ type: "REG_SZ", value: "foobar" }),
-}));
-
 type FakeInfo = Record<string, unknown>;
 let fakeFS: Record<string, unknown> = {};
 
@@ -168,37 +153,6 @@ const MB = 1024 * 1024;
 const baseA = path.sep + "drivea";
 const baseB = path.sep + "driveb";
 
-const describeOnWindows = process.platform === "win32" ? describe : describe.skip;
-
-describeOnWindows("testPathTransfer", () => {
-  beforeEach(() => {
-    walkHandlers[path.join(baseA, "source")] = (cb) => {
-      cb(null, [
-        { name: "dummyfile1.dat", isDirectory: false, size: 500 * MB },
-        { name: "dummyfile2.dat", isDirectory: false, size: 500 * MB },
-      ]);
-    };
-  });
-  it("reports success if there is enough space", async () => {
-    diskCheckResults[baseB] = { free: 2000 * MB };
-    await expect(
-      testPathTransfer(path.join(baseA, "source"), path.join(baseB, "destination")),
-    ).resolves.toBeUndefined();
-  });
-  it("reports success if on same drive, independent of free size", async () => {
-    diskCheckResults[baseA] = { free: 1 * MB };
-    await expect(
-      testPathTransfer(path.join(baseA, "source"), path.join(baseA, "destination")),
-    ).resolves.toBeUndefined();
-  });
-  it("fails if there is less than 512 MB free", async () => {
-    diskCheckResults[baseB] = { free: 256 * MB };
-    await expect(
-      testPathTransfer(path.join(baseA, "source"), path.join(baseB, "destination")),
-    ).rejects.toThrow(`The partition "${path.sep}driveb" has insufficient space.`);
-  });
-});
-
 const dummyA = path.join(baseA, "source", "dummyfile1.dat");
 const dummyB = path.join(baseA, "source", "dummyfile2.dat");
 
@@ -293,5 +247,27 @@ describe("transferPath", () => {
         },
       },
     });
+  });
+});
+
+describe("Linux transfer space checks", () => {
+  it("skips size calculations for a move on the same filesystem", async () => {
+    await expect(
+      testPathTransfer(path.join(baseA, "source"), path.join(baseA, "destination")),
+    ).resolves.toBeUndefined();
+  });
+
+  it("reports insufficient space across filesystems", async () => {
+    walkHandlers[path.join(baseA, "space-check")] = (cb) =>
+      cb(null, [{ name: "mod.zip", isDirectory: false, size: 600 * MB }]);
+    diskCheckResults[baseB] = { free: 800 * MB };
+    await expect(testPathTransfer(path.join(baseA, "space-check"), baseB)).rejects.toThrow();
+  });
+
+  it("allows a copy when the destination has enough free space", async () => {
+    walkHandlers[path.join(baseA, "space-check")] = (cb) =>
+      cb(null, [{ name: "mod.zip", isDirectory: false, size: 600 * MB }]);
+    diskCheckResults[baseB] = { free: 2000 * MB };
+    await expect(testPathTransfer(path.join(baseA, "space-check"), baseB)).resolves.toBeUndefined();
   });
 });

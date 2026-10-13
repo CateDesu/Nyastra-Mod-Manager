@@ -23,16 +23,25 @@ if (process.send) {
 }
 
 import child_process from "node:child_process";
+import { setDefaultResultOrder } from "node:dns";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import path from "node:path";
 import os from "os";
 
-import { DEBUG_PORT, getErrorMessageOrDefault, HTTP_HEADER_SIZE } from "@vortex/shared";
+import {
+  DEBUG_PORT,
+  getErrorMessageOrDefault,
+  HTTP_HEADER_SIZE,
+  PROFILE_NAME,
+  PROGRAM_NAME,
+} from "@vortex/shared";
 import { app, crashReporter, dialog } from "electron";
 import i18next from "i18next";
 import * as sourceMapSupport from "source-map-support";
-import winapi from "winapi-bindings";
+
+app.setName(PROFILE_NAME);
+app.setPath("userData", path.join(app.getPath("appData"), PROFILE_NAME));
 
 // E2E test isolation: redirect userData and appData to temp directories so
 // parallel test workers share no data and don't conflict with the real install.
@@ -55,9 +64,8 @@ import { terminateAsync } from "./errorHandling";
 import {
   reportCrash,
   errorToReportableError,
-  sendPendingCrashReport,
-  sendPendingNativeCrashReport,
   sendReportFile,
+  disableErrorReporting,
 } from "./errorReporting";
 import { NodeFileSystemBackendImpl } from "./filesystem/backend";
 import { NodeFileSystemImpl } from "./filesystem/filesystem-impl";
@@ -68,9 +76,19 @@ import { init as initIpcHandlers } from "./ipcHandlers";
 import { log } from "./logging";
 import StylesheetCompiler from "./stylesheetCompiler";
 import { initTelemetryIpcHandler } from "./telemetry/ipcHandler";
-import { createMainTelemetryProvider } from "./telemetry/setup";
 import { init as initUploadIpc } from "./uploading/ipc";
 import { UploadManager } from "./uploading/manager";
+
+disableErrorReporting();
+
+// Prefer reachable IPv4 endpoints unless the user selected a DNS order.
+if (
+  process.platform === "linux" &&
+  !process.execArgv.some((arg) => arg.startsWith("--dns-result-order")) &&
+  !process.env.NODE_OPTIONS?.includes("--dns-result-order")
+) {
+  setDefaultResultOrder("ipv4first");
+}
 
 process.env["UV_THREADPOOL_SIZE"] = (os.cpus().length * 2).toString();
 
@@ -79,22 +97,22 @@ const earlyErrHandler = (error: Error) => {
   // and blocks until the user dismisses it, giving the report time to send.
   if ("stack" in error && typeof error.stack === "string" && error.stack.includes("[as dlopen]")) {
     dialog.showErrorBox(
-      "Vortex failed to start up",
-      `An unexpected error occurred while Vortex was initialising:\n\n${error.message}\n\n` +
+      "Nyastra's Mod Manager failed to start up",
+      `An unexpected error occurred while Nyastra's Mod Manager was initialising:\n\n${error.message}\n\n` +
         "This is often caused by a bad installation of the app, " +
-        "a security app interfering with Vortex " +
+        "a security app interfering with Nyastra's Mod Manager " +
         "or a problem with the Microsoft Visual C++ Redistributable installed on your PC. " +
         "To solve this issue please try the following:\n\n" +
-        "- Wait a moment and try starting Vortex again\n" +
-        "- Reinstall Vortex from the Nexus Mods website\n" +
+        "- Wait a moment and try starting Nyastra's Mod Manager again\n" +
+        "- Reinstall Nyastra's Mod Manager from its downloaded archive\n" +
         "- Install the latest Microsoft Visual C++ Redistributable (find it using a search engine)\n" +
-        "- Disable anti-virus or other security apps that might interfere and install Vortex again\n\n" +
+        "- Disable anti-virus or other security apps that might interfere and install Nyastra's Mod Manager again\n\n" +
         "If the issue persists, please create a thread in our support forum for further assistance.",
     );
   } else {
     dialog.showErrorBox(
       "Unhandled error",
-      "Vortex failed to start up. This is usually caused by foreign software (e.g. Anti Virus) " +
+      "Nyastra's Mod Manager failed to start up. This is usually caused by foreign software (e.g. Anti Virus) " +
         "interfering.\n\n" +
         error.stack,
     );
@@ -131,42 +149,6 @@ if (process.env.NODE_ENV !== "development") {
   setEnv("NODE_ENV", "production", true);
 }
 
-if (process.platform === "win32" && process.env.NODE_ENV !== "development") {
-  // On windows dlls may be loaded from directories in the path variable
-  // (which I don't know why you'd ever want that) so I filter path quite aggressively here
-  // to prevent dynamically loaded dlls to be loaded from unexpected locations.
-  // The most common problem this should prevent is the edge dll being loaded from
-  // "Browser Assistant" instead of our own.
-
-  const userPath = (process.env.HOMEDRIVE || "c:") + (process.env.HOMEPATH || "\\Users");
-  const programFiles = process.env.ProgramFiles || "C:\\Program Files";
-  const programFilesX86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
-  const programData = process.env.ProgramData || "C:\\ProgramData";
-
-  const pathFilter = (envPath: string): boolean => {
-    return (
-      !envPath.startsWith(userPath) &&
-      !envPath.startsWith(programData) &&
-      !envPath.startsWith(programFiles) &&
-      !envPath.startsWith(programFilesX86)
-    );
-  };
-
-  const path = process.env.PATH;
-  if (path) {
-    process.env["PATH_ORIG"] = path.slice(0);
-    process.env["PATH"] = path.split(";").filter(pathFilter).join(";");
-  }
-}
-
-try {
-  winapi?.SetProcessPreferredUILanguages?.(["en-US"]);
-} catch {
-  // nop
-}
-
-process.env.Path = process.env.Path + path.delimiter + import.meta.dirname;
-
 const handleError = (error: Error) => {
   if (Application.shouldIgnoreError(error)) {
     return;
@@ -183,28 +165,6 @@ async function main(): Promise<void> {
   // important: The following has to be synchronous!
   const mainArgs = parseCommandline(process.argv, false);
 
-  // Elevation diagnostics (issue #23043). Uses synchronous fs.appendFileSync
-  // (not winston) because the elevated Vortex.exe app.quit()s immediately
-  // after the --run handler spawns the inner Node child; winston's buffered
-  // writes can be lost in that window, and winston itself isn't initialised
-  // until later in Application's constructor.
-  const traceElevation = (stage: string, data?: Record<string, unknown>): void => {
-    try {
-      const line =
-        new Date().toISOString() +
-        " [DEBG] [MAIN] [elevation-trace] " +
-        stage +
-        " " +
-        JSON.stringify({ pid: process.pid, ...(data || {}) }) +
-        "\n";
-      appendFileSync(path.join(app.getPath("userData"), "vortex.log"), line);
-    } catch {
-      // diagnostics must never throw
-    }
-  };
-
-  traceElevation("main entry", { argv: process.argv });
-
   if (mainArgs.report) {
     return sendReportFile(mainArgs.report)
       .catch((err: unknown) => {
@@ -215,61 +175,8 @@ async function main(): Promise<void> {
       .then(() => app.quit());
   }
 
-  // --run is the entry point for the elevated helper chain (see
-  // src/renderer/src/util/elevated.ts). The renderer-side monitorConsent
-  // watchdog is tight, so this must run before the telemetry / IPC /
-  // stylesheet init below; in v2.0 those steps burned the budget and broke
-  // deployment elevation (issue #23043).
-  if (mainArgs.run !== undefined) {
-    traceElevation("--run detected, spawning inner Node child", {
-      tmpScript: mainArgs.run,
-    });
-    const appAsar = `${path.sep}app.asar${path.sep}`;
-    const execPath = process.execPath.replace(appAsar, `${path.sep}app.asar.unpacked${path.sep}`);
-
-    child_process
-      .spawn(execPath, [mainArgs.run], {
-        env: {
-          ...process.env,
-          ELECTRON_RUN_AS_NODE: "1",
-          ELECTRON_USERDATA: app.getPath("userData"),
-          ELECTRON_TEMP: app.getPath("temp"),
-          ELECTRON_APPDATA: app.getPath("appData"),
-          ELECTRON_HOME: app.getPath("home"),
-          ELECTRON_DOCUMENTS: app.getPath("documents"),
-          ELECTRON_EXE: app.getPath("exe"),
-          ELECTRON_DESKTOP: app.getPath("desktop"),
-          ELECTRON_APP_PATH: app.getAppPath(),
-          ELECTRON_ASSETS: path.join(app.getAppPath(), "assets"),
-          ELECTRON_ASSETS_UNPACKED: path.join(app.getAppPath() + ".unpacked", "assets"),
-          ELECTRON_MODULES: path.join(app.getAppPath(), "node_modules"),
-          ELECTRON_MODULES_UNPACKED: path.join(app.getAppPath() + ".unpacked", "node_modules"),
-          ELECTRON_BUNDLEDPLUGINS: path.join(app.getAppPath() + ".unpacked", "bundledPlugins"),
-          ELECTRON_LOCALES: path.resolve(app.getAppPath(), "..", "locales"),
-          ELECTRON_BASE: app.getAppPath(),
-          ELECTRON_BASE_UNPACKED: app.getAppPath() + ".unpacked",
-          ELECTRON_APPLICATION: path.resolve(app.getAppPath(), ".."),
-          ELECTRON_PACKAGE: app.getAppPath(),
-          ELECTRON_PACKAGE_UNPACKED: path.join(path.dirname(app.getAppPath()), "app.asar.unpacked"),
-        },
-        stdio: "inherit",
-        detached: true,
-      })
-      .on("error", (err) => {
-        traceElevation("inner child spawn error", { error: err.message });
-        // TODO: In practice we have practically no information about what we're running
-        //       at this point
-        dialog.showErrorBox("Failed to run script", err.message);
-      });
-    traceElevation("inner child spawn issued, quitting");
-    // quit this process, the new one is detached
-    app.quit();
-    return;
-  }
-
   // Start Crashpad as early as possible so even startup crashes produce a
-  // dump; sendPendingNativeCrashReport picks it up on the next start. Must
-  // run before the sweeps below — they read the crashDumps path.
+  // local crash dump for manual diagnostics.
   const dumpsPath = path.join(app.getPath("userData"), "temp", "dumps");
   try {
     mkdirSync(dumpsPath, { recursive: true });
@@ -278,12 +185,6 @@ async function main(): Promise<void> {
   }
   app.setPath("crashDumps", dumpsPath);
   crashReporter.start({ uploadToServer: false });
-
-  // Reports left by previous sessions, sent as early as possible — this
-  // startup may crash before getting any further. Not awaited so
-  // they don't delay startup.
-  void sendPendingCrashReport();
-  void sendPendingNativeCrashReport();
 
   const NODE_OPTIONS = process.env.NODE_OPTIONS || "";
   process.env.NODE_OPTIONS =
@@ -298,17 +199,14 @@ async function main(): Promise<void> {
   app.commandLine.appendSwitch("disable-features", "WidgetLayering");
   app.commandLine.appendSwitch("disable-features", "UseEcoQoSForBackgroundProcess");
 
-  createMainTelemetryProvider();
-
-  // Now that telemetry is available, swap in the proper error handler
-  // that supports crash reporting
+  // Switch from the startup dialog to the regular error handler.
   process.removeListener("uncaughtException", earlyErrHandler);
   process.removeListener("unhandledRejection", earlyErrHandler);
   process.on("uncaughtException", handleError);
   process.on("unhandledRejection", handleError);
 
   const downloadManager = new DownloadManager({ concurrency: 1 });
-  const uploadManager = new UploadManager({ userAgent: `Vortex/${app.getVersion()}` });
+  const uploadManager = new UploadManager({ userAgent: `${PROGRAM_NAME}/${app.getVersion()}` });
 
   // The registry holds exactly one resolver for the universal `native`
   // scheme. Path providers are owned by the app, never by the registry.

@@ -3,7 +3,6 @@ import * as path from "node:path";
 import { parseError } from "@vortex/shared";
 import { QualifiedPath } from "@vortex/shared/filesystem";
 import { parse, type VDFObject, type VDFValue } from "simple-vdf";
-import * as winapi from "winapi-bindings";
 
 import { log } from "@/logging";
 
@@ -13,7 +12,7 @@ import type { ICustomExecutionInfo, IGameStore, IGameStoreSnapshot } from "../ty
 import { GameEntryNotFound } from "../types/IGameStore";
 import type { IGameStoreEntry } from "../types/IGameStoreEntry";
 import { getProtonInfo, buildProtonEnvironment, buildProtonCommand } from "./linux/proton";
-import { findLinuxSteamPath } from "./linux/steamPaths";
+import { findLinuxSteamPath, findAllLinuxSteamPaths } from "./linux/steamPaths";
 
 /** VDF leaves are plain strings, so only nested blocks can be indexed further. */
 const asBlock = (value: VDFValue | undefined): VDFObject | undefined =>
@@ -21,10 +20,11 @@ const asBlock = (value: VDFValue | undefined): VDFObject | undefined =>
 
 const STORE_ID = "steam";
 const STORE_NAME = "Steam";
-const STEAM_EXEC = process.platform === "win32" ? "Steam.exe" : "steam.sh";
+const STEAM_EXEC = "steam.sh";
 const STORE_PRIORITY = 40;
 
 export interface ISteamEntry extends IGameStoreEntry {
+  steamRoot?: string;
   manifestData?: any;
   usesProton?: boolean;
   compatDataPath?: string;
@@ -44,22 +44,7 @@ class Steam implements IGameStore {
   #snapshot: IGameStoreSnapshot;
 
   constructor() {
-    if (process.platform === "win32") {
-      // windows
-      try {
-        const steamPath = winapi.RegGetValue(
-          "HKEY_CURRENT_USER",
-          "Software\\Valve\\Steam",
-          "SteamPath",
-        );
-        this.#baseFolder = steamPath.value as string;
-        this.#snapshot = { entries: [], isInstalled: true };
-      } catch (err) {
-        log("info", "steam not found", err);
-        this.#baseFolder = undefined;
-        this.#snapshot = { entries: [], isInstalled: false };
-      }
-    } else {
+    {
       const linuxPath = findLinuxSteamPath();
       this.#baseFolder = linuxPath;
       this.#snapshot = { entries: [], isInstalled: linuxPath !== undefined };
@@ -202,9 +187,8 @@ class Steam implements IGameStore {
     return "appId" in object;
   }
 
-  private async resolveSteamPaths(): Promise<string[]> {
+  private async resolveSteamPaths(basePath = this.#baseFolder): Promise<string[]> {
     log("debug", "resolving Steam game paths");
-    const basePath = this.#baseFolder;
     if (basePath === undefined) {
       // Steam not found/installed
       return [];
@@ -267,12 +251,20 @@ class Steam implements IGameStore {
       return [];
     }
 
-    const steamPaths = await this.resolveSteamPaths();
+    const steamRoots = process.platform === "linux" ? findAllLinuxSteamPaths() : [baseFolder];
+    if (steamRoots.length === 0) steamRoots.push(baseFolder);
+    const libraries = await Promise.all(
+      steamRoots.map(async (root) => ({ root, paths: await this.resolveSteamPaths(root) })),
+    );
+    const owners = new Map<string, string>();
+    for (const { root, paths } of libraries)
+      for (const library of paths) if (!owners.has(library)) owners.set(library, root);
+    const steamPaths = [...owners.keys()];
 
     const games: ISteamEntry[] = [];
     for (const steamPath of steamPaths) {
       log("debug", "reading steam install folder", { steamPath });
-      games.push(...(await this.parseLibrary(steamPath, baseFolder)));
+      games.push(...(await this.parseLibrary(steamPath, owners.get(steamPath)!, steamPaths)));
     }
 
     log("info", "done reading steam libraries");
@@ -287,7 +279,11 @@ class Steam implements IGameStore {
    * "not found" case is expected - Steam libraries can live on removable
    * media that is currently removed.)
    */
-  private async parseLibrary(steamPath: string, baseFolder: string): Promise<ISteamEntry[]> {
+  private async parseLibrary(
+    steamPath: string,
+    baseFolder: string,
+    libraryPaths: readonly string[],
+  ): Promise<ISteamEntry[]> {
     const steamAppsPath = path.join(steamPath, "steamapps");
 
     try {
@@ -299,7 +295,7 @@ class Steam implements IGameStore {
       for await (const entry of iterator) {
         if (!entry.basename.startsWith("appmanifest_") || entry.extension !== "acf") continue;
 
-        const game = await this.parseManifest(entry, steamAppsPath, baseFolder);
+        const game = await this.parseManifest(entry, steamAppsPath, baseFolder, libraryPaths);
         if (game !== undefined) {
           entries.push(game);
         }
@@ -326,6 +322,7 @@ class Steam implements IGameStore {
     entry: QualifiedPath,
     steamAppsPath: string,
     baseFolder: string,
+    libraryPaths: readonly string[],
   ): Promise<ISteamEntry | undefined> {
     const blob = await window.api.fs.readFile(entry);
     const manifestData = new TextDecoder().decode(blob);
@@ -352,11 +349,20 @@ class Steam implements IGameStore {
         lastUser: parsedObj["AppState"]["LastOwner"],
         lastUpdated: new Date(parsedObj["AppState"]["LastUpdated"] * 1000),
         manifestData: parsedObj,
+        steamRoot: baseFolder,
       };
 
       if (process.platform === "linux") {
         try {
-          const protonInfo = await getProtonInfo(baseFolder, steamAppsPath, result.appid);
+          const protonInfo = await getProtonInfo(
+            baseFolder,
+            steamAppsPath,
+            result.appid,
+            libraryPaths,
+            typeof parsedObj["AppState"]["oslist"] === "string"
+              ? parsedObj["AppState"]["oslist"]
+              : undefined,
+          );
           result.usesProton = protonInfo.usesProton;
           result.compatDataPath = protonInfo.compatDataPath;
           result.protonPath = protonInfo.protonPath;
@@ -390,13 +396,18 @@ class Steam implements IGameStore {
       return api.runExecutable(exePath, args, options);
     }
 
-    const steamPath = this.#baseFolder;
+    const steamPath = gameEntry.steamRoot ?? this.#baseFolder;
     const { executable, args: protonArgs } = buildProtonCommand(
       gameEntry.protonPath,
       exePath,
       args,
     );
-    const protonEnv = buildProtonEnvironment(gameEntry.compatDataPath, steamPath, options.env);
+    const protonEnv = buildProtonEnvironment(
+      gameEntry.compatDataPath,
+      steamPath,
+      options.env,
+      gameEntry.appid,
+    );
 
     return api.runExecutable(executable, protonArgs, {
       ...options,

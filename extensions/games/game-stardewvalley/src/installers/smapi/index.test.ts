@@ -9,24 +9,9 @@ import "./fixtures/vortexApi.mock";
  */
 import { describe, expect, test } from "vitest";
 
-import {
-  isSMAPIModType,
-  linuxSMAPIPlatform,
-  macosSMAPIPlatform,
-  resolveSMAPIPlatform,
-  windowsSMAPIPlatform,
-} from "./index";
+import { isSMAPIModType, linuxSMAPIPlatform, resolveSMAPIPlatform } from "./index";
 
 describe("installers/smapi platform resolution", () => {
-  test("returns windows variant for win32", () => {
-    // Act: resolve the platform.
-    const resolved = resolveSMAPIPlatform("win32");
-
-    // Assert: use the Windows settings.
-    expect(resolved).toBe(windowsSMAPIPlatform);
-    expect(resolved.executableName).toBe("StardewModdingAPI.exe");
-  });
-
   test("returns linux variant for linux", () => {
     // Act: resolve the platform.
     const resolved = resolveSMAPIPlatform("linux");
@@ -34,15 +19,6 @@ describe("installers/smapi platform resolution", () => {
     // Assert: use the Linux settings.
     expect(resolved).toBe(linuxSMAPIPlatform);
     expect(resolved.executableName).toBe("StardewModdingAPI");
-  });
-
-  test("returns macOS stub variant for darwin", () => {
-    // Act: resolve the platform.
-    const resolved = resolveSMAPIPlatform("darwin");
-
-    // Assert: use the macOS stub.
-    expect(resolved).toBe(macosSMAPIPlatform);
-    expect(resolved.implemented).toBe(false);
   });
 
   test("throws for unknown platforms", () => {
@@ -56,14 +32,6 @@ describe("installers/smapi platform resolution", () => {
 });
 
 describe("installers/smapi isSMAPIModType", () => {
-  test("matches windows executable instructions from extracted install.dat payload", async () => {
-    // Arrange: include the Windows executable.
-    const instructions: types.IInstruction[] = [{ type: "copy", source: "StardewModdingAPI.exe" }];
-
-    // Act + assert: match it as SMAPI.
-    await expect(isSMAPIModType(instructions, windowsSMAPIPlatform)).resolves.toBe(true);
-  });
-
   test("matches linux executable instructions from extracted install.dat payload", async () => {
     // Arrange: include the Linux executable.
     const instructions: types.IInstruction[] = [{ type: "copy", source: "StardewModdingAPI" }];

@@ -1,18 +1,14 @@
-import path from "path";
-
 import { getErrorMessageOrDefault } from "@vortex/shared";
 import type { IHashResult } from "modmeta-db";
 
 import type { IExtensionApi } from "../../../types/IExtensionContext";
 import { log } from "../../../util/log";
-import { delayed, toPromise } from "../../../util/util";
-import { batchDispatch } from "../../../util/util";
+import { batchDispatch, delayed } from "../../../util/util";
 import {
   finalizingDownload,
   finalizingProgress,
   finishDownload,
-  setDownloadHash,
-  setDownloadHashByFile,
+  setDownloadHashAndSize,
 } from "../actions/state";
 import queryInfo from "./queryDLInfo";
 
@@ -38,7 +34,7 @@ export function finalizeDownload(api: IExtensionApi, id: string, filePath: strin
     })
     .then((result: IHashResult) => {
       const batched = [
-        setDownloadHashByFile(path.basename(filePath), result.md5sum, result.numBytes),
+        setDownloadHashAndSize(id, result.md5sum, result.numBytes),
         finishDownload(id, "finished", undefined),
       ];
       batchDispatch(api.store, batched);

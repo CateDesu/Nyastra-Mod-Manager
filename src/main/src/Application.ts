@@ -4,24 +4,16 @@ import path from "node:path";
 
 import { getErrorCode, getErrorMessageOrDefault, parseError, unknownToError } from "@vortex/shared";
 import type { IParameters, ISetItem } from "@vortex/shared/cli";
-import {
-  DataInvalid,
-  DocumentsPathMissing,
-  ProcessCanceled,
-  UserCanceled,
-} from "@vortex/shared/errors";
+import { DataInvalid, ProcessCanceled, UserCanceled } from "@vortex/shared/errors";
 import type { AppInitMetadata } from "@vortex/shared/ipc";
 import type { IWindow } from "@vortex/shared/state";
 import { currentStatePath } from "@vortex/shared/state";
 import { app, dialog, ipcMain, protocol, shell } from "electron";
 import contextMenu from "electron-context-menu";
-import isAdmin from "is-admin";
 import * as _ from "lodash";
-import permissions from "permissions";
 import * as semver from "semver";
 import uuidpkg from "uuid";
 const { v4: uuidv4 } = uuidpkg;
-import winapi from "winapi-bindings";
 
 import { shutdownBsdiffWorker } from "./bsdiff/host";
 import { parseCommandline, updateStartupSettings } from "./cli";
@@ -29,13 +21,13 @@ import { installDevelExtensions } from "./devel";
 import { isQuitting, markQuitting, terminate, terminateAsync } from "./errorHandling";
 import { disableErrorReporting, reportCrash } from "./errorReporting";
 import { setupMainExtensions } from "./extensions";
-import { isUpdaterActive } from "./extensions/updater";
 import { validateFiles } from "./fileValidation";
 import { getVortexPath, setVortexPath } from "./getVortexPath";
 import { shutdownHashWorker } from "./hash/host";
 import { betterIpcMain } from "./ipc";
 import { log, setupLogging, changeLogPath } from "./logging";
 import MainWindow from "./MainWindow";
+import { finishProfileImport } from "./profileImport";
 import { ReloadBudget } from "./reloadBudget";
 import SplashScreen from "./SplashScreen";
 import DuckDBSingleton from "./store/DuckDBSingleton";
@@ -52,7 +44,6 @@ import {
 import SubPersistor from "./store/SubPersistor";
 import { isTelemetryEnabled, setTelemetryEnabled, setTelemetryInstanceId } from "./telemetry/state";
 import TrayIcon from "./TrayIcon";
-import { UnleashClient } from "./unleash/client";
 import { synchronizeFeatureFlags } from "./unleash/ipc";
 
 /** test if the running version is a major downgrade (downgrading by a major or minor version,
@@ -220,9 +211,7 @@ class Application {
           // Terminate the worker_thread pools so no idle worker lingers past quit.
           void shutdownHashWorker();
           void shutdownBsdiffWorker();
-          if (process.platform !== "darwin") {
-            app.quit();
-          }
+          app.quit();
         })
         .catch((err: unknown) => {
           log("error", "error finalizing write", unknownToError(err));
@@ -281,17 +270,7 @@ class Application {
     });
 
     const onReady = () => {
-      const vortexPath = process.env.NODE_ENV === "development" ? "vortex_devel" : "vortex";
-
-      // if userData specified, use it
-      let userData =
-        args.userData ??
-        // (only on windows) use ProgramData from environment
-        (args.shared && process.platform === "win32" && process.env.ProgramData !== undefined
-          ? path.join(process.env.ProgramData, "vortex")
-          : // this allows the development build to access data from the
-            // production version and vice versa
-            path.resolve(app.getPath("userData"), "..", vortexPath));
+      let userData = args.userData ?? app.getPath("userData");
       userData = path.join(userData, currentStatePath);
 
       // handle nxm:// internally
@@ -395,30 +374,10 @@ class Application {
         return;
       } else if (err instanceof ProcessCanceled) {
         app.quit();
-      } else if (err instanceof DocumentsPathMissing) {
-        const response = await this.showDialog({
-          type: "error",
-          buttons: ["Close", "More info"],
-          defaultId: 1,
-          title: "Error",
-          message: "Startup failed",
-          detail:
-            'Your "My Documents" folder is missing or is ' +
-            "misconfigured. Please ensure that the folder is properly " +
-            "configured and accessible, then try again.",
-        });
-
-        if (response.response === 1) {
-          await shell.openExternal(
-            `https://wiki.nexusmods.com/index.php/Misconfigured_Documents_Folder`,
-          );
-        }
-
-        app.quit();
       } else if (parsed.data.kind === "database:locked") {
         dialog.showErrorBox(
           "Startup failed",
-          "Vortex seems to be running already. " +
+          "Nyastra's Mod Manager seems to be running already. " +
             "If you can't see it, please check the task manager.",
         );
 
@@ -426,7 +385,7 @@ class Application {
       } else if (parsed.data.kind === "database:open-failed") {
         dialog.showErrorBox(
           "Startup failed",
-          `Vortex couldn't open its application database at:\n\n` +
+          `Nyastra's Mod Manager couldn't open its application database at:\n\n` +
             `${parsed.data.path}\n\n` +
             `Underlying error: ${getErrorMessageOrDefault(parsed.cause)}\n\n` +
             `This is not a "database locked" condition - a different problem is preventing the database from opening. ` +
@@ -442,7 +401,7 @@ class Application {
             "Your system drive is full. " +
               "You should always ensure your system drive has some space free (ideally " +
               "at least 10% of the total capacity, especially on SSDs). " +
-              "Vortex can't start until you have freed up some space.",
+              "Nyastra's Mod Manager can't start until you have freed up some space.",
           );
           app.quit();
           return;
@@ -465,7 +424,6 @@ class Application {
     log("info", "Vortex Version", app.getVersion());
     log("info", "Parameters", process.argv.join(" "));
 
-    this.testUserEnvironment();
     await this.validateFiles();
 
     let splash: SplashScreen | undefined = undefined;
@@ -506,31 +464,15 @@ class Application {
       }
     }
 
-    const unleashClient = new UnleashClient(app.getVersion(), {
-      cachePath: path.join(app.getPath("userData"), "flag-cache.json"),
-    });
-
-    // NOTE(erri120): Querying userId so that the first API call contains it.
-    // Otherwise renderer sets context on user changes.
-    const storedUserId = await readPersistedValue<number>("persistent", [
-      "nexus",
-      "userInfo",
-      "userId",
-    ]);
-
-    if (storedUserId !== undefined) {
-      unleashClient.setContext({ userId: String(storedUserId) });
-    }
-
-    synchronizeFeatureFlags(unleashClient);
+    synchronizeFeatureFlags();
 
     // Collect metadata before creating the main window — the renderer
     // fetches it via getInitMetadata() early in its boot.
     log("debug", "checking how Vortex was installed");
-    await this.identifyInstallType();
+    this.identifyInstallType();
     // the renderer's updater extension gates on this; it cannot work it out itself because
     // VORTEX_DEV_UPDATER is read at runtime and only NODE_ENV is inlined into its bundle
-    this.mAppMetadata!.updaterActive = isUpdaterActive(this.mAppMetadata!.installType ?? "");
+    this.mAppMetadata!.updaterActive = false;
     this.mAppMetadata!.version = app.getVersion();
 
     log("debug", "checking if migration is required");
@@ -546,7 +488,6 @@ class Application {
     await this.initMainWindow();
 
     log("debug", "checking admin rights");
-    await this.warnAdmin();
 
     log("debug", "setting up error handlers");
     // Install error handler (no longer has access to store state)
@@ -575,36 +516,7 @@ class Application {
     }
   }
 
-  private isUACEnabled(): boolean {
-    if (process.platform !== "win32") {
-      return true;
-    }
-
-    const getSystemPolicyValue = (key: string) => {
-      try {
-        const res = winapi.RegGetValue(
-          "HKEY_LOCAL_MACHINE",
-          "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System",
-          key,
-        );
-        log("debug", "UAC settings found", `${key}: ${res.value.toString()}`);
-        return { key, type: res.type, value: res.value };
-      } catch (err) {
-        // We couldn't retrieve the value, log this and resolve positively
-        //  as the user might have a version of Windows that does not use
-        //  the key we're looking for.
-        log("debug", "failed to check UAC settings", err);
-        return undefined;
-      }
-    };
-
-    const promptBehaviorAdmin = getSystemPolicyValue("ConsentPromptBehaviorAdmin");
-
-    if (!promptBehaviorAdmin) return true;
-    return promptBehaviorAdmin.type === "REG_DWORD" && promptBehaviorAdmin.value === 1;
-  }
-
-  private async identifyInstallType(): Promise<void> {
+  private identifyInstallType(): void {
     /**
      * we are checking to see if an uninstaller exists as if it does, it means it was installed via our installer.
      * if it doesn't, then something else installed it. Maybe GOG, or EPIC, or something.
@@ -625,55 +537,7 @@ class Application {
      *
      */
 
-    try {
-      await stat(path.join(getVortexPath("application"), "Uninstall Vortex.exe"));
-      // Collect metadata - renderer will dispatch the action
-      this.mAppMetadata!.installType = "regular";
-    } catch {
-      this.mAppMetadata!.installType = "managed";
-    }
-  }
-
-  private async warnAdmin(): Promise<void> {
-    // Read warnedAdmin from persistence since we don't have the store yet
-    const warnedAdmin = await readPersistedValue<number>("app", ["warnedAdmin"]);
-
-    const timeout = new Promise<void>((resolve) => {
-      setTimeout(() => {
-        resolve();
-      }, 1000);
-    });
-
-    const isAdminResult = await Promise.race([timeout, isAdmin()]);
-    if (typeof isAdminResult !== "boolean" || !isAdminResult) return;
-
-    log("warn", "running as administrator");
-    if ((warnedAdmin ?? 0) > 0) {
-      return;
-    }
-
-    const uacEnabled = this.isUACEnabled();
-    const result = await this.showDialog({
-      title: "Admin rights detected",
-      message:
-        `Vortex has detected that it is being run with administrator rights. It is strongly
-          advised to not run any application with admin rights as adverse effects may include
-          permission issues or even security risks. Continue at your own risk` +
-        (!uacEnabled
-          ? `\n\nPlease note: User Account Control (UAC) notifications are disabled in your
-              operating system.  We strongly recommend you re-enable these to avoid file permissions
-              issues and potential security risks.`
-          : ""),
-      buttons: ["Quit", "Ignore"],
-      noLink: true,
-    });
-
-    if (result.response === 0) {
-      app.quit();
-    } else {
-      // Collect metadata - renderer will dispatch the action
-      this.mAppMetadata!.warnedAdmin = 1;
-    }
+    this.mAppMetadata!.installType = "managed";
   }
 
   private async migrateIfNecessary(currentVersion: string): Promise<void> {
@@ -886,29 +750,6 @@ class Application {
     return budget.allow();
   }
 
-  private multiUserPath() {
-    if (process.platform === "win32" && process.env.ProgramData !== undefined) {
-      const muPath = path.join(process.env.ProgramData, "vortex");
-      try {
-        mkdirSync(muPath, { recursive: true });
-      } catch (err) {
-        const code = getErrorCode(err);
-        // not sure why this would happen, ensureDir isn't supposed to report a problem if
-        // the directory exists, but there was a single report of EEXIST in this place.
-        // Probably a bug related to the filesystem used in C:\ProgramData, we had similar
-        // problems with OneDrive paths
-        if (code !== "EEXIST") {
-          throw err;
-        }
-      }
-
-      return muPath;
-    } else {
-      log("error", "Multi-User mode not implemented outside windows");
-      return app.getPath("userData");
-    }
-  }
-
   /**
    * Set up persistence system for the main process.
    * In the new architecture, main process only handles persistence - renderer owns the Redux store.
@@ -942,94 +783,26 @@ class Application {
     try {
       this.mLevelPersistors.push(levelPersistor);
 
-      // 2. Read user settings to check multi-user mode
-      const baseSubPersistor = new SubPersistor(levelPersistor, "user");
-      let multiUser = false;
-      try {
-        const multiUserStr = await baseSubPersistor.getItem(["multiUser"]);
-        multiUser = multiUserStr ? Boolean(JSON.parse(multiUserStr)) : false;
-      } catch {
-        multiUser = false;
-      }
-
-      // 2b. If the per-user DB says multiUser is enabled, verify against
-      //     the shared DB before committing to shared mode.
-      //
-      //     The multiUser flag is read from the per-user DB at startup but
-      //     written to whichever DB is active.  When the user toggles back
-      //     to "per-user" while running in shared mode, only the shared DB
-      //     receives the update.  We peek at the shared DB here — before
-      //     any side-effects — so we can honour that change immediately
-      //     without needing a second restart.
-      //
-      //     If the shared DB doesn't have the key yet (first launch in
-      //     shared mode), we seed it with `true` so the settings UI
-      //     dropdown renders the correct value after hydration.
-      let seedMultiUser = false;
-      if (multiUser) {
-        const sharedPath = this.multiUserPath();
-        const sharedStatePath = path.join(sharedPath, currentStatePath);
-        try {
-          const tempPersistor = await LevelPersist.create(sharedStatePath, undefined, false);
-          try {
-            const sharedSub = new SubPersistor(tempPersistor, "user");
-            const val = await sharedSub.getItem(["multiUser"]);
-            if (!JSON.parse(val)) {
-              // User toggled back to per-user while in shared mode
-              log("info", "shared database has multiUser disabled, reverting to per-user");
-              multiUser = false;
-              await baseSubPersistor.setItem(["multiUser"], JSON.stringify(false));
-              // Remove the stale flag from the shared DB so it doesn't
-              // block future switches back to shared mode
-              await sharedSub.removeItem(["multiUser"]);
-            }
-          } catch (err: unknown) {
-            // Key not found — first launch in shared mode.
-            // We'll seed the value after the shared DB is set up as the
-            // active persistor so hydration picks it up.
-            if (unknownToError(err).name === "NotFoundError") {
-              seedMultiUser = true;
-            }
-          } finally {
-            // Always close the temporary connection — the main code path
-            // will create its own LevelPersist if we stay in shared mode
-            await tempPersistor.close();
-          }
-        } catch {
-          // Shared DB doesn't exist yet — will be created below
-          seedMultiUser = true;
-        }
-      }
-
-      // 3. Determine data path
+      // Use the current user profile or an explicit Linux path.
       let dataPath = app.getPath("userData");
       if (this.mArgs.userData !== undefined) {
         dataPath = this.mArgs.userData;
-      } else if (multiUser) {
-        dataPath = this.multiUserPath();
       }
       setVortexPath("userData", dataPath);
       this.mBasePath = dataPath;
 
-      let created = false;
       try {
         statSync(dataPath);
       } catch {
         mkdirSync(dataPath, { recursive: true });
-        created = true;
-      }
-      if (multiUser && created) {
-        permissions
-          .allow(dataPath, "group", "rwx")
-          .catch((err) => log("error", `failed to set permissions on ${dataPath}`, err));
       }
       mkdirSync(path.join(dataPath, "temp"), { recursive: true });
 
       log("info", `using ${dataPath} as the storage directory`);
 
-      // 4. If multi-user or custom userData, create new LevelPersist for actual data path
+      // 4. If custom userData, create new LevelPersist for actual data path
       let finalPersistor = levelPersistor;
-      if (multiUser || this.mArgs.userData !== undefined) {
+      if (this.mArgs.userData !== undefined) {
         log("info", "all further logging will happen in", path.join(dataPath, "vortex.log"));
         changeLogPath(dataPath);
         log("info", "--------------------------");
@@ -1042,13 +815,6 @@ class Application {
         );
         this.mLevelPersistors.push(newLevelPersistor);
         finalPersistor = newLevelPersistor;
-
-        // Seed the multiUser flag into the shared DB so the settings
-        // dropdown renders correctly after hydration
-        if (seedMultiUser) {
-          const sharedSub = new SubPersistor(newLevelPersistor, "user");
-          await sharedSub.setItem(["multiUser"], JSON.stringify(true));
-        }
       }
 
       // 5. Restore or merge state backup if requested
@@ -1071,6 +837,7 @@ class Application {
       }
 
       // 6. Initialize the IPC-based persistence system
+      await finishProfileImport(finalPersistor, dataPath);
       log("debug", "initializing main persistence system");
       initMainPersistence(finalPersistor);
 
@@ -1198,20 +965,6 @@ class Application {
     }
   }
 
-  private testUserEnvironment(): void {
-    // Should be used to test the user's environment for known
-    //  issues before starting up Vortex.
-    // On Windows:
-    //  - Ensure we're able to retrieve the user's documents folder.
-    if (process.platform !== "win32") return;
-
-    try {
-      app.getPath("documents");
-    } catch {
-      throw new DocumentsPathMissing();
-    }
-  }
-
   private async validateFiles(): Promise<void> {
     const validation = await validateFiles(getVortexPath("assets_unpacked"));
     if (validation.changed.length === 0 && validation.missing.length === 0) return;
@@ -1220,10 +973,10 @@ class Application {
       type: "error",
       title: "Installation corrupted",
       message:
-        "Your Vortex installation has been corrupted. " +
+        "Your Nyastra's Mod Manager installation has been corrupted. " +
         "This could be the result of a virus or manual manipulation. " +
-        "Vortex might still appear to work (partially) but we suggest " +
-        "you reinstall it. For more information please refer to Vortex's log files.",
+        "Nyastra's Mod Manager might still appear to work (partially) but we suggest " +
+        "you reinstall it. For more information please refer to Nyastra's Mod Manager's log files.",
       noLink: true,
       buttons: ["Quit", "Ignore"],
     });
@@ -1259,8 +1012,8 @@ class Application {
       // TODO: this instructions aren't very correct because we know Vortex doesn't have
       // a UI and needs to be shut down from the task manager
       dialog.showErrorBox(
-        "Vortex unresponsive",
-        "Vortex appears to be frozen, please close Vortex and try again",
+        "Nyastra's Mod Manager unresponsive",
+        "Nyastra's Mod Manager appears to be frozen, please close Nyastra's Mod Manager and try again",
       );
 
       return;

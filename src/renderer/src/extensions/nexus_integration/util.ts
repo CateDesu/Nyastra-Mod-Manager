@@ -291,6 +291,11 @@ const oauth = new OAuth({
 });
 
 export function requestLogin(nexus: Nexus, api: IExtensionApi, callback: (err: Error) => void) {
+  if (!OAUTH_CLIENT_ID) {
+    api.events.once("did-login", callback);
+    api.store.dispatch(setDialogVisible("login-dialog"));
+    return Promise.resolve();
+  }
   const stackErr = new Error();
 
   return oauth
@@ -350,7 +355,7 @@ export function oauthCallback(api: IExtensionApi, code: string, state?: string) 
 export function ensureLoggedIn(api: IExtensionApi): BluebirdPromise<void> {
   if (!isLoggedIn(api.getState())) {
     return new BluebirdPromise((resolve, reject) => {
-      api.events.on("did-login", (err: Error) => {
+      api.events.once("did-login", (err: Error) => {
         if (err !== null) {
           reject(err);
         } else {
@@ -2044,8 +2049,22 @@ export function updateToken(
 export function updateKey(api: IExtensionApi, nexus: Nexus, key: string): BluebirdPromise<boolean> {
   return (
     BluebirdPromise.resolve(nexus.setKey(key))
-      .then(() => true)
-      //.then(userInfo => updateUserInfo(api, nexus))
+      .then((userInfo) => {
+        if (api.getState().confidential.account?.["nexus"]?.["APIKey"] !== key) return false;
+        api.store.dispatch(
+          setUserInfo({
+            email: userInfo.email,
+            name: userInfo.name,
+            profileUrl: userInfo.profile_url,
+            userId: userInfo.user_id,
+            isPremium: userInfo.is_premium,
+            isSupporter: userInfo.is_supporter,
+            isLifetime: false,
+          }),
+        );
+        api.events.emit("did-login", null);
+        return true;
+      })
       // don't stop the login just because the github rate limit is exceeded
       .catch(RateLimitExceeded, () => BluebirdPromise.resolve(true))
       .catch(TimeoutError, (err) => {

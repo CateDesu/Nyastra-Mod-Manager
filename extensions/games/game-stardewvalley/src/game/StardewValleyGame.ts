@@ -66,7 +66,7 @@ export default class StardewValleyGame implements types.IGame {
    */
   constructor(context: types.IExtensionContext) {
     this.context = context;
-    this.requiredFiles = process.platform == "win32" ? ["Stardew Valley.exe"] : ["StardewValley"];
+    this.requiredFiles = ["StardewValley"];
 
     this.defaultPaths = [
       // Linux
@@ -113,7 +113,7 @@ export default class StardewValleyGame implements types.IGame {
   }) as unknown as QueryPath;
 
   public executable() {
-    return process.platform == "win32" ? "Stardew Valley.exe" : "StardewValley";
+    return "StardewValley";
   }
 
   public queryModPath() {

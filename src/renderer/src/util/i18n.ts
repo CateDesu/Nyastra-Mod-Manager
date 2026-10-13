@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
+import { brandText } from "@vortex/shared";
 import type { TOptions, i18n, BackendModule, PostProcessorModule, Services } from "i18next";
 import I18next from "i18next";
 import FSBackend from "i18next-fs-backend";
@@ -8,6 +9,7 @@ import { initReactI18next } from "react-i18next";
 
 import { isValidBcp47 } from "../bcp47";
 import type { IExtension } from "../types/extensions";
+import { branding } from "./branding";
 import getVortexPath from "./getVortexPath";
 
 /** @public */
@@ -17,8 +19,7 @@ export type { i18n };
 export type TFunction = typeof I18next.t;
 
 export const fallbackTFunc: TFunction = (str: string | string[]) => {
-  if (Array.isArray(str)) return String(str[0]);
-  return String(str);
+  return brandText(String(Array.isArray(str) ? str[0] : str));
 };
 
 let debugging = false;
@@ -155,7 +156,7 @@ export async function init(
     i18nObj.use(new HighlightPP());
   }
 
-  i18nObj.use(MultiBackend).use(initReactI18next);
+  i18nObj.use(branding).use(MultiBackend).use(initReactI18next);
 
   try {
     const tFunc = await i18nObj.init({
@@ -187,7 +188,9 @@ export async function init(
       keySeparator: "::",
 
       debug: false,
-      postProcess: process.env.HIGHLIGHT_I18N === "true" ? "HighlightPP" : false,
+      postProcess:
+        process.env.HIGHLIGHT_I18N === "true" ? [branding.name, "HighlightPP"] : [branding.name],
+      postProcessPassResolved: true,
 
       react: {
         // afaict this is simply broken at this time. With this enabled the React.Suspense will

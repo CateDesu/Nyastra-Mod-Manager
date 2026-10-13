@@ -1,7 +1,6 @@
 import * as path from "path";
 
 import Bluebird from "bluebird";
-import * as winapi from "winapi-bindings";
 
 import { log } from "@/logging";
 import { makeExeId } from "@/reducers/session";
@@ -10,6 +9,7 @@ import type { IGameStore } from "@/types/IGameStore";
 import { GameEntryNotFound, GameStoreNotFound } from "@/types/IGameStore";
 import type { IGameStoreEntry } from "@/types/IGameStoreEntry";
 
+import { defaultProcessProvider } from "../extensions/gamemode_management/util/processProvider";
 import { ProcessCanceled } from "./CustomErrors";
 import * as fs from "./fs";
 import { defaultPriority, type IQueryArgEntry, normalizeStoreQuery } from "./storeQuery";
@@ -72,47 +72,8 @@ export async function isGameStoreInstalled(
     return false;
   }
 }
-
 export async function registryLookup(lookup: string): Promise<IGameStoreEntry> {
-  if (lookup === undefined) {
-    throw new Error("invalid store query, provide an id!");
-  }
-
-  const chunked = lookup.split(":", 3);
-
-  if (chunked.length !== 3) {
-    throw new Error("invalid query, should be hive:path:key");
-  }
-
-  if (
-    ![
-      "HKEY_CLASSES_ROOT",
-      "HKEY_CURRENT_CONFIG",
-      "HKEY_CURRENT_USER",
-      "HKEY_LOCAL_MACHINE",
-      "HKEY_USERS",
-    ].includes(chunked[0])
-  ) {
-    throw new Error("invalid query, hive should be something like HKEY_LOCAL_MACHINE");
-  }
-
-  try {
-    const instPath = winapi.RegGetValue(chunked[0] as any, chunked[1], chunked[2]);
-    if (!instPath || instPath.type !== "REG_SZ") {
-      throw new Error("empty or invalid registry key");
-    }
-
-    const result: IGameStoreEntry = {
-      appid: lookup,
-      gamePath: instPath.value as string,
-      gameStoreId: "registry",
-      name: path.basename(instPath.value as string),
-      priority: defaultPriority,
-    };
-    return result;
-  } catch {
-    throw new GameEntryNotFound(lookup, "registry");
-  }
+  throw new GameEntryNotFound(lookup, "registry");
 }
 
 export async function find(
@@ -242,7 +203,7 @@ async function launchStoreAsync(
 
   try {
     const launcherPath = await gameStore.getGameStorePath();
-    if (!!launcherPath && !isStoreRunning(launcherPath)) {
+    if (!!launcherPath && !(await isStoreRunning(launcherPath))) {
       // TODO: Bluebird to native
       await Promise.resolve(
         api.runExecutable(launcherPath, parameters || [], {
@@ -255,14 +216,10 @@ async function launchStoreAsync(
     api.showErrorNotification?.("Failed to launch game store", err);
   }
 }
-
-function isStoreRunning(storeExecPath: string) {
-  const runningProcesses = winapi.GetProcessList();
+async function isStoreRunning(storeExecPath: string): Promise<boolean> {
+  const processes = await defaultProcessProvider.list();
   const exeId = makeExeId(storeExecPath);
-  return (
-    runningProcesses.find((runningProc) => exeId === runningProc.exeFile.toLowerCase()) !==
-    undefined
-  );
+  return processes.some((proc) => makeExeId(proc.path ?? proc.name) === exeId);
 }
 
 function validInput(input: string | string[]): boolean {

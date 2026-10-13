@@ -120,7 +120,10 @@ function cachedAppPath(id: ElectronPathId) {
 }
 
 function localAppData(): string {
-  return process.env.LOCALAPPDATA || path.resolve(cachedAppPath("appData"), "..", "Local");
+  const dataHome = process.env.XDG_DATA_HOME;
+  return dataHome && path.isAbsolute(dataHome)
+    ? dataHome
+    : path.join(cachedAppPath("home"), ".local", "share");
 }
 
 export function setVortexPath(id: ElectronPathId, value: string) {

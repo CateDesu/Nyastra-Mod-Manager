@@ -1,0 +1,33 @@
+name: Linux
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 9.0.x
+      - name: Install Linux prerequisites
+        run: sudo apt-get update && sudo apt-get install -y build-essential python3-setuptools cmake liblz4-dev libfontconfig1-dev patchelf xdg-utils desktop-file-utils psmisc
+      - uses: ./.github/actions/setup-pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run verify
+      - name: Test Linux installation and profile import
+        run: node --test scripts/install-linux.test.mjs scripts/import-linux-profile.test.mjs

@@ -1,7 +1,18 @@
 #login-dialog {
-    .nexus-header {
-        width: 157px;
-        height: 4em;
+    .nyastra-wordmark {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        font-family: $font-family-headings;
+        font-weight: bold;
+        color: $brand-primary;
+
+        img {
+            width: 64px;
+            height: 64px;
+            object-fit: contain;
+        }
     }
 
     .input-group {

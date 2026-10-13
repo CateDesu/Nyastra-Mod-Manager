@@ -5,7 +5,6 @@ import PromiseBB from "bluebird";
 import type { TFunction } from "i18next";
 import type { IEntry } from "turbowalk";
 import turbowalk from "turbowalk";
-import * as winapi from "winapi-bindings";
 
 import { setSettingsPage } from "../../actions/session";
 import type { IExtensionApi, IExtensionContext } from "../../types/IExtensionContext";
@@ -116,14 +115,7 @@ class DeploymentMethod extends LinkingDeployment {
           description: (t) => t("Works only if mods are installed on the same drive as the game"),
           order: 8,
           solution: (t) => {
-            let displayPath = modPaths[typeId];
-            try {
-              displayPath = winapi.GetVolumePathName(modPaths[typeId]);
-            } catch (err) {
-              log("warn", "Failed to resolve volume path", {
-                path: modPaths[typeId],
-              });
-            }
+            const displayPath = modPaths[typeId];
             return t(
               "Please go to Settings->Mods and set the mod staging folder to be on " +
                 "the same drive as the game ({{gameVolume}}).",

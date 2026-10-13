@@ -6,7 +6,7 @@ type BOMLicense = NonNullable<BOMComponent["licenses"]>[number];
 import * as fs from "fs";
 import * as path from "path";
 
-import { getErrorMessageOrDefault } from "@vortex/shared";
+import { getErrorMessageOrDefault, PROGRAM_NAME } from "@vortex/shared";
 import I18next from "i18next";
 import * as React from "react";
 import { Image, Media, Panel } from "react-bootstrap";
@@ -142,7 +142,7 @@ class AboutPage extends ComponentEx<IProps, IComponentState> {
     const { t } = this.props;
     const { changelog, ownLicense, tag, releaseDate } = this.state;
 
-    const imgPath = path.resolve(getVortexPath("assets"), "images", "vortex.png");
+    const imgPath = path.resolve(getVortexPath("assets"), "images", "nyastra.png");
 
     const licenseBox = ownLicense ? (
       <ReactMarkdown className="license-text-own" disallowedElements={["link"]}>
@@ -164,16 +164,17 @@ class AboutPage extends ComponentEx<IProps, IComponentState> {
           <PanelX.Body>
             <Media style={{ marginBottom: 5, display: "block" }}>
               <Media.Left>
-                <Image className="vortex-logo" src={imgPath} />
+                <Image alt={PROGRAM_NAME} className="vortex-logo" src={imgPath} />
               </Media.Left>
               <Media.Body>
                 <h2 className="media-heading">
-                  Vortex {this.mVersion}{" "}
+                  {PROGRAM_NAME} {this.mVersion}{" "}
                   {releaseDate !== undefined
                     ? `(${releaseDate.toLocaleDateString(I18next.language)})`
                     : ""}
                 </h2>
                 <p>&#169;2026 Black Tree Gaming Ltd.</p>
+                <p>Linux adaptation by CateDesu. Based on Vortex by its original contributors.</p>
                 <p>
                   {t("Released under")} <a onClick={this.showOwnLicense}>GPL-3</a> {t("License")}
                 </p>

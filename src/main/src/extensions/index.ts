@@ -8,7 +8,6 @@
 import { betterIpcMain } from "../ipc";
 import { log } from "../logging";
 import { initNexusIntegration } from "./nexusIntegration";
-import { initUpdater } from "./updater";
 
 let initialized = false;
 
@@ -26,7 +25,6 @@ export function setupMainExtensions(): void {
     log("info", "Initializing main process extensions", { installType });
 
     // Initialize extensions
-    initUpdater(installType);
     initNexusIntegration();
 
     initialized = true;

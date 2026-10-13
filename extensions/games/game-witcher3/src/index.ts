@@ -4,7 +4,6 @@ import path from "path";
 import { actions, fs, log, selectors, types, util } from "@nexusmods/vortex-api";
 /* eslint-disable */
 import Bluebird from "bluebird";
-import winapi from "winapi-bindings";
 
 import { genCollectionsData, parseCollectionsData } from "./collections/collections";
 import { IW3CollectionsData } from "./collections/types";
@@ -106,21 +105,8 @@ const tools: types.ITool[] = [
 
 // The first is what the game actually writes; the misspelling was here for
 // years, so it's kept as a fallback in case anything ever populated it.
-const REGISTRY_KEYS = [
-  "Software\\CD Projekt RED\\The Witcher 3",
-  "Software\\CD Project Red\\The Witcher 3",
-];
 
 function findGame(): Bluebird<string> {
-  for (const key of REGISTRY_KEYS) {
-    try {
-      const instPath = winapi.RegGetValue("HKEY_LOCAL_MACHINE", key, "InstallFolder");
-      if (instPath && typeof instPath.value === "string") return Bluebird.resolve(instPath.value);
-    } catch {
-      continue;
-    }
-  }
-
   return util.GameStoreHelper.findByAppId([
     GOG_ID_GOTY,
     GOG_ID,

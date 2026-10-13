@@ -1,25 +1,34 @@
-import { execSync } from "child_process";
+import { execFileSync } from "node:child_process";
+import { rmSync } from "node:fs";
+import { resolve } from "node:path";
 import * as process from "node:process";
 
 try {
   // Check if dotnet is available
-  execSync("dotnet --version", { stdio: "pipe" });
+  execFileSync("dotnet", ["--version"], { stdio: "pipe" });
 
-  let runtimeIdentifier;
-  if (process.platform === "win32") {
-    runtimeIdentifier = "win-x64";
-  } else if (process.platform === "linux") {
-    runtimeIdentifier = "linux-x64";
-  } else {
-    console.error(`Platform ${process.platform} is unsupported`);
-    process.exit(1);
+  if (process.platform !== "linux") throw new Error("The program supports Linux only");
+  const runtimeIdentifier = "linux-x64";
+
+  for (const directory of ["bin", "obj", "dist"]) {
+    rmSync(resolve(import.meta.dirname, directory), { recursive: true, force: true });
   }
-
-  // Build dotnetprobe
-  execSync(`dotnet publish -r ${runtimeIdentifier} -o dist`, {
-    cwd: import.meta.dirname,
-    stdio: "inherit",
-  });
+  execFileSync(
+    "dotnet",
+    [
+      "publish",
+      "-r",
+      runtimeIdentifier,
+      "-o",
+      "dist",
+      "-p:DebugType=None",
+      "-p:DebugSymbols=false",
+    ],
+    {
+      cwd: import.meta.dirname,
+      stdio: "inherit",
+    },
+  );
 } catch (err) {
   // Fail loudly: a silently-missing dotnetprobe binary makes the Vortex
   // renderer crash at runtime, which surfaces as random e2e test failures.

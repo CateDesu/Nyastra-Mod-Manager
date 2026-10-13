@@ -24,7 +24,7 @@
     "react-i18next": "catalog:",
     "redux-act": "catalog:",
     "redux-thunk": "catalog:",
-    "vortex-parse-ini": "catalog:"
+    "vortex-parse-ini": "workspace:*"
   },
   "nx": {
     "tags": [

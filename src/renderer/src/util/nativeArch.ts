@@ -1,10 +1,3 @@
-import { GetNativeArch } from "winapi-bindings";
+import { arch } from "node:os";
 
-export const getCPUArch = () => {
-  try {
-    const nativeArchInfo = GetNativeArch();
-    return nativeArchInfo.nativeArch;
-  } catch (err) {
-    return "Unknown";
-  }
-};
+export const getCPUArch = (): string => arch();

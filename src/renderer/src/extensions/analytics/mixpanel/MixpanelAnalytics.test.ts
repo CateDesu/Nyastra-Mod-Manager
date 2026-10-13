@@ -98,7 +98,7 @@ describe("AppLaunchedEvent is_legacy_ui", () => {
   it.each([true, false])("sends is_legacy_ui=%s through to mixpanel", (isLegacyUI) => {
     analyticsMixpanel.start(userInfo, false);
 
-    analyticsMixpanel.trackEvent(new AppLaunchedEvent("win32", "10.0.22000", "x64", isLegacyUI));
+    analyticsMixpanel.trackEvent(new AppLaunchedEvent("linux", "6.18.0", "x64", isLegacyUI));
 
     expect(mp.track).toHaveBeenCalledWith(
       "app_launched",
@@ -109,7 +109,7 @@ describe("AppLaunchedEvent is_legacy_ui", () => {
   it("leaves is_legacy_ui undefined when the caller omits it", () => {
     // The argument is optional, so an absent value must read as "unknown" downstream rather
     // than defaulting to a mode the session may not be in.
-    const event = new AppLaunchedEvent("win32", "10.0.22000", "x64");
+    const event = new AppLaunchedEvent("linux", "6.18.0", "x64");
 
     expect(event.properties.is_legacy_ui).toBeUndefined();
   });
@@ -125,7 +125,7 @@ describe("AppLaunchedEvent zoom_percent", () => {
     analyticsMixpanel.start(userInfo, false);
 
     analyticsMixpanel.trackEvent(
-      new AppLaunchedEvent("win32", "10.0.22000", "x64", false, undefined, 110),
+      new AppLaunchedEvent("linux", "6.18.0", "x64", false, undefined, 110),
     );
 
     expect(mp.track).toHaveBeenCalledWith(
@@ -135,7 +135,7 @@ describe("AppLaunchedEvent zoom_percent", () => {
   });
 
   it("leaves zoom_percent undefined when the caller omits it", () => {
-    const event = new AppLaunchedEvent("win32", "10.0.22000", "x64");
+    const event = new AppLaunchedEvent("linux", "6.18.0", "x64");
 
     expect(event.properties.zoom_percent).toBeUndefined();
   });
@@ -151,7 +151,7 @@ describe("AppLaunchedEvent is_hidpi", () => {
     analyticsMixpanel.start(userInfo, false);
 
     analyticsMixpanel.trackEvent(
-      new AppLaunchedEvent("win32", "10.0.22000", "x64", false, undefined, 100, isHidpi),
+      new AppLaunchedEvent("linux", "6.18.0", "x64", false, undefined, 100, isHidpi),
     );
 
     expect(mp.track).toHaveBeenCalledWith(
@@ -161,7 +161,7 @@ describe("AppLaunchedEvent is_hidpi", () => {
   });
 
   it("leaves is_hidpi undefined when the caller omits it", () => {
-    const event = new AppLaunchedEvent("win32", "10.0.22000", "x64");
+    const event = new AppLaunchedEvent("linux", "6.18.0", "x64");
 
     expect(event.properties.is_hidpi).toBeUndefined();
   });

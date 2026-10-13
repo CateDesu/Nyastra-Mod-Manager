@@ -13,15 +13,13 @@ import {
   collectDataEntries,
 } from "./index";
 
-const describeOnWindows = process.platform === "win32" ? describe : describe.skip;
-
 const RT_ICON = 3;
 const RT_GROUP_ICON = 14;
 const RT_VERSION = 16;
 
 const DOTNET_PROBE = path.resolve(
   import.meta.dirname,
-  "../../../tools/dotnetprobe/temp/dotnetprobe.exe",
+  "../../../packages/pe-resources/test-data/probe.exe",
 );
 
 // --- Cross-platform tests (use committed PE fixture) ---
@@ -105,82 +103,6 @@ describe("findResourceType (cross-platform)", () => {
         // RT_CURSOR = 1 — extremely unlikely in a .NET probe tool
         const result = findResourceType(section.buf, resourceOffset, 1);
         expect(result === undefined || typeof result === "number").toBe(true);
-      }
-    } finally {
-      await fh.close();
-    }
-  });
-});
-
-// --- Windows-only tests (use system executables) ---
-
-describeOnWindows("findResourceSection (Windows)", () => {
-  it("finds the resource section in notepad.exe", async () => {
-    const fh = await fsp.open("C:\\Windows\\System32\\notepad.exe", "r");
-    try {
-      const section = await findResourceSection(fh);
-      expect(section).toBeDefined();
-      expect(section!.buf.length).toBeGreaterThan(0);
-      expect(section!.sectionVA).toBeGreaterThan(0);
-      expect(section!.resourceRVA).toBeGreaterThan(0);
-    } finally {
-      await fh.close();
-    }
-  });
-});
-
-describeOnWindows("findResourceType (Windows)", () => {
-  it("finds RT_VERSION in notepad.exe", async () => {
-    const fh = await fsp.open("C:\\Windows\\System32\\notepad.exe", "r");
-    try {
-      const section = (await findResourceSection(fh))!;
-      const resourceOffset = section.resourceRVA - section.sectionVA;
-      const typeOffset = findResourceType(section.buf, resourceOffset, RT_VERSION);
-      expect(typeOffset).toBeDefined();
-    } finally {
-      await fh.close();
-    }
-  });
-
-  it("finds RT_GROUP_ICON in notepad.exe", async () => {
-    const fh = await fsp.open("C:\\Windows\\System32\\notepad.exe", "r");
-    try {
-      const section = (await findResourceSection(fh))!;
-      const resourceOffset = section.resourceRVA - section.sectionVA;
-      const typeOffset = findResourceType(section.buf, resourceOffset, RT_GROUP_ICON);
-      expect(typeOffset).toBeDefined();
-    } finally {
-      await fh.close();
-    }
-  });
-
-  it("finds RT_ICON in notepad.exe", async () => {
-    const fh = await fsp.open("C:\\Windows\\System32\\notepad.exe", "r");
-    try {
-      const section = (await findResourceSection(fh))!;
-      const resourceOffset = section.resourceRVA - section.sectionVA;
-      const typeOffset = findResourceType(section.buf, resourceOffset, RT_ICON);
-      expect(typeOffset).toBeDefined();
-    } finally {
-      await fh.close();
-    }
-  });
-});
-
-describeOnWindows("collectDataEntries (Windows)", () => {
-  it("collects RT_ICON entries from notepad.exe", async () => {
-    const fh = await fsp.open("C:\\Windows\\System32\\notepad.exe", "r");
-    try {
-      const section = (await findResourceSection(fh))!;
-      const resourceOffset = section.resourceRVA - section.sectionVA;
-      const iconDirOffset = findResourceType(section.buf, resourceOffset, RT_ICON)!;
-      const entries = collectDataEntries(section.buf, iconDirOffset);
-      expect(entries.size).toBeGreaterThan(0);
-
-      for (const [id, entry] of entries) {
-        expect(id).toBeGreaterThan(0);
-        expect(entry.dataRVA).toBeGreaterThan(0);
-        expect(entry.dataSize).toBeGreaterThan(0);
       }
     } finally {
       await fh.close();

@@ -16,7 +16,7 @@ if (isCI) {
 
 const child = spawn("pnpm", args, {
   cwd,
-  shell: process.platform === "win32",
+  shell: false,
   stdio: isCI ? ["ignore", "pipe", "inherit"] : "inherit",
 });
 

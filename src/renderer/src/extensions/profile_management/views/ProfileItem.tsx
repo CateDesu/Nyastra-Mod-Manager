@@ -205,13 +205,7 @@ class ProfileItem extends ComponentEx<IProps, IComponentState> {
       res.push({ icon: "edit", title: "Edit", action: this.startEditing });
       res.push({ icon: "clone", title: "Clone", action: this.cloneProfile });
     }
-    if (available && process.platform === "win32") {
-      res.push({
-        icon: "savegame",
-        title: "Add Shortcut",
-        action: this.createShortcut,
-      });
-    }
+
     res.push({ icon: "remove", title: "Remove", action: this.removeProfile });
     return res;
   }

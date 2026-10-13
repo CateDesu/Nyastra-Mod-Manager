@@ -18,8 +18,7 @@
   "devDependencies": {
     "@nexusmods/nexus-api": "catalog:",
     "@nexusmods/vortex-api": "workspace:*",
-    "semver": "catalog:",
-    "winapi-bindings": "catalog:"
+    "semver": "catalog:"
   },
   "nx": {
     "tags": [

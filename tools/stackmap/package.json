@@ -74,7 +74,6 @@
   },
   "dependencies": {
     "copy-paste": "notatestuser/node-copy-paste",
-    "copy-paste-win32fix": "^1.4.0",
     "fs-extra": "^8.0.1",
     "minimist": "^1.2.6",
     "semver": "^6.1.0",

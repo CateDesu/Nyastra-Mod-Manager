@@ -14,6 +14,16 @@ if (process.env.DEBUG_REACT_RENDERS === "true") {
 const requireRemap = require("./util/requireRemap").default;
 requireRemap();
 
+// Each Electron process has its own Node DNS defaults.
+const { setDefaultResultOrder } = require("node:dns") as typeof dnsT;
+if (
+  process.platform === "linux" &&
+  !process.execArgv.some((arg) => arg.startsWith("--dns-result-order")) &&
+  !process.env.NODE_OPTIONS?.includes("--dns-result-order")
+) {
+  setDefaultResultOrder("ipv4first");
+}
+
 const earlyErrHandler = (evt: ErrorEvent | PromiseRejectionEvent) => {
   let value: unknown;
   let fallbackMessage = "";
@@ -101,14 +111,8 @@ if (process.env.NODE_ENV === "development") {
   process.env[key] = "production";
 }
 
-// Produce english error messages (windows only atm), otherwise they don't get
-// grouped correctly when reported through our feedback system
-import { SetProcessPreferredUILanguages } from "winapi-bindings";
-if (SetProcessPreferredUILanguages !== undefined) {
-  SetProcessPreferredUILanguages(["en-US"]);
-}
-
 import { EventEmitter } from "events";
+import type * as dnsT from "node:dns";
 import { readFile } from "node:fs/promises";
 import * as path from "path";
 
@@ -155,7 +159,6 @@ import { reduxLogger } from "./store/reduxLogger";
 import { reduxSanity, type StateError } from "./store/reduxSanity";
 import { computeStateDiff } from "./store/stateDiff";
 import StyleManager from "./StyleManager";
-import { createRendererTelemetryProvider } from "./telemetry/setup";
 import type { IExtensionReducer } from "./types/extensions";
 import type { ApiEventMap, IExtensionApi, ThunkStore } from "./types/IExtensionContext";
 import { GameEntryNotFound } from "./types/IGameStore";
@@ -180,19 +183,6 @@ log("debug", "renderer process started", { pid: process["pid"] });
 
 // on windows, copy systemCode to nativeCode so downstream error handling
 // can read a consistent property name
-if (process.platform === "win32") {
-  const oldPrep = Error.prepareStackTrace;
-  Error.prepareStackTrace = (error, stack) => {
-    if (
-      error["code"] === "UNKNOWN" &&
-      error["nativeCode"] === undefined &&
-      error["systemCode"] !== undefined
-    ) {
-      error["nativeCode"] = error["systemCode"];
-    }
-    return oldPrep !== undefined ? oldPrep(error, stack) : error.stack;
-  };
-}
 
 // allow promises to be cancelled.
 Bluebird.config({
@@ -524,8 +514,6 @@ function applyAppMetadata(metadata: AppInitMetadata): void {
 }
 
 async function init(): Promise<ExtensionManager | null> {
-  await createRendererTelemetryProvider();
-
   await StyleManager.renderDefault();
 
   // Fetch app init metadata (commandLine, version, etc.) from main process.

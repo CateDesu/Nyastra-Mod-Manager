@@ -65,7 +65,7 @@ describe("readFileBOM", () => {
 });
 
 describe("forcePerm", () => {
-  it.skipIf(process.platform === "win32")("doesn't offer elevation outside Windows", async () => {
+  it("doesn't offer elevation outside Windows", async () => {
     const showMessageBox = vi.fn().mockResolvedValue({ response: 0 });
     vi.stubGlobal("window", { api: { dialog: { showMessageBox } } });
     const denied = Object.assign(new Error("denied"), {

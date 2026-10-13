@@ -79,7 +79,7 @@ class GlobalNotifications {
     try {
       this.mCurrentNotification = new Notification(notification.title!, {
         tag: notification.id,
-        icon: notification.icon || path.resolve(getVortexPath("assets"), "images", "vortex.ico"),
+        icon: notification.icon || path.resolve(getVortexPath("assets"), "images", "nyastra.png"),
         body: notification.message,
         requireInteraction: true,
         silent: true,

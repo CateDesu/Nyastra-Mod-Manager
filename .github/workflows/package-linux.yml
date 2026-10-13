@@ -1,0 +1,46 @@
+name: Package Linux preview
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 9.0.x
+      - name: Install Linux prerequisites
+        run: sudo apt-get update && sudo apt-get install -y build-essential python3-setuptools cmake liblz4-dev libfontconfig1-dev patchelf xdg-utils desktop-file-utils psmisc xvfb
+      - uses: ./.github/actions/setup-pnpm
+      - run: pnpm install --frozen-lockfile
+        env:
+          VORTEX_ELECTRON_REBUILD: defer
+      - run: pnpm run verify
+      - name: Prepare Linux runtime
+        run: pnpm nx run @vortex/main:publish
+        env:
+          NODE_ENV: production
+          VORTEX_ELECTRON_REBUILD: skip
+      - name: Rebuild deployed native modules
+        run: node src/main/dist/postinstall.mjs
+      - name: Package ZIP, AppImage and Debian preview
+        run: pnpm --filter @vortex/main run package:nosign --x64
+      - run: node scripts/verify-packaged-asar.mjs
+      - name: Prepare Electron sandbox on this disposable runner
+        run: sudo chown root:root dist/linux-unpacked/chrome-sandbox && sudo chmod 4755 dist/linux-unpacked/chrome-sandbox
+      - name: Check packaged startup
+        run: xvfb-run -a node scripts/smoke-linux.mjs dist/linux-unpacked/nyastra-mod-manager
+      - run: node scripts/stage-linux-release.mjs
+      - uses: actions/upload-artifact@v7
+        with:
+          name: nyastra-linux-preview
+          path: dist/release/
+          if-no-files-found: error

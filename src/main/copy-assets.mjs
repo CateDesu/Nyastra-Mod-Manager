@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { cp, mkdir } from "node:fs/promises";
+import { cp, mkdir, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join, basename, dirname } from "node:path";
 
@@ -24,6 +24,7 @@ for (const file of ["loadingScreen.css", "tailwind-v4.css"]) {
 }
 
 // @tools/dotnetprobe compiled outputs
+await rm(join(ASSETS, "dotnetprobe.pdb"), { force: true });
 const dotnetprobeFiles = await glob("tools/dotnetprobe/dist/*", { cwd: WORKSPACE });
 for (const file of dotnetprobeFiles) {
   const rel = file.slice("tools/dotnetprobe/dist/".length);
@@ -57,7 +58,7 @@ await copy(
 try {
   const rendererRequire = createRequire(join(WORKSPACE, "src/renderer/package.json"));
   const lootDir = dirname(rendererRequire.resolve("loot/package.json"));
-  const library = process.platform === "win32" ? "libloot.dll" : "libloot.so.0";
+  const library = "libloot.so.0";
   await copy(join(lootDir, "index.js"), join(ASSETS, "loot/index.js"));
   await copy(join(lootDir, "async.js"), join(ASSETS, "loot/async.js"));
   await copy(

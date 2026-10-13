@@ -70,6 +70,10 @@ interface ICrashInfo {
 }
 
 export async function sendReportFile(filePath: string): Promise<void> {
+  if (isErrorReportingDisabled())
+    throw new Error(
+      "Crash uploads are disabled. Submit reports on the Nyastra's Mod Manager issue tracker.",
+    );
   let json: ICrashInfo;
   try {
     const contents = await readFile(filePath, "utf8");
@@ -112,6 +116,7 @@ const releaseClaim = async (claimedPath: string): Promise<void> => {
  * rename first.
  */
 export async function sendPendingCrashReport(): Promise<void> {
+  if (isErrorReportingDisabled()) return;
   const reportPath = path.join(app.getPath("userData"), "crashinfo.json");
   const claimedPath = reportPath + CLAIM_SUFFIX;
 
@@ -168,6 +173,7 @@ export async function sendPendingCrashReport(): Promise<void> {
  * dump twice.
  */
 export async function sendPendingNativeCrashReport(): Promise<void> {
+  if (isErrorReportingDisabled()) return;
   const dumps = await claimCrashDumps();
   const installedAt = await modifiedTime(process.execPath);
 
@@ -423,6 +429,7 @@ export async function reportCrash(
   consentGiven = false,
   attributes?: Record<string, string | number | boolean>,
 ): Promise<void> {
+  if (isErrorReportingDisabled()) return;
   const resource = createVortexResource("report");
 
   const exporter = new SanitizingSpanExporter(

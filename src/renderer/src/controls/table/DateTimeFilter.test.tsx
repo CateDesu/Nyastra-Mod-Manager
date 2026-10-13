@@ -52,8 +52,10 @@ function renderWith(locale: string, value: string = "") {
 }
 
 describe("DateTimeFilter", () => {
+  const localDate = new Date(2020, 11, 31).toISOString();
+
   it("formats the input via the platform short date for en-US", () => {
-    renderWith("en-US", "2020-12-31T00:00:00Z");
+    renderWith("en-US", localDate);
     const input = document.querySelector("input") as HTMLInputElement;
     expect(input).toBeTruthy();
     // Intl.DateTimeFormat(en-US, short) renders 12/31/20 (2-digit year).
@@ -61,13 +63,13 @@ describe("DateTimeFilter", () => {
   });
 
   it("uses the day-first order for German", () => {
-    renderWith("de", "2020-12-31T00:00:00Z");
+    renderWith("de", localDate);
     const input = document.querySelector("input") as HTMLInputElement;
     expect(input.value).toBe("31.12.20");
   });
 
   it("uses the year-first order for Japanese", () => {
-    renderWith("ja", "2020-12-31T00:00:00Z");
+    renderWith("ja", localDate);
     const input = document.querySelector("input") as HTMLInputElement;
     expect(input.value).toBe("2020/12/31");
   });

@@ -204,10 +204,7 @@ function verifyGamePath(game: IGame, gamePath: string): PromiseBB<void> {
 
 function searchDepth(files: string[]): number {
   return files.reduce((prev, filePath) => {
-    const len =
-      process.platform === "win32"
-        ? filePath.split(/[/\\]/).length
-        : filePath.split(path.sep).length;
+    const len = filePath.split(path.sep).length;
     return Math.max(prev, len);
   }, 0);
 }

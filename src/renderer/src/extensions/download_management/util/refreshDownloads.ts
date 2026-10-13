@@ -1,6 +1,6 @@
 import * as path from "path";
 
-import { VortexError } from "@vortex/shared";
+import { getErrorCode, VortexError } from "@vortex/shared";
 
 import { log } from "../../../logging";
 import { knownArchiveExt } from "../../../util/archives";
@@ -15,7 +15,12 @@ async function readArchiveNames(downloadPath: string): Promise<string[]> {
     archives.map((fileName) =>
       fs.statAsync(path.join(downloadPath, fileName)).then(
         (stat) => !stat.isDirectory(),
-        () => false,
+        (error: unknown) => {
+          if (getErrorCode(error) === "ENOENT") {
+            return false;
+          }
+          throw error;
+        },
       ),
     ),
   );

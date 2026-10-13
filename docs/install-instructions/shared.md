@@ -3,7 +3,7 @@
 Use this page after you have installed the prerequisites from a distro-specific
 guide or from [Generic Installation Instructions].
 
-These steps cover the shared repository bootstrap flow for Windows and Linux.
+These steps cover the Linux repository bootstrap.
 
 `pnpm` is the only tool you need to install by hand. The repository pins its own
 `pnpm` and `node.js` versions and fetches them on install, so no version manager
@@ -13,47 +13,21 @@ is involved.
 
 1. Clone the repository through your git client or CLI with submodules, then open a terminal in that folder:
 
-Linux:
-
 ```bash
-git clone --recurse-submodules https://github.com/Nexus-Mods/Vortex.git
-cd Vortex
+git clone --recurse-submodules https://github.com/CateDesu/Nyastra-Mod-Manager.git
+cd Nyastra-Mod-Manager
 ```
-
-Windows:
-
-```powershell
-git clone --recurse-submodules https://github.com/Nexus-Mods/Vortex.git C:\v
-cd C:\v
-```
-
-Use `C:\v` on Windows to avoid path length issues.
 
 2. Install [pnpm]. The installer is self-contained, so you do not need `node.js`
    or `npm` first:
-
-Linux:
 
 ```bash
 curl -fsSL https://get.pnpm.io/install.sh | sh -
 ```
 
-Windows:
+Close and reopen your terminal so pnpm resolves from PATH.
 
-```powershell
-winget install -e --id pnpm.pnpm
-```
-
-Close and reopen your terminal so `pnpm` resolves from `PATH`, then verify with
-`pnpm --version`.
-
-If Windows Defender blocks the winget binary, use pnpm's own installer instead:
-
-```powershell
-Invoke-WebRequest https://get.pnpm.io/install.ps1 -UseBasicParsing | Invoke-Expression
-```
-
-3. Install Vortex dependencies:
+3. Install the program dependencies:
 
 ```bash
 pnpm install

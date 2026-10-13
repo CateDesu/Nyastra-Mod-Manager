@@ -16,9 +16,12 @@ import { Steam } from "./Steam";
 // Steam.ts builds its singleton at import time, and on Linux that constructor calls
 // findLinuxSteamPath straight away - before any binding declared below this file's
 // imports exists. vi.hoisted runs ahead of the imports, so the mocks can read it.
-// (On Windows the equivalent RegGetValue call sits in a try/catch that swallows the
-// ReferenceError, which is why a plain `let` only fails on CI.)
-const steam = vi.hoisted(() => ({ installed: true, baseFolder: "C:\\Steam" }));
+const steam = vi.hoisted(() => ({
+  installed: true,
+  roots: [] as string[],
+  baseFolder: "C:\\Steam",
+  getProtonInfo: vi.fn(() => Promise.resolve({ usesProton: false })),
+}));
 
 const BASE_FOLDER = steam.baseFolder;
 const ALT_LIBRARY = path.join("D:", "SteamLibrary");
@@ -66,21 +69,13 @@ let libraryFoldersVdf = "";
 /** Fault rules wrapped around the seeded FS; tests set these before scanning. */
 let chaosRules: ChaosRule[] = [];
 
-vi.mock("winapi-bindings", () => ({
-  RegGetValue: () => {
-    if (!steam.installed) {
-      throw new Error("registry key not found");
-    }
-    return { value: steam.baseFolder };
-  },
-}));
-
 vi.mock("./linux/steamPaths", () => ({
   findLinuxSteamPath: () => (steam.installed ? steam.baseFolder : undefined),
+  findAllLinuxSteamPaths: () => (steam.installed ? [steam.baseFolder, ...steam.roots] : []),
 }));
 
 vi.mock("./linux/proton", () => ({
-  getProtonInfo: () => Promise.resolve({ usesProton: false }),
+  getProtonInfo: steam.getProtonInfo,
   buildProtonEnvironment: () => ({}),
   buildProtonCommand: () => ({ executable: "", args: [] }),
 }));
@@ -130,6 +125,8 @@ const scanAllGames = async () => {
 describe("Steam.allGames", () => {
   beforeEach(() => {
     steam.installed = true;
+    steam.roots = [];
+    steam.getProtonInfo.mockClear();
     chaosRules = [];
     libraryFoldersVdf = libraryFolders([]);
   });
@@ -217,6 +214,20 @@ describe("Steam.allGames", () => {
     ]);
   });
 
+  it("passes all discovered libraries to Proton resolution", async () => {
+    libraryFoldersVdf = libraryFolders([ALT_LIBRARY, THIRD_LIBRARY]);
+
+    await scanAllGames();
+
+    expect(steam.getProtonInfo).toHaveBeenCalledWith(
+      BASE_FOLDER,
+      path.join(ALT_LIBRARY, "steamapps"),
+      "42",
+      [BASE_FOLDER, ALT_LIBRARY, THIRD_LIBRARY],
+      undefined,
+    );
+  });
+
   it("matches the libraryfolders key case-insensitively", async () => {
     libraryFoldersVdf = libraryFolders([ALT_LIBRARY], { key: "LibraryFolders" });
 
@@ -262,4 +273,46 @@ describe("Steam.allGames", () => {
       gamePathIn(ALT_LIBRARY),
     ]);
   });
+});
+
+it("keeps each Linux Steam installation as the owner of its library", async () => {
+  const secondary = "/test/flatpak-steam";
+  steam.installed = true;
+  steam.roots = [secondary];
+  steam.getProtonInfo.mockClear();
+  const { restore } = installInMemoryFS((builder) => {
+    builder.file(QualifiedPath.fromNative(path.join(BASE_FOLDER, "config/libraryfolders.vdf")), {
+      type: "text",
+      data: libraryFolders([]),
+    });
+    builder.file(QualifiedPath.fromNative(path.join(secondary, "config/libraryfolders.vdf")), {
+      type: "text",
+      data: libraryFolders([THIRD_LIBRARY]),
+    });
+    builder.file(
+      QualifiedPath.fromNative(path.join(THIRD_LIBRARY, "steamapps/appmanifest_42.acf")),
+      { type: "text", data: MANIFEST },
+    );
+  });
+  try {
+    const instance = new Steam();
+    await instance.reloadGames();
+    expect(instance.snapshot().entries).toContainEqual(
+      expect.objectContaining({
+        appid: "42",
+        gamePath: gamePathIn(THIRD_LIBRARY),
+        steamRoot: secondary,
+      }),
+    );
+    expect(steam.getProtonInfo).toHaveBeenCalledWith(
+      secondary,
+      path.join(THIRD_LIBRARY, "steamapps"),
+      "42",
+      expect.any(Array),
+      undefined,
+    );
+  } finally {
+    restore();
+    steam.roots = [];
+  }
 });

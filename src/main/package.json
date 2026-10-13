@@ -3,7 +3,7 @@
   "name": "@vortex/main",
   "author": "Black Tree Gaming Ltd.",
   "license": "GPL-3.0-only",
-  "version": "1.0.0",
+  "version": "2.9.0-beta.2+linux.2",
   "private": true,
   "type": "commonjs",
   "main": "build/main.cjs",
@@ -19,8 +19,8 @@
     "test": "pnpm vitest run --config ./vitest.config.ts",
     "test:integration": "pnpm exec vitest run --config ./vitest.integration.config.ts",
     "publish": "pnpm exec rimraf ./dist && pnpm cross-env pnpm_config_inject_workspace_packages=true pnpm_config_node_linker=hoisted pnpm -F @vortex/main deploy ./dist && node ./dist/prepare-dist-package.mjs",
-    "package": "cd ./dist && pnpm electron-builder --config ./electron-builder.config.json --config.win.forceCodeSigning=true --config.win.sign=./sign.cjs --publish never",
-    "package:nosign": "cd ./dist && pnpm electron-builder --config ./electron-builder.config.json --publish never",
+    "package": "node ./package-linux.mjs",
+    "package:nosign": "node ./package-linux.mjs",
     "sbom": "pnpm node ./sbom.mjs",
     "download-duckdb-extensions": "pnpm tsx ./download-duckdb-extensions.ts",
     "generate:unleash": "pnpm node src/unleash/trim-spec.mjs && pnpm exec openapi-typescript src/unleash/openapi-slim.json --immutable --output src/unleash/schema.d.ts && pnpm exec oxfmt ./src/unleash/*.json ./src/unleash/schema.d.ts"
@@ -78,6 +78,8 @@
           "{projectRoot}/build/main.cjs.map",
           "{projectRoot}/build/bsdiff-worker.cjs",
           "{projectRoot}/build/bsdiff-worker.cjs.map",
+          "{projectRoot}/build/hash-worker.cjs",
+          "{projectRoot}/build/hash-worker.cjs.map",
           "{projectRoot}/build/hdiff.wasm"
         ]
       },
@@ -221,11 +223,11 @@
   },
   "files": [
     "./build",
-    "./nsis/",
     "./electron-builder.config.json",
+    "./package-linux.mjs",
     "./postinstall.mjs",
     "./prepare-dist-package.mjs",
-    "./sign.cjs"
+    "./prepare-linux-native.mjs"
   ],
   "dependencies": {
     "@duckdb/node-api": "catalog:",
@@ -236,7 +238,6 @@
     "@mdi/js": "catalog:",
     "@msgpack/msgpack": "catalog:",
     "@nexusmods/file-dependency-resolver": "workspace:*",
-    "@nexusmods/fomod-installer-ipc": "catalog:",
     "@nexusmods/fomod-installer-native": "catalog:",
     "@nexusmods/nexus-api": "catalog:",
     "@nosferatu500/react-sortable-tree": "catalog:",
@@ -274,7 +275,6 @@
     "drivelist": "catalog:",
     "electron-context-menu": "catalog:",
     "electron-redux": "catalog:",
-    "electron-updater": "catalog:",
     "encoding-down": "catalog:",
     "exe-version": "workspace:*",
     "feedparser": "catalog:",
@@ -290,7 +290,6 @@
     "immutability-helper": "catalog:",
     "ini": "catalog:",
     "interweave": "catalog:",
-    "is-admin": "catalog:",
     "js-yaml": "catalog:",
     "json-socket": "catalog:",
     "jsonwebtoken": "catalog:",
@@ -310,7 +309,6 @@
     "openapi-fetch": "catalog:",
     "p-queue": "catalog:",
     "packery": "catalog:",
-    "permissions": "catalog:",
     "prop-types": "catalog:",
     "ps-list": "catalog:",
     "re-reselect": "catalog:",
@@ -349,9 +347,7 @@
     "turbowalk": "catalog:",
     "universal-analytics": "catalog:",
     "uuid": "catalog:",
-    "vortex-parse-ini": "catalog:",
-    "wholocks": "catalog:",
-    "winapi-bindings": "catalog:",
+    "vortex-parse-ini": "workspace:*",
     "winston": "catalog:",
     "write-file-atomic": "catalog:",
     "ws": "catalog:",
@@ -402,5 +398,12 @@
     "react-refresh": "catalog:",
     "redux-freeze": "catalog:",
     "vitest-fetch-mock": "catalog:"
+  },
+  "os": [
+    "linux"
+  ],
+  "homepage": "https://github.com/CateDesu/Nyastra-Mod-Manager",
+  "bugs": {
+    "url": "https://github.com/CateDesu/Nyastra-Mod-Manager/issues"
   }
 }

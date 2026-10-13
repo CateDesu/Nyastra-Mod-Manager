@@ -1,7 +1,7 @@
 /**
  * Platform-specific SMAPI installer metadata.
  */
-export type SMAPIPlatformId = "windows" | "linux" | "macos";
+export type SMAPIPlatformId = "linux";
 
 /**
  * Defines archive/executable behaviour for one SMAPI installer platform.

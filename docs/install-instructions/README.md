@@ -1,6 +1,6 @@
 # Installing from Source
 
-Building Vortex from a clone. Pick the page for your platform, install the
+Building Nyastra’s Mod Manager from a clone. Pick the page for your Linux distribution, install the
 prerequisites it lists, then finish with [shared.md](shared.md), which covers
 the repository bootstrap common to all of them.
 
@@ -9,7 +9,6 @@ have a working toolchain.
 
 ## Prerequisites by platform
 
-- [windows.md](windows.md) - Windows 11, from PowerShell or Command Prompt
 - [archlinux.md](archlinux.md) - Arch and derivatives
 - [debian-based.md](debian-based.md) - Debian, Ubuntu, Pop!\_OS
 - [fedora.md](fedora.md) - Fedora

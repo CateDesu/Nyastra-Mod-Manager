@@ -1,11 +1,12 @@
+import { lstat } from "node:fs/promises";
 import * as path from "path";
 import * as util from "util";
 
 import { getErrorCode, getErrorMessageOrDefault, unknownToError } from "@vortex/shared";
 import PromiseBB from "bluebird";
 import type { TFunction } from "i18next";
+import type { IEntry } from "turbowalk";
 import turbowalk from "turbowalk";
-import * as winapi from "winapi-bindings";
 
 import { setSettingsPage } from "../../actions/session";
 import { log } from "../../logging";
@@ -115,14 +116,7 @@ class DeploymentMethod extends LinkingDeployment {
           description: (t) => t("Works only if mods are installed on the same drive as the game."),
           order: 5,
           solution: (t) => {
-            let displayPath = modPaths[typeId];
-            try {
-              displayPath = winapi.GetVolumePathName(modPaths[typeId]);
-            } catch {
-              log("warn", "Failed to resolve volume path", {
-                path: modPaths[typeId],
-              });
-            }
+            const displayPath = modPaths[typeId];
             return t(
               "Please go to Settings->Mods and set the mod staging folder to be on " +
                 "the same drive as the game ({{gameVolume}}).",
@@ -218,6 +212,23 @@ class DeploymentMethod extends LinkingDeployment {
     return PromiseBB.resolve();
   }
 
+  private async getFileId(entry: IEntry): Promise<string | undefined> {
+    if (entry.isDirectory) {
+      return undefined;
+    }
+
+    // The POSIX walker omits file IDs and link counts even with details enabled.
+    try {
+      const stats = await lstat(entry.filePath, { bigint: true });
+      return !stats.isDirectory() && stats.nlink > 1n ? `${stats.dev}:${stats.ino}` : undefined;
+    } catch (err) {
+      if (getErrorCode(err) === "ENOENT") {
+        return undefined;
+      }
+      throw unknownToError(err);
+    }
+  }
+
   protected purgeLinks(
     installationPath: string,
     dataPath: string,
@@ -225,13 +236,12 @@ class DeploymentMethod extends LinkingDeployment {
   ): PromiseBB<void> {
     let installEntryProm: PromiseBB<Set<string>>;
 
-    // find ids of all files in our mods directory
-    // using idStr (string) instead of id (number) to avoid precision loss
-    // for NTFS file IDs exceeding Number.MAX_SAFE_INTEGER
+    // String identities preserve file IDs larger than Number.MAX_SAFE_INTEGER.
     if (this.mInstallationFiles !== undefined) {
       installEntryProm = PromiseBB.resolve(this.mInstallationFiles);
     } else {
       this.mInstallationFiles = new Set<string>();
+      let queue = PromiseBB.resolve();
       installEntryProm = turbowalk(
         installationPath,
         (entries) => {
@@ -240,17 +250,25 @@ class DeploymentMethod extends LinkingDeployment {
             // it is, see https://github.com/Nexus-Mods/Vortex/issues/3684
             return;
           }
-          entries.forEach((entry) => {
-            if (entry.linkCount > 1 && entry.idStr !== undefined) {
-              this.mInstallationFiles.add(entry.idStr);
-            }
-          });
+          queue = queue.then(() =>
+            PromiseBB.map(
+              entries,
+              (entry) =>
+                this.getFileId(entry).then((id) => {
+                  if (id !== undefined) {
+                    this.mInstallationFiles?.add(id);
+                  }
+                }),
+              { concurrency: 50 },
+            ).then(() => undefined),
+          );
         },
         {
           details: true,
           skipHidden: false,
         },
       )
+        .then(() => queue)
         .catch((err) =>
           ["ENOENT", "ENOTFOUND"].includes(err.code) ? PromiseBB.resolve() : PromiseBB.reject(err),
         )
@@ -271,19 +289,23 @@ class DeploymentMethod extends LinkingDeployment {
         dataPath,
         (entries) => {
           queue = queue.then(() =>
-            PromiseBB.map(entries, (entry) => {
-              if (entry.linkCount > 1 && entry.idStr !== undefined && inos.has(entry.idStr)) {
-                ++purged;
-                if (purged % 1000 === 0) {
-                  onProgress?.(purged, total);
-                }
-                return fs
-                  .unlinkAsync(entry.filePath)
-                  .catch((err) => log("warn", "failed to remove", entry.filePath));
-              } else {
-                return PromiseBB.resolve();
-              }
-            }).then(() => undefined),
+            PromiseBB.map(
+              entries,
+              (entry) =>
+                this.getFileId(entry).then((id) => {
+                  if (id !== undefined && inos.has(id)) {
+                    ++purged;
+                    if (purged % 1000 === 0) {
+                      onProgress?.(purged, total);
+                    }
+                    return fs
+                      .unlinkAsync(entry.filePath)
+                      .catch((err) => log("warn", "failed to remove", entry.filePath));
+                  }
+                  return PromiseBB.resolve();
+                }),
+              { concurrency: 50 },
+            ).then(() => undefined),
           );
         },
         { details: true, skipHidden: false },

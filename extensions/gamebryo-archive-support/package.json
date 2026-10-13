@@ -4,7 +4,7 @@
   "description": "Support for Gamebryo/Bethesda archives (BSA and BA2)",
   "scripts": {
     "_build": "node build.mjs && pnpm extractInfo",
-    "build": "node -e \"if(process.platform==='win32')process.exit(1)\" || (pnpm run _build)",
+    "build": "pnpm run _build",
     "typecheck": "pnpm tsc",
     "test": "pnpm exec vitest run",
     "lint:strict": "pnpm exec node ../../scripts/strict-lint.mjs"

@@ -14,7 +14,7 @@ import type {
 } from "@nexusmods/nexus-api";
 import type NexusT from "@nexusmods/nexus-api";
 import { TimeoutError } from "@nexusmods/nexus-api";
-import { getErrorMessageOrDefault, unknownToError } from "@vortex/shared";
+import { getErrorMessageOrDefault, unknownToError, PROGRAM_NAME } from "@vortex/shared";
 import PromiseBB from "bluebird";
 import * as fuzz from "fuzzball";
 import type { TFunction } from "i18next";
@@ -1013,7 +1013,7 @@ function once(api: IExtensionApi, callbacks: Array<(nexus: NexusT) => void>) {
     const disableable = new Disableable(api);
     nexus = new Proxy(
       new Proxy(
-        new Nexus("Vortex", getApplication().version, nexusGameId(getGame(gameMode)), 30000),
+        new Nexus(PROGRAM_NAME, getApplication().version, nexusGameId(getGame(gameMode)), 30000),
         disableable,
       ),
       requestLog,

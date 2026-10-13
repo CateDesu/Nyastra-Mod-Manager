@@ -43,8 +43,8 @@ for review. If you're on `master`, branch first.
 ## Tool use
 
 - Anything committed to `scripts/` should be cross-platform Node.
-- Never run the signed `pnpm package` locally; signing secrets are CI-only. See
-  `docs/packaging/windows.md`.
+- Packaging is Linux-only and unsigned. See
+  `docs/packaging/linux.md`.
 
 ## MCP servers
 
@@ -66,7 +66,7 @@ Read the doc for the area you're touching rather than the whole tree.
 - Writing or fixing tests: `docs/testing.md`
 - Debugging, logs, diagnostics: `docs/DEBUGGING-GUIDE.md`
 - Collections, phased install: `docs/mod-management/collections.md`
-- Installers, release pipeline: `docs/packaging/windows.md`
+- Installers, release pipeline: `docs/packaging/linux.md`
 - The auto-updater: `docs/updater.md`
 - Writing documentation: `docs/writing-documentation.md`
 - Code style: `CODESTYLE.md`

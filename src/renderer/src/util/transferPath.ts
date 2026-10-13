@@ -5,7 +5,6 @@ import { getErrorCode, isErrorWithSystemCode, unknownToError } from "@vortex/sha
 import PromiseBB from "bluebird";
 import type { IEntry } from "turbowalk";
 import turbowalk from "turbowalk";
-import * as winapi from "winapi-bindings";
 
 import { DOWNLOADS_DIR_TAG } from "../extensions/download_management/util/downloadDirectory";
 import { STAGING_DIR_TAG } from "../extensions/mod_management/stagingDirectory";
@@ -36,22 +35,16 @@ const MIN_DISK_SPACE_OFFSET = 512 * 1024 * 1024;
  * @param destination The proposed destination folder.
  */
 export function testPathTransfer(source: string, destination: string): PromiseBB<void> {
-  if (process.platform !== "win32") {
-    return PromiseBB.reject(new UnsupportedOperatingSystem());
-  }
-
-  let destinationRoot: string;
-  try {
-    destinationRoot = winapi.GetVolumePathName(destination);
-  } catch (err) {
-    if (isErrorWithSystemCode(err)) {
-      if (err.systemCode === 2) {
-        return PromiseBB.reject(new NotFound(destination));
-      }
-    }
-
-    return PromiseBB.reject(err);
-  }
+  let destinationRoot = destination;
+  const findExistingDirectory = (candidate: string): PromiseBB<string> =>
+    fs
+      .statAsync(candidate)
+      .then(() => candidate)
+      .catch((err) => {
+        if (getErrorCode(err) !== "ENOENT") return PromiseBB.reject(err);
+        const parent = path.dirname(candidate);
+        return parent === candidate ? PromiseBB.reject(err) : findExistingDirectory(parent);
+      });
 
   const isOnSameVolume = (): PromiseBB<boolean> => {
     return PromiseBB.all([fs.statAsync(source), fs.statAsync(destinationRoot)]).then(
@@ -83,7 +76,11 @@ export function testPathTransfer(source: string, destination: string): PromiseBB
       log("warn", "Transfer disk space test failed - missing source directory", err);
       return PromiseBB.reject(new ProcessCanceled("Missing source directory"));
     })
-    .then(() => isOnSameVolume())
+    .then(() => findExistingDirectory(destination))
+    .then((existing) => {
+      destinationRoot = existing;
+      return isOnSameVolume();
+    })
     .then((res) =>
       res
         ? PromiseBB.reject(new ProcessCanceled("Disk space calculations are unnecessary."))

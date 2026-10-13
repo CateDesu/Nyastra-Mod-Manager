@@ -36,7 +36,11 @@ Project and coding documentation. To set up and build Vortex, start with
 
 ## Building and shipping
 
-- [packaging/windows.md](packaging/windows.md) - Local unsigned installers, the pipeline, signed CI builds
+- [packaging/](packaging/README.md) - Packaging workflows by platform
+- [packaging/linux.md](packaging/linux.md) - Linux builds, profile import and preview artifacts
+- [packaging/linux.md](packaging/linux.md) - Building and installing the experimental native Linux program
+- [Linux extension adaptations](packaging/linux-extensions.md) - Configure Fluffy and reproduce supported extension adaptations
+- [Linux release text](packaging/linux-release.md) - Maintained description for the single ZIP release
 - [packaging/flatpak.md](packaging/flatpak.md) - Building and installing the Flatpak
 - [flatpak/technical.md](flatpak/technical.md) - Flatpak manifest and runtime details
 - [flatpak/maintenance.md](flatpak/maintenance.md) - Updating the Flatpak package
@@ -48,7 +52,6 @@ Project and coding documentation. To set up and build Vortex, start with
 ## Installing from source
 
 - [install-instructions/](install-instructions/README.md) - Per-platform prerequisites, then the shared repository bootstrap:
-  [Windows](install-instructions/windows.md) ·
   [Arch](install-instructions/archlinux.md) ·
   [Debian](install-instructions/debian-based.md) ·
   [Fedora](install-instructions/fedora.md) ·

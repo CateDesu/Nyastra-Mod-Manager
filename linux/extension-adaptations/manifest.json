@@ -1,0 +1,22 @@
+{
+  "recipeVersion": 3,
+  "plugins": [
+    {
+      "directory": "Vortex Extension Update - Resident Evil 4 (2023) Vortex Extension v0.4.1",
+      "name": "Resident Evil 4 (2023) Vortex Extension",
+      "version": "0.4.1",
+      "game": "re4",
+      "author": "ChemBoy1",
+      "url": "https://www.nexusmods.com/site/mods/913"
+    },
+    {
+      "directory": "Vortex Extension Update - Resident Evil Requiem Vortex Extension v0.1.3",
+      "name": "Resident Evil Requiem Vortex Extension",
+      "version": "0.1.3",
+      "game": "requiem",
+      "author": "ChemBoy1",
+      "url": "https://www.nexusmods.com/site/mods/1653"
+    }
+  ],
+  "distribution": "Recipes only. Third-party extension code and artwork are not included."
+}

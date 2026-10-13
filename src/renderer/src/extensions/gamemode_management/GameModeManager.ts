@@ -14,17 +14,12 @@ import type { IGameStore } from "@/types/IGameStore";
 import type { IGameStoreSnapshot } from "@/types/IGameStore";
 import type { IState } from "@/types/IState";
 import type { ITool } from "@/types/ITool";
-import { GoGLauncher } from "@/util/GOGLauncher";
-import { OriginLauncher } from "@/util/OriginStore";
 import { getSafe } from "@/util/storeHelper";
-import { UPlayLauncher } from "@/util/UplayStore";
 import { batchDispatch, truthy } from "@/util/util";
-import { XboxLauncher } from "@/util/xbox/XboxLauncher";
 
 import { setNextProfile } from "../../actions";
 import { getNormalizeFunc } from "../../util/api";
 import { ProcessCanceled, SetupError, UserCanceled } from "../../util/CustomErrors";
-import EpicGamesLauncher from "../../util/EpicGamesLauncher";
 import * as fs from "../../util/fs";
 import { activeProfile, discoveryByGame } from "../../util/selectors";
 import Steam from "../../util/Steam";
@@ -75,14 +70,7 @@ class GameModeManager {
     this.mStore = null;
     this.mKnownGames = extensionGames;
     this.mGameStubs = gameStubs;
-    this.mKnownGameStores = [
-      Steam,
-      EpicGamesLauncher,
-      GoGLauncher.create(),
-      OriginLauncher.create(),
-      UPlayLauncher.create(),
-      XboxLauncher.create(api),
-    ].filter(Boolean);
+    this.mKnownGameStores = [Steam];
     this.mActiveSearch = null;
     this.mQuickDiscoveryAbort = null;
     this.mOnGameModeActivated = onGameModeActivated;

@@ -55,9 +55,6 @@ function ensureIniBackups(
 function genIniFormat(format: string) {
   switch (format) {
     case "winapi":
-      if (process.platform !== "win32") {
-        return undefined;
-      }
       return new WinapiFormat();
     default:
       throw new Error("unsupported ini format: " + format);
@@ -288,68 +285,6 @@ function purgeChanges(t: TFunction, gameMode: string, discovery: IDiscoveryResul
   );
 }
 
-function testProtectedFolderAccess(): PromiseBB<ITestResult> {
-  if (process.platform !== "win32") {
-    // Windows only! (for now)
-    return PromiseBB.resolve(undefined);
-  }
-
-  let writablePath;
-  try {
-    // Technically this try/catch block shouldn't be necessary but some users
-    //  seem to encounter a crash (Windows only) when attempting to retrieve
-    //  the documents path. This may be related to:
-    // tslint:disable-next-line:max-line-length
-    // https://forums.asp.net/t/1889407.aspx?GetFolderPath+Environment+GetFolderPath+Environment+SpecialFolder+MyDocuments+returning+blank+when+hosted+on+IIS
-    writablePath = getVortexPath("documents");
-  } catch (err) {
-    // We can't retrieve the documents path, but for the purpose of completing this
-    //  test, we can simply query a different folder which is also guaranteed to trigger
-    //  folder protection functionality.
-    // tslint:disable-next-line
-    log(
-      "error",
-      "Unable to get path to my documents folder - user environment is misconfigured!",
-      err,
-    );
-    writablePath = getVortexPath("home");
-  }
-
-  const canary = path.join(writablePath, "__vortex_canary.tmp");
-  return fs
-    .writeFileAsync(canary, "Should only exist temporarily, feel free to delete")
-    .then(() => fs.removeAsync(canary))
-    .then(() => PromiseBB.resolve(undefined))
-    .catch((err) => {
-      // Theoretically the only reason why writing/removing this file would fail is if/when
-      //  an external application has blocked Vortex from running the file operation.
-      //  in this case it's safe to assume that an AV or possibly Windows Defender
-      //  have stepped in and blocked Vortex.
-      log("warn", "reporting AV blocking access to documents", {
-        documentsPath: writablePath,
-        error: err.message,
-      });
-      disableErrorReport();
-      return {
-        description: {
-          short: "Anti-Virus protection detected",
-          long:
-            "Vortex is being blocked from running file operations by your Anti-Virus software " +
-            "and will not function correctly unless an exception is added manually. <br /><br />" +
-            "Most Anti-Virus applications should inform you of this attempt while others such as " +
-            "Windows 10's Windows Defender will block access without prompt.<br /><br />" +
-            "For more information please visit our wiki: " +
-            "[url]" +
-            `https://wiki.${NEXUS_DOMAIN}/index.php/Configuring_your_anti-virus_to_work_with_Vortex` +
-            "[/url]<br /><br />" +
-            "[b][color=red]Important: Error reporting from Vortex will be disabled " +
-            "until you remedy this situation.[/color][/b]",
-        },
-        severity: "error",
-      };
-    });
-}
-
 function main(context: IExtensionContext) {
   context.registerTableAttribute("mods", {
     id: "iniEdits",
@@ -359,8 +294,6 @@ function main(context: IExtensionContext) {
     placement: "detail",
     edit: {},
   });
-
-  context.registerTest("controlled-folder-access", "startup", () => testProtectedFolderAccess());
 
   context.once(() => {
     let deactivated: boolean = false;

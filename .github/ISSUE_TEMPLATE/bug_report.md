@@ -1,43 +1,15 @@
 ---
 name: Bug report
-about: Create a report to help us improve
-title: ""
-labels: ""
-assignees: ""
+about: Report a problem with Nyastra's Mod Manager on Linux
 ---
 
-> **Important:** Tickets that do not provide sufficient information may be closed without further notice. Context is everything when diagnosing bugs — do not assume that a screenshot alone is enough for us to identify the problem. Logs and reproduction steps are extremely important and, unless the issue is immediately obvious, we cannot assist without them. Please attach all `.log` files from `%appdata%/vortex`.
+**Program version and Linux distribution**
 
-**Your Nexus Mods username**
-Will help us debug your issue.
+**Game, store and Proton version**
 
-**Describe the bug**
-A clear and concise description of what the bug is.
+**Steps to reproduce**
 
-**To Reproduce**
-Steps to reproduce the behavior:
+**Expected and actual behavior**
 
-1. Go to '...'
-2. Click on '....'
-3. Scroll down to '....'
-4. See error
-
-**Expected behavior**
-A clear and concise description of what you expected to happen.
-
-**Logs**
-Please attach all `.log` files from `%appdata%/vortex`. Without logs, we are unlikely to be able to help.
-
-**Screenshots**
-If applicable, add screenshots to help explain your problem.
-
-**Setup (please complete the following information):**
-
-- OS: [e.g. Windows 11]
-- Vortex Version: [e.g. 1.16.7]
-- Game: [e.g. Skyrim]
-
-**Additional context**
-Add any other context about the problem here.
-
-> **Note:** If your issue is specific to a community extension or a game supported by a community extension, please report it on the extension's page on Nexus Mods instead. This tracker is for Vortex core and officially supported functionality only.
+**Relevant logs**
+Review logs before posting and remove personal information, API keys and private links.

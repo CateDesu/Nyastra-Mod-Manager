@@ -7,11 +7,8 @@ import type { IGameStore } from "../types/IGameStore";
 import type { IGameStoreEntry } from "../types/IGameStoreEntry";
 import * as storeLookup from "./storeLookup";
 
-vi.mock("winapi-bindings", () => ({
-  RegGetValue: () => {
-    throw new Error("no registry in tests");
-  },
-  GetProcessList: () => [],
+vi.mock("../extensions/gamemode_management/util/processProvider", () => ({
+  defaultProcessProvider: { list: vi.fn(() => Promise.resolve([])) },
 }));
 
 const entry = (gameStoreId: string, appid: string, name: string): IGameStoreEntry => ({

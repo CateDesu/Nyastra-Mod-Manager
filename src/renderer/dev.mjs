@@ -41,7 +41,7 @@ compiler.watch({}, (err, stats) => {
       spawn("pnpm", ["-F", "@vortex/main", "run", "start"], {
         cwd: ROOT_DIR,
         stdio: "inherit",
-        shell: process.platform === "win32",
+        shell: false,
         signal: abortController.signal,
       });
     }

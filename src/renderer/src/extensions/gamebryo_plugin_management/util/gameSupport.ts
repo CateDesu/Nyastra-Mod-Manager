@@ -376,9 +376,11 @@ export function initGameSupport(api: IExtensionApi): Bluebird<void> {
 export function appDataPath(gameMode: string): string {
   const dataPath = gameSupport.get(gameMode, "appDataPath");
 
-  return process.env.LOCALAPPDATA !== undefined
-    ? path.join(process.env.LOCALAPPDATA, dataPath)
-    : path.resolve(getVortexPath("appData"), "..", "Local", dataPath);
+  const discovery = discoveryForGame(gameMode);
+  const directory = discovery?.protonPrefix
+    ? path.join(discovery.protonPrefix, "drive_c", "users", "steamuser", "AppData", "Local")
+    : getVortexPath("localAppData");
+  return path.join(directory, dataPath);
 }
 
 export function gameDataPath(gameMode: string): string {

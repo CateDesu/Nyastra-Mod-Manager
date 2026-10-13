@@ -94,13 +94,23 @@ export const stateReducer: IReducerSpec = {
       setOrNop(state, ["files", payload.id, "pausable"], payload.pausable),
     [action.setDownloadHash as any]: (state, payload) =>
       setOrNop(state, ["files", payload.id, "fileMD5"], payload.fileMD5),
-    [action.setDownloadHashByFile as any]: (state, payload) => {
-      const downloadId = Object.keys(state.files || {}).find(
-        (id: string) => state.files[id].localPath === payload.fileName,
-      );
-      if (downloadId === undefined) {
+    [action.setDownloadHashAndSize as any]: (state, payload) => {
+      if (state.files[payload.id] === undefined) {
         return state;
       }
+      return merge(state, ["files", payload.id], {
+        fileMD5: payload.fileMD5,
+        size: payload.fileSize,
+      });
+    },
+    [action.setDownloadHashByFile as any]: (state, payload) => {
+      const matchingIds = Object.keys(state.files || {}).filter(
+        (id: string) => state.files[id].localPath === payload.fileName,
+      );
+      if (matchingIds.length !== 1) {
+        return state;
+      }
+      const downloadId = matchingIds[0];
       if (typeof downloadId !== "string") {
         throw new Error("invalid download id");
       }

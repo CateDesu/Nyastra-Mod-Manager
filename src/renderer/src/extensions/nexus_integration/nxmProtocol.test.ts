@@ -431,6 +431,42 @@ describe("nxm protocol resolver", () => {
         expect(harness.freeUserQueue()).toEqual([]);
       });
 
+      test("cancels the remaining duplicate when retries finish out of order", async ({
+        makeNxm,
+      }) => {
+        const { harness, nxm, resolve } = makeNxm({ userInfo: FREE });
+        websiteRoundTrip();
+        const firstSettled = vi.fn();
+        const first = resolve(MOD_URL);
+        void first.then(firstSettled, firstSettled);
+        const second = resolve(MOD_URL);
+        await vi.waitFor(() => expect(harness.freeUserQueue()).toEqual([MOD_URL]));
+
+        const firstReply = Promise.withResolvers<ReturnType<typeof downloadLink>>();
+        const secondReply = Promise.withResolvers<ReturnType<typeof downloadLink>>();
+        harness.getDownloadURLs
+          .mockReturnValueOnce(firstReply.promise)
+          .mockReturnValueOnce(secondReply.promise);
+        harness.setUserInfo(PREMIUM);
+        nxm.dialogHandlers.onRetry();
+        await vi.waitFor(() => expect(harness.getDownloadURLs).toHaveBeenCalledTimes(2));
+
+        try {
+          secondReply.resolve(downloadLink("https://cdn/second.7z"));
+          await expect(second).resolves.toMatchObject({ urls: ["https://cdn/second.7z"] });
+          expect(harness.freeUserQueue()).toEqual([MOD_URL]);
+          nxm.dialogHandlers.onCancel(MOD_URL);
+
+          await vi.waitFor(() =>
+            expect(firstSettled).toHaveBeenCalledWith(expect.any(UserCanceled)),
+          );
+          expect(harness.freeUserQueue()).toEqual([]);
+        } finally {
+          firstReply.resolve(downloadLink("https://cdn/first.7z"));
+          await first.catch(() => undefined);
+        }
+      });
+
       test("opens the file's page on the website when the user picks download there", async ({
         makeNxm,
       }) => {

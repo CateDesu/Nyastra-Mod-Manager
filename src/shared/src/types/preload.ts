@@ -64,8 +64,6 @@ export interface Api {
   /** Adaptor host API - for querying adaptor services from renderer */
   adaptors: AdaptorsApi;
 
-  /** Updater API - for querying update status from main process */
-  updater: UpdaterApi;
   /** Dialog APIs */
   dialog: Dialog;
 

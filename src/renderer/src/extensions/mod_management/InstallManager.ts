@@ -3843,7 +3843,7 @@ class InstallManager {
   }
 
   private isBrowserAssistantError(error: string): boolean {
-    return process.platform === "win32" && error.indexOf("Roaming\\Browser Assistant") !== -1;
+    return false;
   }
 
   private isFileInUse(errorMessage: string, errorCode?: string): boolean {
@@ -3968,6 +3968,7 @@ class InstallManager {
   ): Promise<IInstallResult> {
     let fileList: string[] = [];
     let phase = "Extracting";
+    const hasFileList = (extractList?.length ?? 0) > 0;
 
     const progress = (files: string[], percent: number) => {
       if (percent !== undefined && installContext !== undefined) {
@@ -4036,6 +4037,13 @@ class InstallManager {
           hasXmlConfigXML,
         };
 
+        if (process.platform === "linux" && hasCSScripts && !hasXmlConfigXML && !hasFileList) {
+          throw new SetupError(
+            "C# FOMOD installers are not supported by native Linux Vortex. " +
+              "Choose a version of this mod with an XML FOMOD installer.",
+          );
+        }
+
         const allowList = getCSharpScriptAllowListForGame(gameId);
         if (hasCSScripts && !allowList.has(details?.modReference?.repo?.modId || "")) {
           const modName =
@@ -4067,7 +4075,7 @@ class InstallManager {
           }
         }
 
-        if (truthy(extractList) && extractList.length > 0) {
+        if (hasFileList) {
           const supportedInstaller = await makeListInstaller(extractList, tempPath);
           return { ...supportedInstaller, ...testDetails };
         } else if (forceInstaller === undefined) {
@@ -4283,8 +4291,7 @@ class InstallManager {
 
           // Ensure we use windows path separators as scripted installers
           //  will sometime return *nix separators.
-          const sanitized =
-            process.platform === "win32" ? destination.replace(sanitizeSep, path.sep) : destination;
+          const sanitized = destination;
           return !isPathValid(sanitized, true);
         }
 

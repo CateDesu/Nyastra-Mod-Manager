@@ -84,7 +84,24 @@ own workspace glob):
 Generated or vendored, and not worth searching:
 
 - `src/main/build/`, `src/main/dist/`, `src/renderer/lib/` - Build output. These are packaging
-  output and input; see [packaging/windows.md](packaging/windows.md) when
+  output and input; see [packaging/linux.md](packaging/linux.md) when
   working on installers.
 - `test-results/` - Test artifacts
 - `node_modules/` - Dependencies
+
+## Linux program files
+
+- `patches/` holds versioned dependency fixes used by the lockfile.
+- `linux/extension-adaptations/` owns the portable RE4 and Requiem adaptation code.
+- `linux/extension-adaptations/local/` keeps ignored local third-party source copies.
+- `scripts/install-linux.mjs` installs the runtime into XDG application data.
+- `scripts/stage-linux-release.mjs` stages ZIP, AppImage and Debian packages and the release text.
+- `dist/release/assets/` holds the generated binary release assets.
+- `mods/vortex/` holds the ignored local Vortex archive and staging libraries.
+- `mods/fluffy/` holds the ignored local Fluffy runtime, mods and game settings.
+
+Runtime copies live under `$XDG_DATA_HOME/nyastra-mod-manager/app`. Settings and
+installed plugins live under `$XDG_CONFIG_HOME/NyastraModManager`. Personal Fluffy
+settings live under `$XDG_CONFIG_HOME/nyastra-mod-manager`. These are installed
+state rather than maintained source. Installation backups belong under XDG state
+or the program's user data.

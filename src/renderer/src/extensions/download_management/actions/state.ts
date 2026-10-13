@@ -85,6 +85,11 @@ export const setDownloadHash = createAction("SET_DOWNLOAD_HASH", (id: string, fi
   fileMD5,
 }));
 
+export const setDownloadHashAndSize = createAction(
+  "SET_DOWNLOAD_HASH_AND_SIZE",
+  (id: string, fileMD5: string, fileSize: number) => ({ id, fileMD5, fileSize }),
+);
+
 export const setDownloadHashByFile = createAction(
   "SET_DOWNLOAD_HASH_BY_FILE",
   (fileName: string, fileMD5: string, fileSize: number) => ({

@@ -27,7 +27,7 @@ function GameSelectionDialog(props: IProps): JSX.Element {
   const [paths, setPaths] = React.useState(searchPaths);
 
   const addSearchPath = React.useCallback(() => {
-    setPaths([].concat(paths, process.platform === "win32" ? "C:" : "/"));
+    setPaths([].concat(paths, "/"));
   }, [paths, setPaths]);
 
   const updateSearchPath = React.useCallback(

@@ -1,7 +1,6 @@
 import * as path from "path";
 
 import { actions, fs, log, selectors, types, util } from "@nexusmods/vortex-api";
-import { GetProcessWindowList, SetForegroundWindow } from "winapi-bindings";
 
 import { patchListName } from "./gameSupport";
 import { IDeployment, IFNISPatch } from "./types";
@@ -243,38 +242,6 @@ async function writePatches(toolPath: string, patches: string[]) {
   }
 }
 
-function genSpawnedHandler(api: types.IExtensionApi) {
-  if (process.platform !== "win32") {
-    // only supported on windows
-    return;
-  }
-
-  return (pid?: number) => {
-    if (pid === undefined) {
-      return;
-    }
-    const checkTimeout = () => {
-      try {
-        process.kill(pid, 0);
-        const hwnds = GetProcessWindowList(pid);
-        if (hwnds.length > 0) {
-          // if fnis has a window, something must have gone wrong. Ensure it's visible
-          // otherwise the user may wait forever
-          hwnds.forEach((hwnd) => {
-            SetForegroundWindow(hwnd);
-          });
-        } else {
-          // fnis still running but has no window, check back later
-          setTimeout(checkTimeout, CHECK_FOR_WINDOW_FREQUENCY);
-        }
-      } catch (err) {
-        // if the kill throws an exception that means the process has ended. probably
-      }
-    };
-    setTimeout(checkTimeout, CHECK_FOR_WINDOW_FREQUENCY);
-  };
-}
-
 async function runFNIS(
   api: types.IExtensionApi,
   profile: types.IProfile,
@@ -306,7 +273,7 @@ async function runFNIS(
   }
   await api.runExecutable(tool.path, args, {
     suggestDeploy: false,
-    onSpawned: genSpawnedHandler(api) as any,
+    onSpawned: undefined as any,
   });
 }
 

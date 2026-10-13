@@ -22,10 +22,6 @@ export default defineConfig({
     tsconfigPaths: true,
     alias: {
       "original-fs": "fs",
-      "modmeta-db": path.resolve(
-        __dirname,
-        "../../extensions/nmm-import-tool/node_modules/modmeta-db/lib/index.js",
-      ),
     },
   },
 });

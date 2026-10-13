@@ -46,7 +46,7 @@ describe("native crash startup sweep", () => {
     vi.clearAllMocks();
     root = await mkdtemp(path.join(tmpdir(), "vortex-crash-sweep-"));
     telemetry.getPath.mockReturnValue(root);
-    telemetry.getVersion.mockReturnValue("43.0.0");
+    telemetry.getVersion.mockReturnValue("1.0.0");
   });
   afterEach(async () => {
     await rm(root, { recursive: true, force: true });
@@ -54,7 +54,7 @@ describe("native crash startup sweep", () => {
 
   async function dump(name: string, processType: string) {
     let buffer = gunzipSync(
-      await readFile(path.join(__dirname, "__fixtures__", "windows-renderer.dmp.gz")),
+      await readFile(path.join(__dirname, "__fixtures__", "linux-renderer.dmp.gz")),
     );
     // Append a length-prefixed annotation value and redirect only the
     // Crashpad annotation-object value RVAs for ptype/process_type.
@@ -117,9 +117,7 @@ describe("native crash startup sweep", () => {
         expect.objectContaining({
           "crash.sourceProcess": source,
           "crash.native.processType": type,
-          "crash.native.exceptionCode": "0xc0000005",
-          "crash.native.module": "electron.exe",
-          "crash.native.moduleOffset": "0x3aeaef0",
+          "crash.native.exceptionCode": "0xb",
         }),
       );
     }
@@ -137,16 +135,14 @@ describe("native crash startup sweep", () => {
     );
     for (const sourceProcess of ["main", "renderer", "gpu", "utility"]) {
       expect(attributes).toContainEqual(
-        expect.objectContaining({ "error.title": `${sourceProcess} crash in electron.exe` }),
+        expect.objectContaining({ "error.title": `${sourceProcess} crash (unknown module)` }),
       );
     }
     const messages = telemetry.startSpan.mock.calls.map(
       (call) => call[1].attributes["error.message"],
     );
     for (const sourceProcess of ["main", "gpu", "renderer", "utility"]) {
-      expect(messages).toContain(
-        `${sourceProcess} crash from previous session: ACCESS_VIOLATION (0xc0000005) in electron.exe+0x3aeaef0`,
-      );
+      expect(messages).toContain(`${sourceProcess} crash from previous session: SIGSEGV (0xb)`);
     }
   });
 
@@ -175,11 +171,14 @@ describe("native crash startup sweep", () => {
   });
 
   it("discards other builds and DumpWithoutCrashing reports", async () => {
+    telemetry.getVersion.mockReturnValue("2.0.0");
     await mkdir(path.join(root, "reports"), { recursive: true });
     await writeFile(
       path.join(root, "reports", "old.dmp"),
       gunzipSync(await readFile(path.join(__dirname, "__fixtures__", "linux-main.dmp.gz"))),
     ); // appVersion 1.0.0
+    await sendPendingNativeCrashReport();
+    telemetry.getVersion.mockReturnValue("1.0.0");
     const file = await dump("diagnostic", "gpu-process");
     const buffer = await readFile(file);
     const directory = buffer.readUInt32LE(12);
@@ -199,7 +198,10 @@ describe("native crash startup sweep", () => {
     const active = path.join(root, "active.dmp.sending");
     const stale = path.join(root, "stale.dmp.sending");
     await writeFile(active, Buffer.alloc(32));
-    await writeFile(stale, Buffer.alloc(32));
+    await writeFile(
+      stale,
+      gunzipSync(await readFile(path.join(__dirname, "__fixtures__", "linux-main.dmp.gz"))),
+    );
     const old = new Date(Date.now() - 10 * 60 * 1000);
     await utimes(stale, old, old);
     await sendPendingNativeCrashReport();

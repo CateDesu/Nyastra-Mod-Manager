@@ -362,16 +362,16 @@ export class NxmProtocol {
    * it - otherwise an abandoned trip to the website leaves an entry that never expires, holding
    * the settled download alive and re-resolving it if a matching link ever does arrive.
    */
-  #dequeue(input: string): void {
+  #dequeue(queued: IQueuedDownload): void {
     // the entry may already be gone
-    const queuedIdx = this.#freeQueue.findIndex((iter) => iter.input === input);
+    const queuedIdx = this.#freeQueue.indexOf(queued);
     if (queuedIdx !== -1) {
       this.#freeQueue.splice(queuedIdx, 1);
     }
     // the queue is keyed by url, so one row can stand for two downloads of the same file; it goes
     // when the last of them settles, or the survivor is left parked with nothing to release it
-    if (!this.#freeQueue.some((iter) => iter.input === input)) {
-      this.#api.store.dispatch(removeFreeUserDLItem(input));
+    if (!this.#freeQueue.some((iter) => iter.input === queued.input)) {
+      this.#api.store.dispatch(removeFreeUserDLItem(queued.input));
     }
   }
 
@@ -382,20 +382,21 @@ export class NxmProtocol {
   #websiteDownload(input: string, url: NXMUrl): Promise<IResolvedURL> {
     // a promise settles once and #dequeue tolerates a repeat, so cancelling after a skip is safe
     return new Promise<IResolvedURL>((resolve, reject) => {
-      this.#freeQueue.push({
+      const queued: IQueuedDownload = {
         input,
         url,
         resolve: (res) => {
-          this.#dequeue(input);
+          this.#dequeue(queued);
           resolve(res);
         },
         reject: (err) => {
-          this.#dequeue(input);
+          this.#dequeue(queued);
           reject(err);
         },
         queryRelevantUpdates: () => this.#relevantUpdates(url),
         awaitingLink: false,
-      });
+      };
+      this.#freeQueue.push(queued);
       this.#api.store.dispatch(addFreeUserDLItem(input));
     });
   }
@@ -591,7 +592,7 @@ export class NxmProtocol {
     }
 
     // #download reports its own failures, resolving to undefined when nothing was started
-    const dlId = await this.#download(url);
+    const dlId = await this.#download(url, install ? false : undefined);
     if (dlId == null) {
       return;
     }
@@ -627,9 +628,9 @@ export class NxmProtocol {
   }
 
   /** Start a download, reporting any failure here. Resolves to undefined when none started. */
-  async #download(url: string): Promise<string | undefined> {
+  async #download(url: string, allowInstall?: boolean): Promise<string | undefined> {
     try {
-      return await startDownload(this.#api, this.#nexus, url);
+      return await startDownload(this.#api, this.#nexus, url, undefined, undefined, allowInstall);
     } catch (err) {
       if (parseError(err).data.kind === "download:is-html" || err instanceof UserCanceled) {
         return undefined;

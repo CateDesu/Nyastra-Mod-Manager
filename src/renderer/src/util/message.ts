@@ -22,7 +22,6 @@ import {
 import { didIgnoreError, isOutdated, recordErrorSpan } from "./errorHandling";
 import getVortexPath from "./getVortexPath";
 import { log } from "./log";
-import { decodeSystemError } from "./nativeErrors";
 import { jsonRequest } from "./network";
 import opn from "./opn";
 import { flatten, nexusModsURL, truthy } from "./util";
@@ -368,15 +367,6 @@ function prettifyNodeErrorMessageInner(
   options?: IErrorOptions,
   fileName?: string,
 ): IPrettifiedFields {
-  const decoded = decodeSystemError(err, err.path ?? err.filename ?? fileName);
-  if (decoded !== undefined) {
-    return {
-      message: decoded.message,
-      replace: { filePath: err.path ?? err.filename },
-      allowReport: false,
-    };
-  }
-
   if (err instanceof ThirdPartyError || err instanceof ArchiveBrokenError) {
     const message =
       err instanceof ArchiveBrokenError

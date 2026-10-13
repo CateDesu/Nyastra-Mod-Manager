@@ -11,6 +11,20 @@ export interface IProtonInfo {
   protonPath?: string;
 }
 
+export const PROTON_USERNAME = "steamuser";
+
+export function getMyGamesPath(compatDataPath: string): string {
+  return path.join(
+    compatDataPath,
+    "pfx",
+    "drive_c",
+    "users",
+    PROTON_USERNAME,
+    "Documents",
+    "My Games",
+  );
+}
+
 /**
  * Check if a game uses Proton by looking for its compatdata folder
  */
@@ -50,7 +64,7 @@ export async function getConfiguredProtonName(
     const configData = await fs.readFileAsync(configPath, "utf8");
     const config = parse(configData.toString()) as any;
     const mapping = config?.InstallConfigStore?.Software?.Valve?.Steam?.CompatToolMapping;
-    return mapping?.[appId]?.name;
+    return mapping?.[appId]?.name ?? mapping?.["0"]?.name;
   } catch (err: any) {
     log("debug", "Could not read Steam config.vdf", { error: err?.message });
     return undefined;
@@ -58,15 +72,20 @@ export async function getConfiguredProtonName(
 }
 
 /**
- * Check if a path exists asynchronously
+ * Ignore incomplete downloads without a Proton runner.
  */
-async function pathExists(filePath: string): Promise<boolean> {
+async function isProtonInstallation(directory: string): Promise<boolean> {
   try {
-    await fs.statAsync(filePath);
-    return true;
+    return (await fs.statAsync(path.join(directory, "proton"))).isFile();
   } catch {
     return false;
   }
+}
+
+function protonCommonPaths(steamPath: string, libraryPaths: readonly string[]): string[] {
+  return [...new Set([steamPath, ...libraryPaths])].map((libraryPath) =>
+    path.join(libraryPath, "steamapps", "common"),
+  );
 }
 
 /**
@@ -91,18 +110,12 @@ function extractProtonKeyword(protonName: string): string | undefined {
 function folderMatchesKeyword(folderName: string, keyword: string): boolean {
   const lowerFolder = folderName.toLowerCase();
 
-  // Direct substring match (handles "experimental", "hotfix", etc.)
-  if (lowerFolder.includes(keyword)) {
-    return true;
-  }
-
   // Version number match: "9" should match "9.0", "9.1", etc.
   if (/^\d+$/.test(keyword)) {
-    const versionPattern = new RegExp(`\\b${keyword}(\\.\\d+)?\\b`);
-    return versionPattern.test(lowerFolder);
+    return lowerFolder.match(/^proton[\s_-]*(\d+)(?:[.\s_-]|$)/)?.[1] === keyword;
   }
 
-  return false;
+  return lowerFolder.includes(keyword);
 }
 
 /**
@@ -121,8 +134,8 @@ function folderMatchesKeyword(folderName: string, keyword: string): boolean {
  * Resolution strategy (no hardcoded mappings):
  * 1. Custom tools: Check compatibilitytools.d/{name} - custom Proton builds
  *    use their config name as the folder name directly.
- * 2. Exact match: Check steamapps/common/{name} - in case config name matches.
- * 3. Fuzzy match: Scan steamapps/common/Proton* folders and match by keyword.
+ * 2. Exact match: Check every library's steamapps/common/{name}.
+ * 3. Fuzzy match: Scan each library's steamapps/common/Proton* folders.
  *    Extract the keyword after "proton_" and find a folder containing it.
  *
  * This approach is self-maintaining and doesn't require updates when Valve
@@ -131,32 +144,37 @@ function folderMatchesKeyword(folderName: string, keyword: string): boolean {
 export async function resolveProtonPath(
   steamPath: string,
   protonName: string,
+  libraryPaths: readonly string[] = [],
 ): Promise<string | undefined> {
   // 1. Check custom compatibility tools directory (GE-Proton, etc.)
   // Custom tools use their config name as the folder name directly
   const customToolPath = path.join(steamPath, "compatibilitytools.d", protonName);
-  if (await pathExists(customToolPath)) {
+  if (await isProtonInstallation(customToolPath)) {
     return customToolPath;
   }
 
-  const commonPath = path.join(steamPath, "steamapps", "common");
-
-  // 2. Check for exact match in steamapps/common
-  const exactPath = path.join(commonPath, protonName);
-  if (await pathExists(exactPath)) {
-    return exactPath;
+  const commonPaths = protonCommonPaths(steamPath, libraryPaths);
+  for (const commonPath of commonPaths) {
+    const exactPath = path.join(commonPath, protonName);
+    if (await isProtonInstallation(exactPath)) {
+      return exactPath;
+    }
   }
 
-  // 3. Fuzzy match: scan Proton* folders and match by keyword
   const keyword = extractProtonKeyword(protonName);
-  if (keyword) {
+  if (!keyword) {
+    return undefined;
+  }
+
+  for (const commonPath of commonPaths) {
     try {
       const entries = await fs.readdirAsync(commonPath);
       const protonDirs = entries.filter((e) => e.toLowerCase().startsWith("proton"));
 
       for (const dir of protonDirs) {
-        if (folderMatchesKeyword(dir, keyword)) {
-          return path.join(commonPath, dir);
+        const protonPath = path.join(commonPath, dir);
+        if (folderMatchesKeyword(dir, keyword) && (await isProtonInstallation(protonPath))) {
+          return protonPath;
         }
       }
     } catch (err: any) {
@@ -172,22 +190,27 @@ export async function resolveProtonPath(
 /**
  * Find the latest installed Proton version (fallback)
  */
-export async function findLatestProton(steamPath: string): Promise<string | undefined> {
-  const commonPath = path.join(steamPath, "steamapps", "common");
-  try {
-    const entries = await fs.readdirAsync(commonPath);
-    const protonDirs = entries
-      .filter((e) => e.toLowerCase().startsWith("proton"))
-      .sort()
-      .reverse();
-
-    if (protonDirs.length > 0) {
-      return path.join(commonPath, protonDirs[0]);
+export async function findLatestProton(
+  steamPath: string,
+  libraryPaths: readonly string[] = [],
+): Promise<string | undefined> {
+  const candidates: string[] = [];
+  for (const commonPath of protonCommonPaths(steamPath, libraryPaths)) {
+    try {
+      const entries = await fs.readdirAsync(commonPath);
+      for (const entry of entries) {
+        const protonPath = path.join(commonPath, entry);
+        if (entry.toLowerCase().startsWith("proton") && (await isProtonInstallation(protonPath))) {
+          candidates.push(protonPath);
+        }
+      }
+    } catch (err: any) {
+      log("debug", "Could not scan for Proton versions", { error: err?.message });
     }
-  } catch (err: any) {
-    log("debug", "Could not scan for Proton versions", { error: err?.message });
   }
-  return undefined;
+  return candidates.sort((left, right) =>
+    path.basename(right).localeCompare(path.basename(left), "en", { numeric: true }),
+  )[0];
 }
 
 /**
@@ -197,24 +220,32 @@ export async function getProtonInfo(
   steamPath: string,
   steamAppsPath: string,
   appId: string,
+  libraryPaths: readonly string[] = [],
+  oslist?: string,
 ): Promise<IProtonInfo> {
-  const usesProton = await detectProtonUsage(steamAppsPath, appId);
+  const existingPrefix = await detectProtonUsage(steamAppsPath, appId);
+  const usesProton =
+    existingPrefix ||
+    (typeof oslist === "string" &&
+      oslist.trim().length > 0 &&
+      !oslist.split(/[,\s]+/).some((os) => os.toLowerCase() === "linux"));
   if (!usesProton) {
     return { usesProton: false };
   }
 
   const compatDataPath = getCompatDataPath(steamAppsPath, appId);
+  const searchPaths = [...libraryPaths, path.dirname(steamAppsPath)];
 
   // Try to get configured Proton, fall back to latest
   const protonName = await getConfiguredProtonName(steamPath, appId);
   let protonPath: string | undefined;
 
   if (protonName) {
-    protonPath = await resolveProtonPath(steamPath, protonName);
+    protonPath = await resolveProtonPath(steamPath, protonName, searchPaths);
   }
 
   if (!protonPath) {
-    protonPath = await findLatestProton(steamPath);
+    protonPath = await findLatestProton(steamPath, searchPaths);
   }
 
   return { usesProton: true, compatDataPath, protonPath };
@@ -235,6 +266,7 @@ export function buildProtonEnvironment(
   compatDataPath: string,
   steamPath: string,
   existingEnv?: Record<string, string>,
+  appId?: string,
 ): Record<string, string> {
   const preloads = [
     path.join(steamPath, "ubuntu12_32", "gameoverlayrenderer.so"),
@@ -242,6 +274,7 @@ export function buildProtonEnvironment(
   ];
   return {
     ...existingEnv,
+    ...(appId ? { SteamAppId: appId, SteamGameId: appId } : {}),
     STEAM_COMPAT_DATA_PATH: compatDataPath,
     STEAM_COMPAT_CLIENT_INSTALL_PATH: steamPath,
     WINEPREFIX: getWinePrefixPath(compatDataPath),

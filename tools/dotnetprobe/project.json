@@ -10,28 +10,18 @@
       },
       "cache": true,
       "inputs": [
+        "{projectRoot}/build.mjs",
         "{projectRoot}/dotnetprobe.csproj",
         "{projectRoot}/Program.cs",
         "{projectRoot}/nuget.config",
-        { "runtime": "dotnet --version" },
-        { "runtime": "node -p process.platform" }
+        {
+          "runtime": "dotnet --version"
+        },
+        {
+          "runtime": "node -p process.platform"
+        }
       ],
       "outputs": ["{projectRoot}/dist"]
-    },
-    "build:win": {
-      "executor": "nx:run-commands",
-      "options": {
-        "command": "dotnet publish -r win-x64 -o temp",
-        "cwd": "{projectRoot}"
-      },
-      "cache": true,
-      "inputs": [
-        "{projectRoot}/dotnetprobe.csproj",
-        "{projectRoot}/Program.cs",
-        "{projectRoot}/nuget.config",
-        { "runtime": "dotnet --version" }
-      ],
-      "outputs": ["{projectRoot}/temp/dotnetprobe.exe"]
     }
   }
 }

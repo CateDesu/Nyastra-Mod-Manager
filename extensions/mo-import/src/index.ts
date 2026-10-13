@@ -24,7 +24,7 @@ const isGameSupported = (context: types.IExtensionContext): boolean => {
 };
 
 function init(context: types.IExtensionContext): boolean {
-  if (process.platform !== "win32") {
+  {
     // not going to work on other platforms because some of the path resolution
     // assumes windows.
     return false;

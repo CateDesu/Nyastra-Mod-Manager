@@ -18,9 +18,13 @@ function chromeAllowScheme(scheme: string): PromiseBB<boolean> {
       fs.readFileAsync(statePath, { encoding: "utf8" }).then((content: string) => {
         let state = JSON.parse(deBOM(content));
         log("info", "protocol handler", state.protocol_handler);
-        const currentState = getSafe(state, ["protocol_handler", "excluded_schemes", scheme], true);
+        const currentState = getSafe<boolean>(
+          state,
+          ["protocol_handler", "excluded_schemes", scheme],
+          false,
+        );
         log("info", "current state", currentState);
-        if (currentState) {
+        if (currentState === true) {
           state = setSafe(state, ["protocol_handler", "excluded_schemes", scheme], false);
           changed = true;
           return fs

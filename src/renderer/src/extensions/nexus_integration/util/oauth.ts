@@ -1,14 +1,17 @@
 import crypto from "crypto";
+import { readFileSync } from "node:fs";
 import * as http from "node:http";
 import * as https from "node:https";
 import type { AddressInfo } from "node:net";
+import * as path from "node:path";
 import * as querystring from "node:querystring";
 import * as url from "node:url";
 
-import { unknownToError } from "@vortex/shared";
+import { BRAND_NAME, SERVICE_NAME, PROGRAM_NAME, unknownToError } from "@vortex/shared";
 import { v1 as uuidv1 } from "uuid";
 
 import { ArgumentInvalid } from "../../../util/CustomErrors";
+import getVortexPath from "../../../util/getVortexPath";
 import { log } from "../../../util/log";
 import {
   OAUTH_CLIENT_ID,
@@ -17,7 +20,6 @@ import {
   OAUTH_URL,
   getOAuthRedirectUrl,
 } from "../constants";
-import NEXUSMODS_LOGO from "./nexusmodslogo";
 
 type TokenType = "Bearer";
 
@@ -47,6 +49,9 @@ interface IOAuthServerSettings {
 
 function makeResultPage(success: boolean) {
   const html = [];
+  const logo = readFileSync(path.join(getVortexPath("assets"), "images", "nyastra.png")).toString(
+    "base64",
+  );
 
   html.push(
     `<!DOCTYPE html>
@@ -64,23 +69,24 @@ function makeResultPage(success: boolean) {
     
     <div style="text-align: center; ">
     
-    <img width="200px" src="data:image/png;base64,${NEXUSMODS_LOGO}" />`,
+    <img alt="" width="64" height="64" src="data:image/png;base64,${logo}" />
+    <h1 style="color: #D98F40;">${BRAND_NAME}</h1>`,
   );
 
   if (success) {
     html.push(`
-    <h1>Vortex log in successful!</h1>
+    <h1>${PROGRAM_NAME} log in successful!</h1>
   `);
   } else {
     html.push(`
-    <h1>Vortex was unable to log in</h1>
-    <p style="font-size: 1.2em;">Please check Vortex for more information</a></p>
+    <h1>${PROGRAM_NAME} was unable to log in</h1>
+    <p style="font-size: 1.2em;">Please check ${PROGRAM_NAME} for more information</p>
   `);
   }
 
   html.push(`
 
-  <p style="font-size: 1.2em;">Taking you to the <a href="http://www.nexusmods.com/" style="color: #D98F40;">Nexus Mods homepage</a></p>
+  <p style="font-size: 1.2em;">Taking you to the <a href="http://www.nexusmods.com/" style="color: #D98F40;">${SERVICE_NAME} homepage</a></p>
     </div>
     </body>
     

@@ -1,0 +1,14 @@
+Linux Fluffy adaptation recipes
+
+These recipes are part of this GPL-3.0 Vortex derivative. The program's
+resources/app.asar.unpacked/LICENSE.md contains the license text.
+
+Supported third-party extensions by ChemBoy1:
+Resident Evil 4 (2023) Vortex Extension 0.4.1
+https://www.nexusmods.com/site/mods/913
+Resident Evil Requiem Vortex Extension 0.1.3
+https://www.nexusmods.com/site/mods/1653
+
+The release contains source transformations and a runtime helper only.
+Downloaded extension source, artwork and other extension assets are not
+redistributed. Obtain the original extensions from their authors.

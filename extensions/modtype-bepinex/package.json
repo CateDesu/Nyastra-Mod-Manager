@@ -27,7 +27,7 @@
     "react": "catalog:",
     "react-i18next": "catalog:",
     "semver": "catalog:",
-    "vortex-parse-ini": "catalog:"
+    "vortex-parse-ini": "workspace:*"
   },
   "dependencies": {
     "@iarna/toml": "catalog:"

@@ -5,14 +5,13 @@
 import { QualifiedPath } from "@vortex/shared/filesystem";
 
 import { LinuxPathProvider } from "./paths.linux";
-import { WindowsPathProvider } from "./paths.windows";
 
 /**
  * Returns the path provider for the current platform using the real
  * production implementations.
  */
-export function platformProvider(): LinuxPathProvider | WindowsPathProvider {
-  return process.platform === "win32" ? new WindowsPathProvider() : new LinuxPathProvider();
+export function platformProvider(): LinuxPathProvider {
+  return new LinuxPathProvider();
 }
 
 /**

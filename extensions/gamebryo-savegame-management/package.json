@@ -35,7 +35,7 @@
     "redux-thunk": "catalog:",
     "turbowalk": "catalog:",
     "@nexusmods/vortex-api": "workspace:*",
-    "vortex-parse-ini": "catalog:"
+    "vortex-parse-ini": "workspace:*"
   },
   "dependencies": {
     "lz4js": "^0.2.0"

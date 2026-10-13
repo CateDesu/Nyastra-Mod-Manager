@@ -29,9 +29,9 @@
  * @module Linux protocol registration helpers
  */
 import { spawnSync } from "child_process";
-import * as os from "os";
 import * as path from "path";
 
+import { xdgDataHome } from "../../linux/xdg";
 import { log } from "../../log";
 
 interface ICommandResult {
@@ -45,12 +45,7 @@ interface ICommandResult {
  * Resolve the writable Linux applications directory used for local desktop entries.
  */
 export function applicationsDirectory(): string {
-  const xdgDataHome = process.env.XDG_DATA_HOME;
-  const dataHome =
-    xdgDataHome != null && xdgDataHome.length > 0
-      ? xdgDataHome
-      : path.join(os.homedir(), ".local", "share");
-  return path.join(dataHome, "applications");
+  return path.join(xdgDataHome(), "applications");
 }
 
 /**
@@ -62,6 +57,13 @@ export function refreshDesktopDatabase(applicationsDir: string): void {
   const args = [applicationsDir];
   const result = runCommand(command, args);
   logCommandFailure(command, args, result);
+  if (/(^|:)KDE(:|$)/i.test(process.env.XDG_CURRENT_DESKTOP ?? "")) {
+    const kde = runCommand("kbuildsycoca6", ["--noincremental"]);
+    if (kde.error?.code === "ENOENT") {
+      const legacy = runCommand("kbuildsycoca5", ["--noincremental"]);
+      logCommandFailure("kbuildsycoca5", ["--noincremental"], legacy);
+    } else logCommandFailure("kbuildsycoca6", ["--noincremental"], kde);
+  }
 }
 
 /**
@@ -104,7 +106,7 @@ export function getDefaultUrlSchemeHandler(protocol: string): string | undefined
  * In Flatpak, uses flatpak-spawn to modify the host's settings.
  * ref: https://github.com/Nexus-Mods/NexusMods.App/blob/main/src/NexusMods.Backend/RuntimeDependency/XDGSettingsDependency.cs#L22-L34
  */
-export function setDefaultUrlSchemeHandler(protocol: string, desktopId: string): void {
+export function setDefaultUrlSchemeHandler(protocol: string, desktopId: string): boolean {
   const args = isFlatpak()
     ? withFlatpakHostArgs([
         "xdg-settings",
@@ -147,12 +149,14 @@ export function setDefaultUrlSchemeHandler(protocol: string, desktopId: string):
       stdout: result.stdout.trim(),
     });
   }
+  return result.error === undefined && result.status === 0;
 }
 
 function runCommand(command: string, args: string[]): ICommandResult {
   const result = spawnSync(command, args, {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
+    timeout: 15000,
   });
 
   return {

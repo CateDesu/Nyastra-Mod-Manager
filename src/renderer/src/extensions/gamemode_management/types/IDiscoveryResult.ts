@@ -17,6 +17,7 @@ export interface IDiscoveryResult {
   path?: string;
   pathSetManually?: boolean;
   store?: string;
+  protonPrefix?: string;
   tools?: {
     [id: string]: IDiscoveredTool;
   };

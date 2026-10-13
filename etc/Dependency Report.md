@@ -16,8 +16,7 @@ This is a list of all modules leaked by Vortex to extensions. Any module listed 
 | @mdi/js | 7.4.47 |
 | @msgpack/msgpack | 2.8.0 |
 | @nexusmods/file-dependency-resolver | link:../../packages/file-dependency-resolver |
-| @nexusmods/fomod-installer-ipc | 0.13.3 |
-| @nexusmods/fomod-installer-native | 0.13.3 |
+| @nexusmods/fomod-installer-native | 0.13.4 |
 | @nexusmods/nexus-api | 1.7.3 |
 | @nosferatu500/react-sortable-tree | 4.4.0 |
 | @nosferatu500/theme-file-explorer | 3.0.21 |
@@ -29,6 +28,7 @@ This is a list of all modules leaked by Vortex to extensions. Any module listed 
 | @opentelemetry/sdk-trace-base | 2.8.0 |
 | @opentelemetry/semantic-conventions | 1.40.0 |
 | @tailwindcss/cli | 4.3.2 |
+| @tanstack/react-virtual | 3.13.23 |
 | @types/bluebird | 3.5.20 |
 | @types/uuid | 3.4.13 |
 | @vortex/nexus-api-v3 | link:../../packages/nexus-api-v3 |
@@ -53,7 +53,6 @@ This is a list of all modules leaked by Vortex to extensions. Any module listed 
 | drivelist | 10.0.2 |
 | electron-context-menu | 3.6.1 |
 | electron-redux | 1.4.9-sync |
-| electron-updater | 6.8.9 |
 | encoding-down | 6.3.0 |
 | exe-version | link:../../packages/exe-version |
 | feedparser | 2.3.0 |
@@ -69,7 +68,6 @@ This is a list of all modules leaked by Vortex to extensions. Any module listed 
 | immutability-helper | 3.1.1 |
 | ini | 6.0.0 |
 | interweave | 12.9.0 |
-| is-admin | 3.0.0 |
 | js-yaml | 4.1.1 |
 | json-socket | 0.3.0 |
 | jsonwebtoken | 9.0.3 |
@@ -89,7 +87,6 @@ This is a list of all modules leaked by Vortex to extensions. Any module listed 
 | p-limit | 7.3.0 |
 | p-queue | 9.3.0 |
 | packery | 2.1.2 |
-| permissions | 2.1.0 |
 | prop-types | 15.8.1 |
 | ps-list | 7.2.0 |
 | re-reselect | 4.0.1 |
@@ -128,9 +125,7 @@ This is a list of all modules leaked by Vortex to extensions. Any module listed 
 | turbowalk | 3.1.1 |
 | universal-analytics | 0.4.23 |
 | uuid | 3.4.0 |
-| vortex-parse-ini | 0.4.0 |
-| wholocks | 1.1.0 |
-| winapi-bindings | 2.7.3 |
+| vortex-parse-ini | link:../../packages/parse-ini |
 | winston | 2.4.7 |
 | write-file-atomic | 3.0.3 |
 | ws | 7.5.10 |

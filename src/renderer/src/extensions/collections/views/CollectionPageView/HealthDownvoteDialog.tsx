@@ -104,13 +104,13 @@ function HealthDownvoteDialog(props: IHealthDownvoteDialogProps) {
           <li>Read the collection instructions and check if you've missed any steps.</li>
 
           <li>
-            <a href={commentLink}>Check comments on Nexus Mods</a> for advice and to reach out to
-            the collection curator.
+            <a href={commentLink}>{t("Check comments on Nexus Mods")}</a> for advice and to reach
+            out to the collection curator.
           </li>
 
           <li>
-            <a href={bugLink}>View bug reports on Nexus Mods</a> or report a new bug to help the
-            curator fix the issue.
+            <a href={bugLink}>{t("View bug reports on Nexus Mods")}</a> or report a new bug to help
+            the curator fix the issue.
           </li>
         </ol>
 

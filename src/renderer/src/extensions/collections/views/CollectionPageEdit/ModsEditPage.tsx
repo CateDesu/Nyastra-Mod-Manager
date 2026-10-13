@@ -1,6 +1,6 @@
 import * as path from "path";
 
-import { getErrorCode, unknownToError } from "@vortex/shared";
+import { getErrorCode, SERVICE_NAME, unknownToError } from "@vortex/shared";
 import type { TFunction } from "i18next";
 import * as _ from "lodash";
 import * as React from "react";
@@ -86,7 +86,7 @@ interface IModsPageState {
 type IProps = IModsPageProps;
 
 const SOURCES = {
-  nexus: "Nexus Mods",
+  nexus: SERVICE_NAME,
   direct: "Direct download",
   browse: "Browse a website",
   bundle: "Bundle with collection",

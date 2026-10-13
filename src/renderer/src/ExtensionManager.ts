@@ -97,7 +97,6 @@ import {
   TimeoutError,
   UserCanceled,
 } from "./util/CustomErrors";
-import { runElevated } from "./util/elevated";
 import { disableErrorReport, isOutdated, recordErrorSpan } from "./util/errorHandling";
 import * as fsVortex from "./util/fs";
 import getVortexPath from "./util/getVortexPath";
@@ -106,7 +105,6 @@ import { TString } from "./util/i18n";
 import lazyRequire from "./util/lazyRequire";
 import { showError } from "./util/message";
 import { deregisterProtocolHandler, registerProtocolHandler } from "./util/protocolRegistration";
-import runElevatedCustomTool from "./util/runElevatedCustomTool";
 import { activeGameId } from "./util/selectors";
 import { getSafe } from "./util/storeHelper";
 import {
@@ -1565,7 +1563,7 @@ class ExtensionManager {
   }
 
   public getProtocolHandler(protocol: string) {
-    return this.mProtocolHandlers[protocol] || null;
+    return this.mProtocolHandlers[protocol.toLowerCase()] || null;
   }
 
   public get numOnce() {
@@ -1986,12 +1984,13 @@ class ExtensionManager {
     callback: (url: string, install: boolean) => void,
   ): Promise<boolean> => {
     log("info", "register protocol", { protocol });
+    const scheme = protocol.toLowerCase();
     const haveToRegister = await registerProtocolHandler({
-      protocol,
+      protocol: scheme,
       setAsDefault: def,
       userDataPath: this.commandLineUserData(),
     });
-    this.mProtocolHandlers[protocol] = callback;
+    this.mProtocolHandlers[scheme] = callback;
     return haveToRegister;
   };
 
@@ -2009,7 +2008,7 @@ class ExtensionManager {
 
   private deregisterProtocol = async (protocol: string): Promise<void> => {
     log("info", "deregister protocol");
-    await deregisterProtocolHandler(protocol, this.commandLineUserData());
+    await deregisterProtocolHandler(protocol.toLowerCase(), this.commandLineUserData());
   };
 
   private lookupModReference = (
@@ -2532,13 +2531,6 @@ class ExtensionManager {
             }),
         )
         .catch(ProcessCanceled, () => null)
-        .catch({ code: "EACCES" }, (err) => {
-          // Elevated execution is only supported on Windows
-          if (process.platform !== "win32") {
-            return PromiseBB.reject(err);
-          }
-          return this.runElevated(executable, cwd, args, env, options.onSpawned);
-        })
         .catch({ code: "ECANCELED" }, () => PromiseBB.reject(new UserCanceled()))
         .catch({ systemCode: 1223 }, () => PromiseBB.reject(new UserCanceled()))
         // Is errno still used ? looks like shellEx call returns systemCode instead
@@ -2556,49 +2548,6 @@ class ExtensionManager {
         })
     );
   };
-
-  private runElevated(
-    executable: string,
-    cwd: string,
-    args: string[],
-    env: { [key: string]: string },
-    onSpawned: (pid?: number) => void,
-  ) {
-    const ipcPath = shortid();
-    let tmpFilePath: string;
-    return new PromiseBB((resolve, reject) => {
-      this.startIPC(ipcPath, (err) => {
-        if (err !== null) {
-          reject(err);
-        } else {
-          resolve();
-        }
-      });
-
-      log("debug", "running elevated", { executable, cwd, args });
-      runElevated(ipcPath, runElevatedCustomTool, {
-        toolPath: executable,
-        toolCWD: cwd,
-        parameters: args,
-        environment: env,
-      })
-        .then((tmpPath) => {
-          tmpFilePath = tmpPath;
-          if (onSpawned !== undefined) {
-            onSpawned();
-          }
-        })
-        .catch((err) => reject(err));
-    }).finally(() => {
-      if (tmpFilePath !== undefined) {
-        try {
-          fs.unlinkSync(tmpFilePath);
-        } catch (err) {
-          // nop
-        }
-      }
-    });
-  }
 
   private emitAndAwait = ((eventName: string, ...args: unknown[]): Promise<unknown> => {
     const pending: Promise<void>[] = [];
@@ -2769,40 +2718,6 @@ class ExtensionManager {
     }
     this.mForceDBReconnect = true;
   };
-
-  private startIPC(ipcPath: string, onFinished: (err: Error) => void) {
-    let connected: boolean = false;
-
-    const finish = (err: Error) => {
-      server.close();
-      onFinished(err);
-    };
-
-    const server = net
-      .createServer((connRaw) => {
-        const conn = new JsonSocket(connRaw);
-
-        log("debug", "ipc client connected");
-        connected = true;
-
-        conn
-          .on("message", (data) => {
-            const { message, payload } = data;
-            if (message === "log") {
-              // tslint:disable-next-line:no-shadowed-variable
-              const { level, message, meta } = payload;
-              log(level, message, meta);
-            } else if (message === "finished") {
-              finish(null);
-            }
-          })
-          .on("error", (err) => {
-            log("error", "elevated code reported error", err);
-            finish(err);
-          });
-      })
-      .listen(path.join("\\\\?\\pipe", ipcPath));
-  }
 
   private idify(name: string, pathName: string) {
     const transform = (input: string) =>
@@ -3040,8 +2955,6 @@ class ExtensionManager {
       health_check: () => require("./extensions/health_check/index.ts"),
       history_management: () => require("./extensions/history_management/index.ts"),
       ini_prep: () => require("./extensions/ini_prep/index.ts"),
-      installer_dotnet: () => require("./extensions/installer_dotnet/index.ts"),
-      installer_fomod_ipc: () => require("./extensions/installer_fomod_ipc/index.ts"),
       installer_fomod_native: () => require("./extensions/installer_fomod_native/index.ts"),
       installer_fomod_shared: () => require("./extensions/installer_fomod_shared/index.ts"),
       installer_nested_fomod: () => require("./extensions/installer_nested_fomod/index.ts"),
@@ -3073,7 +2986,6 @@ class ExtensionManager {
       sticky_mods: () => require("./extensions/sticky_mods/index.ts"),
       support_bundle: () => require("./extensions/support_bundle/index.ts"),
       symlink_activator: () => require("./extensions/symlink_activator/index.ts"),
-      symlink_activator_elevate: () => require("./extensions/symlink_activator_elevate/index.ts"),
       test_runner: () => require("./extensions/test_runner/index.ts"),
       tool_variables_base: () => require("./extensions/tool_variables_base/index.ts"),
       updater: () => require("./extensions/updater/index.ts"),

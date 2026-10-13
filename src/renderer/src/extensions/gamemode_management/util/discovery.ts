@@ -5,7 +5,6 @@ import { getErrorCode, getErrorMessageOrDefault, unknownToError } from "@vortex/
 import Bluebird from "bluebird";
 import * as fsExtra from "fs-extra";
 import turbowalk from "turbowalk";
-import * as winapi from "winapi-bindings";
 
 import { log } from "@/logging";
 
@@ -22,6 +21,7 @@ import type { Normalize } from "../../../util/getNormalizeFunc";
 import getNormalizeFunc from "../../../util/getNormalizeFunc";
 import getVortexPath from "../../../util/getVortexPath";
 import StarterInfo from "../../../util/StarterInfo";
+import type { ISteamEntry } from "../../../util/Steam";
 import { getSafe } from "../../../util/storeHelper";
 import * as storeLookup from "../../../util/storeLookup";
 import { truthy } from "../../../util/util";
@@ -228,6 +228,17 @@ async function handleDiscoveredGame(
     store,
   };
 
+  const steamEntry =
+    store === "steam"
+      ? (getGameStoresSafe()
+          .find((candidate) => candidate.id === "steam")
+          ?.snapshot()
+          .entries.find((candidate) => candidate.gamePath === resolvedPath) as
+          | ISteamEntry
+          | undefined)
+      : undefined;
+  if (steamEntry?.usesProton && steamEntry.compatDataPath)
+    discovery.protonPrefix = path.join(steamEntry.compatDataPath, "pfx");
   onDiscoveredGame(game.id, discovery);
 
   try {
@@ -728,13 +739,9 @@ export async function suggestStagingPath(api: IExtensionApi, gameId: string): Pr
 
   let suggestion: string;
 
-  if (statModPath.dev === statUserData.dev || process.platform !== "win32") {
+  {
     // main mod folder is on same drive as userdata, use a subdirectory below that
     suggestion = path.join("{USERDATA}", "{game}", "mods");
-  } else {
-    // different drives, suggest path on same drive
-    const volume = winapi.GetVolumePathName(modPaths[""]);
-    suggestion = path.join(volume, state.settings.mods.suggestInstallPathDirectory, "{game}");
   }
 
   return suggestion;

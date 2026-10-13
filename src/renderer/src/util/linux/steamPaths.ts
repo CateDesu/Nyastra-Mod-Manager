@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 
 import getVortexPath from "../getVortexPath";
+import { xdgDataHome } from "./xdg";
 
 /**
  * Default Steam installation paths for Linux systems
@@ -9,14 +10,21 @@ import getVortexPath from "../getVortexPath";
  */
 export function getLinuxSteamPaths(): string[] {
   const home = getVortexPath("home");
-  return [
-    path.join(home, ".local", "share", "Steam"), // XDG standard (native)
+  const candidates: string[] = [];
+  try {
+    candidates.push(fs.realpathSync(path.join(home, ".steam", "root")));
+  } catch {
+    // Steam has not created its root link.
+  }
+  candidates.push(
+    path.join(xdgDataHome(), "Steam"),
     path.join(home, ".steam", "debian-installation"), // Debian/Ubuntu symlink
     path.join(home, ".var", "app", "com.valvesoftware.Steam", "data", "Steam"), // Flatpak
     path.join(home, ".var", "app", "com.valvesoftware.Steam", ".local", "share", "Steam"),
     path.join(home, "snap", "steam", "common", ".local", "share", "Steam"), // Snap
     path.join(home, ".steam", "steam"), // Legacy
-  ];
+  );
+  return [...new Set(candidates)];
 }
 
 /**
@@ -25,8 +33,7 @@ export function getLinuxSteamPaths(): string[] {
 export function isValidSteamPath(steamPath: string): boolean {
   const libraryFoldersPath = path.join(steamPath, "config", "libraryfolders.vdf");
   try {
-    fs.statSync(libraryFoldersPath);
-    return true;
+    return fs.statSync(libraryFoldersPath).isFile();
   } catch {
     return false;
   }
@@ -42,4 +49,16 @@ export function findLinuxSteamPath(): string | undefined {
     }
   }
   return undefined;
+}
+
+export function findAllLinuxSteamPaths(): string[] {
+  const roots = new Set<string>();
+  for (const candidate of getLinuxSteamPaths()) {
+    try {
+      if (isValidSteamPath(candidate)) roots.add(fs.realpathSync(candidate));
+    } catch {
+      /* The installation disappeared during discovery. */
+    }
+  }
+  return [...roots];
 }

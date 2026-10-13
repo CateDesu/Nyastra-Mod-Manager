@@ -52,7 +52,7 @@ const testPaths: VortexPaths = {
   temp: p("temp"),
   home: p("home"),
   documents: p("documents"),
-  exe: p(process.platform === "win32" ? "vortex.exe" : "vortex"),
+  exe: p("nyastra-mod-manager"),
   desktop: p("desktop"),
 };
 

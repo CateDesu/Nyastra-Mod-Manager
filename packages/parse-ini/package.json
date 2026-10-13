@@ -1,0 +1,35 @@
+{
+  "$schema": "https://www.schemastore.org/package.json",
+  "name": "vortex-parse-ini",
+  "version": "0.4.0",
+  "description": "Game INI parsing and editing on Linux",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "pnpm tsdown",
+    "typecheck": "pnpm tsc -p ./tsconfig.json",
+    "test": "pnpm vitest run",
+    "lint:strict": "pnpm exec node ../../scripts/strict-lint.mjs"
+  },
+  "exports": {
+    ".": {
+      "development": "./src/index.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.cts",
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "import": "./dist/index.mjs",
+        "require": "./dist/index.cjs"
+      },
+      "./package.json": "./package.json"
+    }
+  },
+  "license": "GPL-3.0-or-later"
+}

@@ -13,6 +13,7 @@ import type { IState } from "../../types/IState";
 import { getGame, UserCanceled } from "../../util/api";
 import * as fs from "../../util/fs";
 import type { Normalize } from "../../util/getNormalizeFunc";
+import { resolvePathCase } from "../../util/resolvePathCase";
 import { activeGameId } from "../../util/selectors";
 import { truthy } from "../../util/util";
 import type { IDeploymentFailure } from "./actions/session";
@@ -62,8 +63,7 @@ async function mapWithConcurrency<T, R>(
  */
 abstract class LinkingActivator implements IDeploymentMethod {
   public static OLD_TAG_NAME = "__delete_if_empty";
-  public static NEW_TAG_NAME =
-    process.platform === "win32" ? "__folder_managed_by_vortex" : ".__folder_managed_by_vortex";
+  public static NEW_TAG_NAME = ".__folder_managed_by_vortex";
 
   private static isTagName(name: string) {
     return (
@@ -84,6 +84,8 @@ abstract class LinkingActivator implements IDeploymentMethod {
   private mQueue: Promise<void> = Promise.resolve();
   private mContext: IDeploymentContext;
   private mDirCache: Set<string>;
+  private mCaseCache: Map<string, Promise<string[]>> | undefined;
+  private mCaseInsensitive = false;
 
   constructor(
     id: string,
@@ -172,6 +174,8 @@ abstract class LinkingActivator implements IDeploymentMethod {
     let contentChanged: string[];
 
     this.mDirCache = new Set<string>();
+    this.mCaseCache = new Map();
+    this.mCaseInsensitive = this.isWindowsGame(gameId);
 
     // unlink all files that were removed or changed
     ({ added, removed, sourceChanged, contentChanged } = this.diffActivation(
@@ -328,6 +332,7 @@ abstract class LinkingActivator implements IDeploymentMethod {
         })
         .finally(() => {
           this.mDirCache = undefined;
+          this.mCaseCache = undefined;
         })
     );
   }
@@ -477,15 +482,18 @@ abstract class LinkingActivator implements IDeploymentMethod {
     activation: IDeployedFile[],
   ): Promise<IFileChange[]> {
     const changes: IFileChange[] = [];
+    const cache = new Map<string, Promise<string[]>>();
+    const insensitive = this.isWindowsGame(gameId);
 
     return mapWithConcurrency(
       activation ?? [],
-      (fileEntry) => {
-        const fileDataPath = (
-          truthy(fileEntry.target)
-            ? [dataPath, fileEntry.target, fileEntry.relPath]
-            : [dataPath, fileEntry.relPath]
+      async (fileEntry) => {
+        const relative = (
+          truthy(fileEntry.target) ? [fileEntry.target, fileEntry.relPath] : [fileEntry.relPath]
         ).join(path.sep);
+        const fileDataPath = insensitive
+          ? await resolvePathCase(dataPath, relative, cache)
+          : path.join(dataPath, relative);
         const fileModPath = [installPath, fileEntry.source, fileEntry.relPath].join(path.sep);
         let sourceDeleted: boolean = false;
         let destDeleted: boolean = false;
@@ -717,7 +725,20 @@ abstract class LinkingActivator implements IDeploymentMethod {
     return keys.filter((key) => !failed.has(key));
   }
 
-  private removeDeployedFile(
+  private isWindowsGame(gameId: string): boolean {
+    if (process.platform !== "linux") return false;
+    const game = getGame(gameId);
+    if (game?.executable) {
+      try {
+        return /\.(exe|bat|cmd)$/i.test(game.executable());
+      } catch {
+        return false;
+      }
+    }
+    return !!this.mNormalize && this.mNormalize("A") === this.mNormalize("a");
+  }
+
+  private async removeDeployedFile(
     installationPath: string,
     dataPath: string,
     key: string,
@@ -726,11 +747,13 @@ abstract class LinkingActivator implements IDeploymentMethod {
     if (this.mContext.previousDeployment[key] === undefined) {
       return Promise.reject(new Error(`failed to remove "${key}"`));
     }
-    const outputPath = path.join(
-      dataPath,
+    const relative = path.join(
       this.mContext.previousDeployment[key].target || "",
       this.mContext.previousDeployment[key].relPath,
     );
+    const outputPath = this.mCaseInsensitive
+      ? await resolvePathCase(dataPath, relative, this.mCaseCache)
+      : path.join(dataPath, relative);
     const sourcePath = path.join(
       installationPath,
       this.mContext.previousDeployment[key].source,
@@ -769,7 +792,7 @@ abstract class LinkingActivator implements IDeploymentMethod {
       });
   }
 
-  private deployFile(
+  private async deployFile(
     key: string,
     installPathStr: string,
     dataPath: string,
@@ -781,13 +804,15 @@ abstract class LinkingActivator implements IDeploymentMethod {
       this.mContext.newDeployment[key].source,
       this.mContext.newDeployment[key].relPath,
     ].join(path.sep);
-    const fullOutputPath = [
-      dataPath,
+    const relative = [
       this.mContext.newDeployment[key].target || null,
       this.mContext.newDeployment[key].relPath,
     ]
       .filter((i) => i !== null)
       .join(path.sep);
+    const fullOutputPath = this.mCaseInsensitive
+      ? await resolvePathCase(dataPath, relative, this.mCaseCache)
+      : path.join(dataPath, relative);
 
     const backupProm: Promise<void> = replace
       ? Promise.resolve()

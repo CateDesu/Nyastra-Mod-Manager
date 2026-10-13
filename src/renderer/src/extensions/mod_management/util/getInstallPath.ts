@@ -26,15 +26,7 @@ function getInstallPath(pattern: string, gameId: string): string {
   }
   let result = resolveInstallPath(getInstallPathPattern(pattern), gameId);
 
-  // on windows a path of the form \foo\bar or /foo/bar will be identified as absolute
-  // even though it's not, it just isn't. It is relative to the drive of the current working
-  // directory - which makes no fing sense since windows is supposed to have separate cwds
-  // per drive and ... uuuuugh windows...
-  if (
-    !path.isAbsolute(result) ||
-    (process.platform === "win32" && result[0] === "\\" && result[1] !== "\\") ||
-    (result[0] === "/" && result[1] !== "/")
-  ) {
+  if (!path.isAbsolute(result)) {
     result = path.resolve(getVortexPath("userData"), result);
   }
 

@@ -6,14 +6,12 @@ import { describe, it, expect } from "vitest";
 
 import { extractIcon, extractIconToFile } from "./index";
 
-const describeOnWindows = process.platform === "win32" ? describe : describe.skip;
-
 const TEST_DATA_DIR = path.resolve(import.meta.dirname, "../test-data");
 const REFERENCE_DIR = path.join(TEST_DATA_DIR, "reference");
 
 const DOTNET_PROBE = path.resolve(
   import.meta.dirname,
-  "../../../tools/dotnetprobe/temp/dotnetprobe.exe",
+  "../../../packages/pe-resources/test-data/probe.exe",
 );
 
 // PNG signature bytes
@@ -75,89 +73,4 @@ describe("extractIconToFile (cross-platform)", () => {
 
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
-});
-
-// --- Windows-only tests (use system executables) ---
-
-describeOnWindows("extractIcon (Windows)", () => {
-  it("extracts icon from notepad.exe", async () => {
-    const result = await extractIcon("C:\\Windows\\System32\\notepad.exe");
-    expect(result).toBeDefined();
-    expect(isPng(result!.png)).toBe(true);
-    expect(result!.width).toBeGreaterThan(0);
-    expect(result!.height).toBeGreaterThan(0);
-  });
-
-  it("extracts icon from cmd.exe", async () => {
-    const result = await extractIcon("C:\\Windows\\System32\\cmd.exe");
-    expect(result).toBeDefined();
-    expect(isPng(result!.png)).toBe(true);
-  });
-
-  it("extracts icon from explorer.exe", async () => {
-    const result = await extractIcon("C:\\Windows\\explorer.exe");
-    expect(result).toBeDefined();
-    expect(isPng(result!.png)).toBe(true);
-  });
-
-  it("respects width parameter", async () => {
-    const icon32 = await extractIcon("C:\\Windows\\System32\\notepad.exe", 32);
-    const icon16 = await extractIcon("C:\\Windows\\System32\\notepad.exe", 16);
-    expect(icon32).toBeDefined();
-    expect(icon16).toBeDefined();
-
-    const dim32 = pngDimensions(icon32!.png);
-    const dim16 = pngDimensions(icon16!.png);
-    expect(dim32).toBeDefined();
-    expect(dim16).toBeDefined();
-
-    // The selected icon should be the closest match to the requested width
-    expect(dim16!.width).toBeLessThanOrEqual(dim32!.width);
-  });
-});
-
-describeOnWindows("extractIconToFile (Windows)", () => {
-  it("writes a valid PNG file", async () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "iconext-"));
-    const outPath = path.join(tmpDir, "notepad.png");
-
-    await extractIconToFile("C:\\Windows\\System32\\notepad.exe", outPath);
-
-    expect(fs.existsSync(outPath)).toBe(true);
-    const data = fs.readFileSync(outPath);
-    expect(isPng(data)).toBe(true);
-    expect(data.length).toBeGreaterThan(100);
-
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-});
-
-describeOnWindows("cross-validation with reference data", () => {
-  const testCases = [
-    { name: "notepad", exe: "C:\\Windows\\System32\\notepad.exe" },
-    { name: "cmd", exe: "C:\\Windows\\System32\\cmd.exe" },
-    { name: "explorer", exe: "C:\\Windows\\explorer.exe" },
-  ];
-
-  for (const { name, exe } of testCases) {
-    it(`produces valid icon for ${name} comparable to shell API reference`, async () => {
-      const refPath = path.join(REFERENCE_DIR, `${name}_32x32.png`);
-      if (!fs.existsSync(refPath)) return;
-
-      const refData = fs.readFileSync(refPath);
-      const refDims = pngDimensions(refData);
-      expect(refDims).toBeDefined();
-
-      const result = await extractIcon(exe, 32);
-      expect(result).toBeDefined();
-      expect(isPng(result!.png)).toBe(true);
-
-      const tsDims = pngDimensions(result!.png);
-      expect(tsDims).toBeDefined();
-
-      expect(tsDims!.width).toBeGreaterThanOrEqual(16);
-      expect(tsDims!.height).toBeGreaterThanOrEqual(16);
-      expect(result!.png.length).toBeGreaterThan(100);
-    });
-  }
 });

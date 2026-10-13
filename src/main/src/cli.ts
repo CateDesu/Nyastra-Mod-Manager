@@ -30,7 +30,7 @@ const ARG_COUNTS: Record<string, number> = {
   "--user-data": 1,
 };
 
-const electronExecutable = process.platform === "win32" ? "electron.exe" : "electron";
+const electronExecutable = "electron";
 
 // Chrome rearranges the command line parameters it passes to processes it spawns internally
 // by putting switches (--foo) first, arguments (bar) after.
@@ -179,6 +179,12 @@ export function updateStartupSettings(updater: (current: IParameters) => IParame
 }
 
 export function parseCommandline(argv: string[], electronIsShitHack: boolean): IParameters {
+  argv = argv.flatMap((argument, index) =>
+    /^nxm:\/\//i.test(argument) &&
+    !["--install", "-i", "--download", "-d"].includes(argv[index - 1] ?? "")
+      ? ["--install", argument]
+      : [argument],
+  );
   // lets look and replace epic stuff?!
   argv = transformEpicArguments(argv);
 
@@ -224,19 +230,18 @@ export function parseCommandline(argv: string[], electronIsShitHack: boolean): I
     .option(
       "-s, --set <path=value>",
       "Change a value in the state. Please be very careful " +
-        "with this, incorrect use will break Vortex and you may " +
+        "with this, incorrect use will break Nyastra's Mod Manager and you may " +
         "lose data",
       assign,
     )
     .option("--del <path>", "Remove a value in state", collect)
     .option(
       "--user-data <path>",
-      "Starts Vortex with a custom directory for the user data. " +
+      "Starts Nyastra's Mod Manager with a custom directory for the user data. " +
         "Only use if you know what you're doing.",
     )
-    .option("--start-minimized", "Starts Vortex in the task bar")
-    .option("--game <game id>", "Starts Vortex with a different game enabled")
-    .option("--run <path>", "Execute the js program instead of Vortex itself.")
+    .option("--start-minimized", "Starts Nyastra's Mod Manager in the task bar")
+    .option("--game <game id>", "Starts Nyastra's Mod Manager with a different game enabled")
     .option("--report <path>", "Send an error report. For internal use")
     .option("--restore <path>", "Restore a state backup")
     .option(
@@ -245,16 +250,11 @@ export function parseCommandline(argv: string[], electronIsShitHack: boolean): I
         "state file will be merged into the existing state.",
     )
     .option(
-      "--shared",
-      "Used in conjunction with set, get or del, this will access the database" +
-        "in the shared location instead of the per-user one",
-    )
-    .option(
       "--max-memory <size in MB>",
-      "Maximum amount of memory Vortex may use in MB " + "(defaults to 4096)",
+      "Maximum amount of memory Nyastra's Mod Manager may use in MB " + "(defaults to 4096)",
     )
-    .option("--inspector", "Start Vortex with the chrome inspector opened")
-    .option("--profile <profile id>", "Start Vortex with a specific profile active")
+    .option("--inspector", "Start Nyastra's Mod Manager with the chrome inspector opened")
+    .option("--profile <profile id>", "Start Nyastra's Mod Manager with a specific profile active")
     .option("--epic-auth-login <login>")
     .option("--epic-auth-password <password>")
     .option("--epic-auth-type <type>")

@@ -1,6 +1,7 @@
 import * as https from "https";
 import * as url from "url";
 
+import { PROGRAM_NAME } from "@vortex/shared";
 import PromiseBB from "bluebird";
 import * as _ from "lodash";
 import * as semver from "semver";
@@ -74,24 +75,24 @@ export class RateLimitExceeded extends Error {
 }
 
 /**
- * wrap requests to the Vortex GitHub repo, caching results where appropriate
+ * Query the program's GitHub releases and configuration.
  *
  * @class GitHub
  */
 class GitHub {
   // oldest release to be returned when retrieving releases
   private static RELEASE_CUTOFF = "0.12.7";
-  private static USER_AGENT = "Vortex";
+  private static USER_AGENT = PROGRAM_NAME;
   private static CONFIG_BRANCH = "announcements";
 
-  private static REPO = "Vortex";
+  private static REPO = "CateDesu/Nyastra-Mod-Manager";
 
   private static repoUrl() {
-    return `https://api.github.com/repos/Nexus-Mods/${GitHub.REPO}`;
+    return `https://api.github.com/repos/${GitHub.REPO}`;
   }
 
   private static rawUrl() {
-    return `https://raw.githubusercontent.com/Nexus-Mods/${GitHub.REPO}`;
+    return `https://raw.githubusercontent.com/${GitHub.REPO}`;
   }
 
   private mReleaseCache: PromiseBB<IGitHubRelease[]> | undefined;
@@ -169,7 +170,10 @@ class GitHub {
         return PromiseBB.reject(new DataInvalid("expected array of github releases"));
       }
       const current = releases
-        .filter((rel) => semver.valid(rel.name) && semver.gte(rel.name, GitHub.RELEASE_CUTOFF))
+        .filter(
+          (rel) => semver.valid(rel.tag_name) && semver.gte(rel.tag_name, GitHub.RELEASE_CUTOFF),
+        )
+        .map((rel) => ({ ...rel, name: rel.tag_name.replace(/^v/, "") }))
         .sort((lhs, rhs) => semver.compare(lhs.name, rhs.name));
 
       return PromiseBB.resolve(current);

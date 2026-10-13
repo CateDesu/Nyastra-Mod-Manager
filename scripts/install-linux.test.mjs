@@ -1,0 +1,375 @@
+import assert from "node:assert/strict";
+import { spawn, spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { test } from "node:test";
+import { setTimeout } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
+
+const installer = fileURLToPath(new URL("./install-linux.mjs", import.meta.url));
+
+function fixture() {
+  const root = mkdtempSync(path.join(tmpdir(), "vortex-install-"));
+  const home = path.join(root, "Home with ' apostrophe");
+  const source = path.join(root, "Extracted with ' apostrophe");
+  const bin = path.join(root, "bin");
+  const env = {
+    ...process.env,
+    HOME: home,
+    XDG_DATA_HOME: path.join(home, "data"),
+    XDG_CONFIG_HOME: path.join(home, "config"),
+    XDG_STATE_HOME: path.join(home, "state"),
+    PATH: `${bin}:${process.env.PATH}`,
+    HANDLER: path.join(root, "handler"),
+    CAPTURE: path.join(root, "capture"),
+  };
+  for (const directory of [home, source, bin, path.join(source, "resources")])
+    mkdirSync(directory, { recursive: true });
+  const script = (filename, content) => {
+    writeFileSync(filename, `#!${process.execPath}\n${content}\n`);
+    chmodSync(filename, 0o755);
+  };
+  writeFileSync(path.join(source, "resources/app.asar"), "fixture archive");
+  writeFileSync(path.join(source, "version"), "one");
+  script(
+    path.join(source, "vortex"),
+    "require('node:fs').writeFileSync(process.env.CAPTURE, JSON.stringify(process.argv.slice(2)));",
+  );
+  script(
+    path.join(bin, "xdg-mime"),
+    `const fs = require('node:fs');
+const [operation, value] = process.argv.slice(2);
+if (operation === 'query') process.stdout.write(fs.existsSync(process.env.HANDLER) ? fs.readFileSync(process.env.HANDLER) : 'old.desktop');
+else if (process.env.FAIL_ASSOCIATION === '1' && value === 'io.github.CateDesu.NyastraModManager.desktop') process.exit(1);
+else fs.writeFileSync(process.env.HANDLER, value);`,
+  );
+  script(path.join(bin, "update-desktop-database"), "process.exit(0);");
+  const app = path.join(env.XDG_DATA_HOME, "nyastra-mod-manager/app");
+  const wrapper = path.join(home, ".local/bin/nyastra-mod-manager");
+  const desktop = path.join(
+    env.XDG_DATA_HOME,
+    "applications/io.github.CateDesu.NyastraModManager.desktop",
+  );
+  return {
+    root,
+    source,
+    env,
+    app,
+    wrapper,
+    desktop,
+    run: (directory = source, extra = {}) =>
+      spawnSync(process.execPath, [installer, directory], {
+        env: { ...env, ...extra },
+        encoding: "utf8",
+      }),
+    clean: () => rmSync(root, { recursive: true, force: true }),
+  };
+}
+
+test("installed launcher survives extraction removal and passes literal NXM arguments", () => {
+  const f = fixture();
+  try {
+    const installed = f.run();
+    assert.equal(installed.status, 0, installed.stderr);
+    assert.match(readFileSync(f.wrapper, "utf8"), /nyastra-mod-manager\/app\/vortex/);
+    assert.ok(!readFileSync(f.wrapper, "utf8").includes(f.source));
+    rmSync(f.source, { recursive: true });
+    const uri = "nXm://game/mods/1/files/2?key='$(touch forbidden)'&expires=3";
+    const launched = spawnSync(f.wrapper, [uri], { env: f.env, encoding: "utf8" });
+    assert.equal(launched.status, 0, launched.stderr);
+    assert.deepEqual(JSON.parse(readFileSync(f.env.CAPTURE, "utf8")), ["--install", uri]);
+    assert.match(readFileSync(f.desktop, "utf8"), /Exec=env .* %u/);
+  } finally {
+    f.clean();
+  }
+});
+
+test("updates replace the runtime and self installation is idempotent", () => {
+  const f = fixture();
+  try {
+    assert.equal(f.run().status, 0);
+    writeFileSync(path.join(f.source, "version"), "two");
+    assert.equal(f.run().status, 0);
+    assert.equal(readFileSync(path.join(f.app, "version"), "utf8"), "two");
+    assert.equal(f.run(f.app).status, 0);
+    assert.equal(readFileSync(path.join(f.app, "version"), "utf8"), "two");
+  } finally {
+    f.clean();
+  }
+});
+
+test("concurrent installation cannot capture state before owning the lock", async () => {
+  const f = fixture();
+  const queryStarted = path.join(f.root, "query-started");
+  const queryRelease = path.join(f.root, "query-release");
+  let finished;
+  try {
+    writeFileSync(
+      path.join(f.env.PATH.split(path.delimiter)[0], "xdg-mime"),
+      `#!${process.execPath}
+const fs = require('node:fs');
+const [operation, value] = process.argv.slice(2);
+if (operation === 'query') {
+  const previous = fs.existsSync(process.env.HANDLER) ? fs.readFileSync(process.env.HANDLER) : 'old.desktop';
+  if (process.env.QUERY_STARTED) {
+    fs.writeFileSync(process.env.QUERY_STARTED, 'ready');
+    const pause = new Int32Array(new SharedArrayBuffer(4));
+    while (!fs.existsSync(process.env.QUERY_RELEASE)) Atomics.wait(pause, 0, 0, 10);
+  }
+  process.stdout.write(previous);
+} else if (process.env.FAIL_ASSOCIATION === '1' && value === 'io.github.CateDesu.NyastraModManager.desktop') process.exit(1);
+else fs.writeFileSync(process.env.HANDLER, value);
+`,
+    );
+    const pending = spawn(process.execPath, [installer, f.source], {
+      env: { ...f.env, QUERY_STARTED: queryStarted, QUERY_RELEASE: queryRelease },
+    });
+    let stderr = "";
+    pending.stdout.resume();
+    pending.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    finished = new Promise((resolve, reject) => {
+      pending.once("error", reject);
+      pending.once("close", (status) => resolve({ status, stderr }));
+    });
+    const deadline = Date.now() + 5000;
+    while (!existsSync(queryStarted) && Date.now() < deadline) await setTimeout(10);
+    assert.ok(existsSync(queryStarted), "The first installer reached its state snapshot");
+    const concurrent = f.run(f.source, { FAIL_ASSOCIATION: "1" });
+    assert.equal(concurrent.status, 1);
+    assert.match(concurrent.stderr, /Another installer is already running/);
+    assert.ok(existsSync(path.join(path.dirname(f.app), ".install.lock")));
+    assert.ok(!existsSync(f.env.HANDLER));
+    writeFileSync(queryRelease, "continue");
+    const installed = await finished;
+    assert.equal(installed.status, 0, installed.stderr);
+    assert.equal(
+      readFileSync(f.env.HANDLER, "utf8"),
+      "io.github.CateDesu.NyastraModManager.desktop",
+    );
+    assert.equal(f.run().status, 0, "The completed installer releases its lock");
+  } finally {
+    writeFileSync(queryRelease, "continue");
+    await finished;
+    f.clean();
+  }
+});
+
+test("failed desktop registration restores the prior runtime and launcher", () => {
+  const f = fixture();
+  try {
+    assert.equal(f.run().status, 0);
+    const wrapper = readFileSync(f.wrapper);
+    const desktop = readFileSync(f.desktop);
+    writeFileSync(path.join(f.source, "version"), "broken update");
+    const result = f.run(f.source, { FAIL_ASSOCIATION: "1" });
+    assert.equal(result.status, 1);
+    assert.equal(readFileSync(path.join(f.app, "version"), "utf8"), "one");
+    assert.deepEqual(readFileSync(f.wrapper), wrapper);
+    assert.deepEqual(readFileSync(f.desktop), desktop);
+    assert.equal(f.run().status, 0, "A failed installer releases its lock");
+  } finally {
+    f.clean();
+  }
+});
+
+test("failed first registration restores existing external launchers", () => {
+  const f = fixture();
+  try {
+    mkdirSync(path.dirname(f.wrapper), { recursive: true });
+    mkdirSync(path.dirname(f.desktop), { recursive: true });
+    writeFileSync(f.wrapper, "old wrapper");
+    writeFileSync(f.desktop, "old desktop");
+    assert.equal(f.run(f.source, { FAIL_ASSOCIATION: "1" }).status, 1);
+    assert.equal(readFileSync(f.wrapper, "utf8"), "old wrapper");
+    assert.equal(readFileSync(f.desktop, "utf8"), "old desktop");
+    assert.equal(readFileSync(f.env.HANDLER, "utf8"), "old.desktop");
+    assert.ok(!existsSync(f.app));
+  } finally {
+    f.clean();
+  }
+});
+
+test("failed extension adaptation restores the previous installed runtime", () => {
+  const f = fixture();
+  try {
+    assert.equal(f.run().status, 0);
+    writeFileSync(path.join(f.source, "version"), "broken update");
+    mkdirSync(path.join(f.source, "linux-extensions"));
+    writeFileSync(
+      path.join(f.source, "linux-extensions/apply.mjs"),
+      'export async function applyExtensions() { throw new Error("fixture adaptation failed"); }',
+    );
+    const result = f.run();
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /fixture adaptation failed/);
+    assert.equal(readFileSync(path.join(f.app, "version"), "utf8"), "one");
+    assert.ok(!existsSync(path.join(f.app, "linux-extensions")));
+    assert.ok(!result.stdout.includes("Program files:"));
+  } finally {
+    f.clean();
+  }
+});
+
+test("an interrupted installer releases its lock without removing the lock file", async () => {
+  const f = fixture();
+  const queryStarted = path.join(f.root, "query-started");
+  const mime = path.join(f.env.PATH.split(path.delimiter)[0], "xdg-mime");
+  const original = readFileSync(mime);
+  let pending;
+  let finished;
+  try {
+    writeFileSync(
+      mime,
+      `#!${process.execPath}
+require('node:fs').writeFileSync(process.env.QUERY_STARTED, String(process.pid));
+setTimeout(() => process.exit(0), 10000);
+`,
+    );
+    pending = spawn(process.execPath, [installer, f.source], {
+      env: { ...f.env, QUERY_STARTED: queryStarted },
+      stdio: "ignore",
+    });
+    finished = new Promise((resolve) => pending.once("close", resolve));
+    const deadline = Date.now() + 5000;
+    while (!existsSync(queryStarted) && Date.now() < deadline) await setTimeout(10);
+    assert.ok(existsSync(queryStarted));
+    pending.kill("SIGKILL");
+    await finished;
+    assert.ok(existsSync(path.join(path.dirname(f.app), ".install.lock")));
+    writeFileSync(mime, original);
+    const restarted = f.run();
+    assert.equal(restarted.status, 0, restarted.stderr);
+  } finally {
+    pending?.kill("SIGKILL");
+    await finished;
+    if (existsSync(queryStarted)) {
+      try {
+        process.kill(Number(readFileSync(queryStarted, "utf8")), "SIGKILL");
+      } catch (error) {
+        if (error.code !== "ESRCH") throw error;
+      }
+    }
+    f.clean();
+  }
+});
+
+for (const failRegistration of [false, true]) {
+  test(`failed first installation restores unset NXM associations with real xdg-mime, registration failure=${failRegistration}`, () => {
+    const f = fixture();
+    try {
+      const realMime = spawnSync("sh", ["-c", "command -v xdg-mime"], {
+        encoding: "utf8",
+      }).stdout.trim();
+      assert.ok(realMime, "xdg-utils is an installer prerequisite");
+      const bin = f.env.PATH.split(path.delimiter)[0];
+      Object.assign(f.env, {
+        XDG_CURRENT_DESKTOP: "X-Generic",
+        DE: "generic",
+        KDE_SESSION_VERSION: "0",
+        DISPLAY: "",
+        DBUS_SESSION_BUS_ADDRESS: "",
+        XDG_RUNTIME_DIR: path.join(f.root, "runtime"),
+        XDG_CONFIG_DIRS: path.join(f.root, "system-config"),
+        XDG_DATA_DIRS: path.join(f.root, "system-data"),
+      });
+      mkdirSync(f.env.XDG_CONFIG_HOME, { recursive: true });
+      writeFileSync(path.join(bin, "kde-config"), `#!${process.execPath}\nprocess.exit(1);\n`);
+      chmodSync(path.join(bin, "kde-config"), 0o755);
+      writeFileSync(
+        path.join(bin, "xdg-mime"),
+        `#!${process.execPath}
+const result = require('node:child_process').spawnSync(${JSON.stringify(realMime)}, process.argv.slice(2), { stdio: 'inherit' });
+process.exit(${failRegistration} && process.argv[2] === 'default' && process.argv[3] === 'io.github.CateDesu.NyastraModManager.desktop' ? 1 : result.status);
+`,
+      );
+      const mimeFile = path.join(f.env.XDG_CONFIG_HOME, "mimeapps.list");
+      writeFileSync(
+        mimeFile,
+        "[Default Applications]\ntext/plain=prior.desktop;\n[Added Associations]\nx-scheme-handler/nxm=unavailable.desktop;\n",
+      );
+      mkdirSync(path.join(f.source, "linux-extensions"));
+      writeFileSync(
+        path.join(f.source, "linux-extensions/apply.mjs"),
+        `export async function applyExtensions() {
+const fs = await import('node:fs');
+fs.appendFileSync(${JSON.stringify(mimeFile)}, '[Default Applications]\\nimage/png=concurrent.desktop;\\n');
+throw new Error('fixture adaptation failed');
+}`,
+      );
+      const failed = f.run();
+      assert.equal(failed.status, 1, failed.stderr);
+      const restored = readFileSync(mimeFile, "utf8");
+      assert.ok(!restored.includes("io.github.CateDesu.NyastraModManager.desktop"));
+      assert.match(restored, /text\/plain=prior.desktop;/);
+      assert.match(restored, /x-scheme-handler\/nxm=unavailable.desktop;/);
+      if (!failRegistration) assert.match(restored, /image\/png=concurrent.desktop;/);
+      assert.ok(!existsSync(f.desktop));
+      assert.ok(!existsSync(f.app));
+      rmSync(path.join(f.source, "linux-extensions"), { recursive: true });
+      const installed = f.run(f.source, { PATH: `${path.dirname(realMime)}:${f.env.PATH}` });
+      assert.equal(installed.status, 0, installed.stderr);
+      const query = spawnSync(realMime, ["query", "default", "x-scheme-handler/nxm"], {
+        env: f.env,
+        encoding: "utf8",
+      });
+      assert.equal(query.stdout.trim(), "io.github.CateDesu.NyastraModManager.desktop");
+    } finally {
+      f.clean();
+    }
+  });
+}
+
+test("installer explains the flock prerequisite before changing launchers", () => {
+  const f = fixture();
+  try {
+    const failed = f.run(f.source, { PATH: f.env.PATH.split(path.delimiter)[0] });
+    assert.equal(failed.status, 1);
+    assert.match(failed.stderr, /requires flock.*util-linux/);
+    assert.ok(!existsSync(f.wrapper));
+    assert.ok(!existsSync(f.env.HANDLER));
+  } finally {
+    f.clean();
+  }
+});
+
+test("installer rejects incomplete programs, relative XDG paths and recursive sources", () => {
+  const f = fixture();
+  try {
+    rmSync(path.join(f.source, "resources/app.asar"));
+    assert.equal(f.run().status, 1);
+    writeFileSync(path.join(f.source, "resources/app.asar"), "fixture archive");
+    assert.equal(f.run(f.source, { XDG_DATA_HOME: "relative" }).status, 1);
+    assert.equal(f.run(f.source, { XDG_DATA_HOME: path.join(f.source, "data") }).status, 1);
+    assert.ok(!existsSync(f.wrapper));
+  } finally {
+    f.clean();
+  }
+});
+
+test("installer refuses to replace a symlink or unrelated installation folder", () => {
+  const f = fixture();
+  try {
+    mkdirSync(path.dirname(f.app), { recursive: true });
+    symlinkSync(f.source, f.app, "dir");
+    assert.equal(f.run().status, 1);
+    rmSync(f.app);
+    mkdirSync(f.app);
+    writeFileSync(path.join(f.app, "precious"), "keep");
+    assert.equal(f.run().status, 1);
+    assert.equal(readFileSync(path.join(f.app, "precious"), "utf8"), "keep");
+  } finally {
+    f.clean();
+  }
+});

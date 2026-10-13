@@ -1,7 +1,6 @@
 import type Bluebird from "bluebird";
 
 import { registerDeprecatedApi, wrapDeprecatedSurface } from "./deprecatedApiUsage";
-import type { EpicGamesLauncher } from "./EpicGamesLauncher";
 import GameStoreHelper from "./GameStoreHelper";
 import type { Steam } from "./Steam";
 

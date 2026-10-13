@@ -20,7 +20,7 @@ import { truthy } from "../../../util/util";
 import { clearOAuthCredentials, setUserAPIKey } from "../actions/account";
 import { setUserInfo } from "../actions/persistent";
 import { setOauthPending } from "../actions/session";
-import { FALLBACK_AVATAR, NEXUS_BASE_URL, OAUTH_URL } from "../constants";
+import { FALLBACK_AVATAR, NEXUS_BASE_URL, OAUTH_CLIENT_ID } from "../constants";
 import { isLoggedIn } from "../selectors";
 import type { IMembership, IValidateKeyDataV2 } from "../types/IValidateKeyData";
 
@@ -149,7 +149,7 @@ class LoginIcon extends ComponentEx<IProps, {}> {
     if (!this.isLoggedIn()) {
       this.context.api.events.emit("analytics-track-click-event", "Profile", "Site profile");
       this.setDialogVisible(true);
-      this.launchNexusOauth();
+      if (OAUTH_CLIENT_ID) this.launchNexusOauth();
     } else {
       opn(`${NEXUS_BASE_URL}/users/${userInfo.userId}`).catch((err) => undefined);
     }

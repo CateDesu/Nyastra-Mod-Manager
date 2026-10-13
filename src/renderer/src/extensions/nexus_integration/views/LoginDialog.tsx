@@ -1,3 +1,4 @@
+import { BRAND_NAME } from "@vortex/shared";
 import type { TFunction } from "i18next";
 import * as React from "react";
 import type { ModalBody } from "react-bootstrap";
@@ -23,7 +24,7 @@ import opn from "../../../util/opn";
 import { setUserAPIKey } from "../actions/account";
 import { setLoginId, setOauthPending } from "../actions/session";
 import { NEXUS_BASE_URL } from "../constants";
-import { OAUTH_URL } from "../constants";
+import { OAUTH_URL, OAUTH_CLIENT_ID } from "../constants";
 import type { IValidateKeyData } from "../types/IValidateKeyData";
 import { getPageURL } from "../util/sso";
 
@@ -98,7 +99,7 @@ interface ILoginDialogState {
   invalidToken: boolean;
 }
 
-class LoginDialog extends ComponentEx<IProps, ILoginDialogState> {
+export class LoginDialog extends ComponentEx<IProps, ILoginDialogState> {
   // private mKeyValidation = /^[a-zA-Z0-9\-]*$/;
   private mKeyValidation = /^[a-zA-Z0-9\-=]*$/;
   private mModalRef = React.createRef<ModalBody>();
@@ -159,13 +160,14 @@ class LoginDialog extends ComponentEx<IProps, ILoginDialogState> {
     const { t, loginId, oauthPending, visible } = this.props;
     const { requested, showElement } = this.state;
 
+    if (!OAUTH_CLIENT_ID && oauthPending === undefined) return this.renderTroubleshoot();
+
     return (
       <div className="login-content">
-        <Icon
-          className="nexus-header"
-          name="nexus-header"
-          svgStyle="#login-dialog path { fill: black }"
-        />
+        <h1 className="nyastra-wordmark">
+          <img alt="" src="assets/images/nyastra.png" />
+          {BRAND_NAME}
+        </h1>
         {visible && oauthPending === undefined ? (
           <div>
             <h2>{t("Log in or register on the Nexus Mods website")}</h2>
@@ -239,44 +241,67 @@ class LoginDialog extends ComponentEx<IProps, ILoginDialogState> {
 
     return (
       <div className="login-content">
-        <Icon
-          className="nexus-header"
-          name="nexus-header"
-          svgStyle="#login-dialog path { fill: black }"
-        />
+        <h1 className="nyastra-wordmark">
+          <img alt="" src="assets/images/nyastra.png" />
+          {BRAND_NAME}
+        </h1>
 
-        <h2>{t("Log in with token")}</h2>
+        <h2>{t(OAUTH_CLIENT_ID ? "Log in with token" : "Log in with a personal API key")}</h2>
+        {!OAUTH_CLIENT_ID && (
+          <Alert bsStyle="info">
+            {t(
+              "Nexus Mods application registration is pending. Personal API keys are provided here for registration testing only.",
+            )}
+          </Alert>
+        )}
 
         <ol style={{ textAlign: "left" }}>
           <li>
             <p>
               {t(
-                "Copy the following address into your browser and log in/register if required (skip this step if you already have the token). We support Chrome, Safari, Firefox and Edge.",
+                OAUTH_CLIENT_ID
+                  ? "Copy the following address into your browser and log in/register if required (skip this step if you already have the token). We support Chrome, Safari, Firefox and Edge."
+                  : "Open your Nexus Mods account API access page and create a personal API key for testing.",
               )}
             </p>
 
-            <CopyClipboardInput inputValue={oauthPending} />
+            <CopyClipboardInput inputValue={OAUTH_CLIENT_ID ? oauthPending : API_ACCESS_URL} />
           </li>
           <li>
             <p>
               {t(
-                'Click "Authorise" on the website and you will be given a token, copy and paste the token below and click save.',
+                OAUTH_CLIENT_ID
+                  ? 'Click "Authorise" on the website and you will be given a token, copy and paste the token below and click save.'
+                  : "Paste your personal API key below and click Save. Keep this key private.",
               )}
             </p>
 
-            <PlaceholderTextArea
-              t={t}
-              mModalRef={this.mModalRef}
-              className="token-paste-textarea"
-              onChange={this.updateAPIKey}
-            />
+            {OAUTH_CLIENT_ID ? (
+              <PlaceholderTextArea
+                t={t}
+                mModalRef={this.mModalRef}
+                className="token-paste-textarea"
+                onChange={this.updateAPIKey}
+              />
+            ) : (
+              <FormGroup>
+                <ControlLabel htmlFor="personal-api-key">{t("Personal API key")}</ControlLabel>
+                <FormControl
+                  id="personal-api-key"
+                  type="password"
+                  value={apiKeyInput}
+                  autoComplete="off"
+                  onChange={this.updateAPIKey}
+                />
+              </FormGroup>
+            )}
           </li>
         </ol>
 
         <Button
           tooltip={t("Save")}
           onClick={this.applyKey}
-          // disabled={!keyValid}
+          disabled={apiKeyInput.trim().length === 0}
         >
           {t("Save")}
         </Button>
@@ -299,6 +324,12 @@ class LoginDialog extends ComponentEx<IProps, ILoginDialogState> {
   }
 
   private applyKey = async () => {
+    if (!OAUTH_CLIENT_ID) {
+      if (!this.state.apiKeyInput.trim()) return;
+      this.props.onSetAPIKey(this.state.apiKeyInput.trim());
+      this.props.onHide();
+      return;
+    }
     try {
       const decoded = JSON.parse(this.decodeB64(this.state.apiKeyInput));
       await this.props.onReceiveCode(decoded.authorization_code, decoded.state);

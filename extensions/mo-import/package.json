@@ -36,7 +36,7 @@
     "redux": "catalog:",
     "semver": "catalog:",
     "shortid": "catalog:",
-    "vortex-parse-ini": "catalog:"
+    "vortex-parse-ini": "workspace:*"
   },
   "nx": {
     "tags": [

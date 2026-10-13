@@ -2,7 +2,6 @@ import path from "path";
 import { setTimeout } from "timers";
 
 import { actions, fs, log, selectors, types, util } from "@nexusmods/vortex-api";
-import * as winapi from "winapi-bindings";
 
 import { getDownload, getSupportMap, NEXUS, UMM_EXE } from "./common";
 import { AutoInstallDisabledError, NotPremiumError } from "./Errors";
@@ -18,12 +17,6 @@ export async function ensureUMM(
   const gameId = gameMode === undefined ? selectors.activeGameId(state) : gameMode;
   const gameConf: IUMMGameConfig = getSupportMap()[gameId];
   if (gameConf === undefined || !gameConf.autoDownloadUMM) {
-    return undefined;
-  }
-
-  const ummPath = await findUMMPath();
-  if (ummPath !== undefined) {
-    setUMMPath(api, ummPath, gameMode);
     return undefined;
   }
 
@@ -147,36 +140,6 @@ async function downloadFromGithub(api: types.IExtensionApi, dlInfo: INexusDownlo
   });
 }
 
-function readRegistryKey(hive, key, name) {
-  try {
-    const instPath = winapi.RegGetValue(hive, key, name);
-    if (!instPath) {
-      throw new Error("empty registry key");
-    }
-    return instPath.value;
-  } catch (err) {
-    return undefined;
-  }
-}
-
-function setRegistryKey(hive, key, name, value) {
-  try {
-    winapi.RegSetKeyValue(hive, key, name, value);
-  } catch (err) {
-    log("error", "failed to set registry key", err);
-  }
-}
-
-async function findUMMPath(): Promise<string> {
-  const value = readRegistryKey("HKEY_CURRENT_USER", "Software\\UnityModManager", "Path");
-  try {
-    await fs.statAsync(path.join(value.toString(), UMM_EXE));
-    return value.toString();
-  } catch (err) {
-    return undefined;
-  }
-}
-
 async function install(
   api: types.IExtensionApi,
   downloadInfo: INexusDownloadInfo,
@@ -221,8 +184,6 @@ async function finalize(
     const staging = selectors.installPathForGame(state, downloadInfo.gameId);
     const mod = api.getState().persistent.mods[downloadInfo.gameId][modId];
     const ummPath = path.join(staging, mod.installationPath, UMM_EXE);
-    setRegistryKey("HKEY_CURRENT_USER", "Software\\UnityModManager", "Path", path.dirname(ummPath));
-    setRegistryKey("HKEY_CURRENT_USER", "Software\\UnityModManager", "ExePath", ummPath);
     setUMMPath(api, path.dirname(ummPath), downloadInfo.gameId);
     return Promise.resolve(modId);
   } catch (err) {

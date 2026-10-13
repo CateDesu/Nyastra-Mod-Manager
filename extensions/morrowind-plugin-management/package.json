@@ -26,7 +26,7 @@
     "react-dnd": "catalog:",
     "react-i18next": "catalog:",
     "typescript": "catalog:",
-    "vortex-parse-ini": "catalog:"
+    "vortex-parse-ini": "workspace:*"
   },
   "nx": {
     "tags": [

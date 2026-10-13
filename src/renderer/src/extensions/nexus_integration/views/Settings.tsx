@@ -1,3 +1,4 @@
+import { SERVICE_NAME } from "@vortex/shared";
 import * as React from "react";
 import { Alert, FormGroup, HelpBlock } from "react-bootstrap";
 import type * as Redux from "redux";
@@ -74,22 +75,17 @@ class Settings extends ComponentEx<IProps, {}> {
             disabled={process.platform === "linux"}
           >
             {t("Handle Mod Manager Download buttons on")}{" "}
-            <a onClick={this.openNexus}>nexusmods.com</a> (nxm:// links)
+            <a onClick={this.openNexus}>{SERVICE_NAME}</a> (nxm:// links)
           </Toggle>
-          {
-            // on linux this is handled by the desktop environment so you'd have to implement
-            // separate solutions for kde, gnome, xfce, ...
-            process.platform === "linux" ? (
-              <HelpBlock>
-                <Alert bsStyle="info">{t("Not supported on Linux")}</Alert>
-              </HelpBlock>
-            ) : null
-          }
+          {process.platform === "linux" ? (
+            <HelpBlock>
+              <Alert bsStyle="info">
+                {t("NXM download links are registered by the Linux installer.")}
+              </Alert>
+            </HelpBlock>
+          ) : null}
           <div style={{ marginTop: 15 }}>
-            {t(
-              "Fix Nexus Mods links in Chrome " +
-                "(Only required for Chrome. Requires Chrome to be closed)",
-            )}
+            {t("Repair legacy Chrome settings for Nexus Mods links (close Chrome first)")}
             <More id="more-chrome-fix" name={t("Chrome Fix")}>
               {this.mHelpText}
             </More>

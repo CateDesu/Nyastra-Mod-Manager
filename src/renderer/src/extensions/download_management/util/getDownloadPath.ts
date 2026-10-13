@@ -26,13 +26,7 @@ function getDownloadPath(pattern: string, gameId?: string): string {
       ? path.join(format(getDownloadPathPattern(pattern), formatKeys), gameId)
       : format(getDownloadPathPattern(pattern), formatKeys);
 
-  // on windows a path of the form \foo\bar will be identified as absolute
-  // because why would anything make sense on windows?
-  if (
-    !path.isAbsolute(result) ||
-    (process.platform === "win32" && result[0] === "\\" && result[1] !== "\\") ||
-    (result[0] === "/" && result[1] !== "/")
-  ) {
+  if (!path.isAbsolute(result)) {
     result = path.resolve(getVortexPath("userData"), result);
   }
 

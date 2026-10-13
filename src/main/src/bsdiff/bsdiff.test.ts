@@ -8,7 +8,10 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { applyPatchFile, createPatchFile } from "./patch";
 import { applyPatch, createPatch, loadWasm } from "./wasm";
 
-const TEST_DATA_DIR = path.resolve(__dirname, "..", "..", "test-data");
+const TEST_DATA_DIR = path.resolve(
+  __dirname,
+  "../../../renderer/src/extensions/collections/test-data",
+);
 
 // hdiff.wasm ships with the @hot-updater/bsdiff package. Load the module once
 // and reuse the instance for every case, the same way the worker does at runtime.
@@ -127,15 +130,7 @@ describe("bsdiff wasm core - file API", () => {
 
 // --- Cross-compatibility with native patches ---
 
-// run capture-native-baseline.cjs first
-function hasNativeBaseline(): boolean {
-  return (
-    fs.existsSync(path.join(TEST_DATA_DIR, "native-baseline.json")) &&
-    TEST_CASES.every((tc) => fs.existsSync(path.join(TEST_DATA_DIR, `${tc.name}-native.diff`)))
-  );
-}
-
-describe.skipIf(!hasNativeBaseline())("bsdiff wasm core - native cross-compatibility", () => {
+describe("bsdiff wasm core - native cross-compatibility", () => {
   let baseline: NativeBaseline;
 
   beforeAll(() => {

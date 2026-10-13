@@ -1,6 +1,7 @@
+import { statfsSync } from "node:fs";
+
 import type { TFunction } from "i18next";
 import * as React from "react";
-import * as winapi from "winapi-bindings";
 
 import { setSettingsPage } from "../../actions/session";
 import Icon from "../../controls/Icon";
@@ -26,7 +27,10 @@ function minDiskSpace(required: number, key: string) {
       try {
         freeSpace[key] = {
           path: checkPath,
-          free: winapi.GetDiskFreeSpaceEx(checkPath).freeToCaller,
+          free: (() => {
+            const stats = statfsSync(checkPath);
+            return stats.bavail * stats.bsize;
+          })(),
         };
       } catch (err) {
         return false;
@@ -90,10 +94,10 @@ function todos(api: IExtensionApi): IToDo[] {
       type: "settings" as ToDoType,
       priority: 30,
       props: (state) => ({ dlPath: selectors.downloadPath(state) }),
-      text: "Downloads are on drive",
+      text: "Downloads folder",
       value: (t: TFunction, props: any) => {
         try {
-          return winapi.GetVolumePathName(props.dlPath);
+          return props.dlPath;
         } catch (err) {
           err["dlPath"] = props.dlPath;
           throw err;
@@ -116,13 +120,13 @@ function todos(api: IExtensionApi): IToDo[] {
       type: "settings" as ToDoType,
       priority: 31,
       props: (state) => ({ instPath: selectors.installPath(state) }),
-      text: "Mods are staged on drive",
+      text: "Mod staging folder",
       value: (t: TFunction, props: any) => {
         try {
           if (props.instPath === undefined) {
             return t("<No staging folder>");
           }
-          return winapi.GetVolumePathName(props.instPath);
+          return props.instPath;
         } catch (err) {
           return t("<Invalid Drive>");
         }

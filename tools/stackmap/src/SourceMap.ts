@@ -14,9 +14,6 @@ class SourceMap {
 
   constructor(sourcePath: string) {
     this.mSourcePath = sourcePath;
-    if (process.platform === "win32" && sourcePath.startsWith("/")) {
-      this.mSourcePath = sourcePath.slice(1);
-    }
   }
 
   public lookup(position: NullableMappedPosition): Promise<NullableMappedPosition> {

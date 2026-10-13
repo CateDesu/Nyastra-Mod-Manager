@@ -358,8 +358,7 @@ export function getAllPropertyNames(obj: object): string[] {
  */
 export function isChildPath(child: string, parent: string, normalize?: Normalize): boolean {
   if (normalize === undefined) {
-    normalize = (input) =>
-      process.platform === "win32" ? path.normalize(input.toUpperCase()) : path.normalize(input);
+    normalize = (input) => path.normalize(input);
   }
 
   const childNorm = normalize(child);
@@ -376,8 +375,7 @@ export function isChildPath(child: string, parent: string, normalize?: Normalize
 
 export function isReservedDirectory(dirPath: string, normalize?: Normalize): boolean {
   if (normalize === undefined) {
-    normalize = (input) =>
-      process.platform === "win32" ? path.normalize(input.toUpperCase()) : path.normalize(input);
+    normalize = (input) => path.normalize(input);
   }
 
   const normalized = normalize(dirPath);
@@ -507,8 +505,7 @@ export function delay(timeoutMS: number): Bluebird<void> {
 /**
  * characters invalid in a file path
  */
-const INVALID_FILEPATH_CHARACTERS =
-  process.platform === "win32" ? ["/", "?", "*", ":", "|", '"', "<", ">"] : [];
+const INVALID_FILEPATH_CHARACTERS = ["\0"];
 
 /**
  * characters invalid in a file name
@@ -517,36 +514,7 @@ const INVALID_FILENAME_CHARACTERS = [...INVALID_FILEPATH_CHARACTERS, path.sep];
 
 const INVALID_FILENAME_RE = new RegExp(`[${escapeRE(INVALID_FILENAME_CHARACTERS.join(""))}]`, "g");
 
-const RESERVED_NAMES = new Set(
-  process.platform === "win32"
-    ? [
-        "CON",
-        "PRN",
-        "AUX",
-        "NUL",
-        "COM1",
-        "COM2",
-        "COM3",
-        "COM4",
-        "COM5",
-        "COM6",
-        "COM7",
-        "COM8",
-        "COM9",
-        "LPT1",
-        "LPT2",
-        "LPT3",
-        "LPT4",
-        "LPT5",
-        "LPT6",
-        "LPT7",
-        "LPT8",
-        "LPT9",
-        "..",
-        ".",
-      ]
-    : ["..", "."],
-);
+const RESERVED_NAMES = new Set(["..", "."]);
 
 export function isFilenameValid(input: string): boolean {
   if (input.length === 0) {
@@ -555,16 +523,12 @@ export function isFilenameValid(input: string): boolean {
   if (RESERVED_NAMES.has(path.basename(input, path.extname(input)).toUpperCase())) {
     return false;
   }
-  if (process.platform === "win32" && (input.endsWith(" ") || input.endsWith("."))) {
-    // Although Windows' underlying file system may support
-    //  filenames/dirnames ending with '.' and ' ', the win shell and UI does not.
-    return false;
-  }
+
   return input.search(INVALID_FILENAME_RE) < 0;
 }
 
 function isDriveLetter(input: string): boolean {
-  return process.platform === "win32" && input.length === 2 && input[1] === ":";
+  return false;
 }
 
 /**
@@ -577,21 +541,14 @@ export function sanitizeFilename(input: string): string {
   if (RESERVED_NAMES.has(path.basename(input, path.extname(input)).toUpperCase())) {
     return path.join(path.dirname(input), "_reserved_" + path.basename(input));
   }
-  if (process.platform === "win32" && (input.endsWith(" ") || input.endsWith("."))) {
-    // Although Windows' underlying file system may support
-    //  filenames/dirnames ending with '.' and ' ', the win shell and UI does not.
-    return input + "_";
-  }
+
   return input.replace(INVALID_FILENAME_RE, (invChar) => `_${invChar.charCodeAt(0)}_`);
 }
 
 const trimTrailingSep = new RegExp(`\\${path.sep}*$`, "g");
 
 export function isPathValid(input: string, allowRelative: boolean = false): boolean {
-  if (process.platform === "win32" && input.startsWith("\\\\")) {
-    // UNC path, skip the leading \\ for validation
-    input = input.slice(2);
-  } else if (process.platform !== "win32" && input.startsWith("/")) {
+  if (input.startsWith("/")) {
     input = input.slice(1);
   }
   let split = input.replace(trimTrailingSep, "").split(path.sep);

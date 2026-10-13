@@ -123,7 +123,14 @@ describe("nxm link callback", () => {
 
       await vi.waitFor(() => expect(dispatchedModInfo(harness)).not.toHaveLength(0));
       expect(logIn).toHaveBeenCalledWith(harness.api);
-      expect(beginDownload).toHaveBeenCalledWith(harness.api, harness.nexus, MOD_URL);
+      expect(beginDownload).toHaveBeenCalledWith(
+        harness.api,
+        harness.nexus,
+        MOD_URL,
+        undefined,
+        undefined,
+        undefined,
+      );
       expect(dispatchedModInfo(harness)).toEqual([
         expect.objectContaining({ key: "source", value: "nexus" }),
       ]);

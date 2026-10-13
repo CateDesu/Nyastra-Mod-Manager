@@ -5,7 +5,6 @@ import path from "path";
 import { IFileInfo } from "@nexusmods/nexus-api";
 import { actions, fs, log, types, selectors, util } from "@nexusmods/vortex-api";
 import * as semver from "semver";
-import * as winapi from "winapi-bindings";
 
 // List of folders in the various languages on Xbox, for now we default to English but this could be enhanced to select a folder based on the Vortex locale.
 // It's possible that some mods don't work with the non-English variant.
@@ -31,13 +30,6 @@ const PATCH_4GB_EXECUTABLES = ["FNVpatch.exe", "FalloutNVpatch.exe", "Patcher.ex
 let selectedLanguage = undefined;
 let multipleLanguages = false;
 
-async function findRegistryGame(key: string): Promise<types.IGameStoreEntry | undefined> {
-  const instPath = winapi.RegGetValue("HKEY_LOCAL_MACHINE", key, "Installed Path");
-  if (instPath.type !== "REG_SZ") return undefined;
-  const gamePath = instPath.value as string;
-  return { appid: key, name: path.basename(gamePath), gamePath, gameStoreId: "registry" };
-}
-
 async function findGame() {
   // Same order as the removed GameStoreHelper.find; the first hit wins.
   const lookups: PromiseLike<types.IGameStoreEntry>[] = [
@@ -47,7 +39,6 @@ async function findGame() {
     util.GameStoreHelper.findByAppId(MS_ID, "xbox"),
     util.GameStoreHelper.findByAppId(GOG_ID, "gog"),
     util.GameStoreHelper.findByAppId(EPIC_ID, "epic"),
-    findRegistryGame("Software\\Wow6432Node\\Bethesda Softworks\\falloutnv"),
   ];
   const storeGames = (
     await Promise.all(lookups.map((lookup) => Promise.resolve(lookup).catch(() => undefined)))
