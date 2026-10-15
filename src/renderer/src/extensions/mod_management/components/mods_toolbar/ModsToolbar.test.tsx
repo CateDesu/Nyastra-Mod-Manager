@@ -29,7 +29,8 @@ vi.mock("@/contexts", () => ({ useMainContext: () => ({ api: { events: { emit } 
 vi.mock("react-redux", async () => ({
   ...(await vi.importActual<typeof ReactReduxTypes>("react-redux")),
   useDispatch: () => vi.fn(),
-  useSelector: (selector: (state: unknown) => unknown) => selector({ settings: { toolbars: {} } }),
+  useSelector: (selector: (state: unknown) => unknown) =>
+    selector({ settings: { toolbars: {}, profiles: {} }, persistent: { profiles: {} } }),
 }));
 
 vi.mock("../../hooks/useModToolbarActions.hook", () => ({
@@ -50,6 +51,8 @@ describe("ModsToolbar", () => {
     // the bar — an unpinned one lives in the kebab and would report `overflow`.
     actions.current = [{ label: "Deploy Mods", id: "deploy", pinned: true, onClick: vi.fn() }];
     render(<ModsToolbar t={t} />);
+
+    expect(screen.getByTestId("mod-enable-controls")).toBeDisabled();
 
     await userEvent.click(screen.getByRole("button", { name: "Deploy Mods" }));
 

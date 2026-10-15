@@ -1,22 +1,9 @@
 const { util } = require("@nexusmods/vortex-api");
-const winapi = require("winapi-bindings");
 
 function findGame() {
-  try {
-    const instPath = winapi.RegGetValue(
-      "HKEY_CURRENT_USER",
-      "Software\\SureAI\\Enderal",
-      "Install_Path",
-    );
-    if (!instPath) {
-      throw new Error("empty registry key");
-    }
-    return Promise.resolve(instPath.value);
-  } catch (err) {
-    return util.GameStoreHelper.findByName("Enderal: Forgotten Stories", "steam").then(
-      (game) => game.gamePath,
-    );
-  }
+  return util.GameStoreHelper.findByName("Enderal: Forgotten Stories", "steam").then(
+    (game) => game.gamePath,
+  );
 }
 
 let tools = [

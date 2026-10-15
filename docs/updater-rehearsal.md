@@ -1,5 +1,9 @@
 # Updater Rehearsal on Real GitHub
 
+> Historical upstream Windows instructions. Nyastra uses Linux release and source
+> metadata checks with explicit installation. See [Linux updates](updater.md).
+> The signing and publishing steps below do not apply to the Linux program.
+
 The mock feed (`docs/updater-testing.md`) covers most of the updater matrix
 offline. What it can't cover is GitHub itself: real API shapes and rate
 limits, the `objects.githubusercontent.com` redirect on asset downloads,

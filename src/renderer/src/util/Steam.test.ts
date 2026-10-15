@@ -316,3 +316,89 @@ it("keeps each Linux Steam installation as the owner of its library", async () =
     steam.roots = [];
   }
 });
+
+describe("Steam launch commands", () => {
+  beforeEach(() => {
+    steam.installed = true;
+    steam.roots = [];
+    chaosRules = [];
+    libraryFoldersVdf = libraryFolders([]);
+  });
+
+  it("launches a discovered folder using its app ID", async () => {
+    const restore = installTestFS();
+    try {
+      const store = new Steam();
+      await store.reloadGames();
+      expect(await store.getExecInfo(gamePathIn(BASE_FOLDER))).toEqual({
+        execPath: path.join(BASE_FOLDER, "steam.sh"),
+        arguments: ["-applaunch", "42"],
+      });
+    } finally {
+      restore();
+    }
+  });
+
+  it("does not match a sibling folder with the same name prefix", async () => {
+    const restore = installTestFS();
+    try {
+      const store = new Steam();
+      await store.reloadGames();
+      await expect(store.getExecInfo(gamePathIn(BASE_FOLDER) + "-other")).rejects.toBeInstanceOf(
+        GameEntryNotFound,
+      );
+    } finally {
+      restore();
+    }
+  });
+
+  it("preserves argument boundaries when invoking the launcher", async () => {
+    const restore = installTestFS();
+    const api = { runExecutable: vi.fn(() => Promise.resolve()) };
+    try {
+      const store = new Steam();
+      await store.reloadGames();
+      await store.launchGame(
+        { appId: "42", parameters: ["two words", "literal;$HOME"] },
+        api as unknown as Parameters<Steam["launchGame"]>[1],
+      );
+      expect(api.runExecutable).toHaveBeenCalledWith(
+        path.join(BASE_FOLDER, "steam.sh"),
+        ["-applaunch", "42", "two words", "literal;$HOME"],
+        expect.objectContaining({ shell: false }),
+      );
+    } finally {
+      restore();
+    }
+  });
+
+  it("uses the owning Steam root and retains custom arguments", async () => {
+    const secondary = "/test/secondary-steam";
+    steam.roots = [secondary];
+    const { restore } = installInMemoryFS((builder) => {
+      for (const root of [BASE_FOLDER, secondary]) {
+        builder.file(QualifiedPath.fromNative(path.join(root, "config/libraryfolders.vdf")), {
+          type: "text",
+          data: libraryFolders([]),
+        });
+      }
+      builder.file(QualifiedPath.fromNative(path.join(secondary, "steamapps/appmanifest_42.acf")), {
+        type: "text",
+        data: MANIFEST,
+      });
+    });
+    try {
+      const store = new Steam();
+      await store.reloadGames();
+      expect(await store.getExecInfo({ appId: "42", parameters: ["--name", "two words"] })).toEqual(
+        {
+          execPath: path.join(secondary, "steam.sh"),
+          arguments: ["-applaunch", "42", "--name", "two words"],
+        },
+      );
+    } finally {
+      restore();
+      steam.roots = [];
+    }
+  });
+});

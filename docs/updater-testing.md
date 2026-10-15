@@ -1,5 +1,10 @@
 # Testing the Auto-Updater Locally
 
+> Historical upstream Windows instructions. This workflow does not apply to
+> Nyastra's Linux update checker. See [Linux updates](updater.md) and the checks
+> in `src/main/src/updateCheck.test.ts` and
+> `src/renderer/src/extensions/updater/SettingsUpdate.test.tsx`.
+
 The full update cycle (resolve, notify, download differentially, verify,
 install) can be exercised on one machine with no GitHub access, using
 packaged local builds and a mock feed. This is how the updater overhaul was

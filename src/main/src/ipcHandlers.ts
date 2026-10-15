@@ -50,6 +50,7 @@ import { getVortexPath } from "./getVortexPath";
 import { hashFile } from "./hash/host";
 import { betterIpcMain } from "./ipc";
 import { openUrl, openFile, showItemInFolder } from "./open";
+import { createUpdateChecker } from "./updateCheck";
 import { extraWebViews } from "./webview";
 
 // Type-safe interface for global Redux state accessors
@@ -59,6 +60,13 @@ export interface GlobalWithRedux {
 }
 
 export function init(fs: FileSystem) {
+  const checkUpdates = createUpdateChecker(() => ({
+    packaged: app.isPackaged,
+    version: app.getVersion(),
+    appPath: app.getAppPath(),
+    arch: process.arch,
+  }));
+  betterIpcMain.handle("updater:check-linux", () => checkUpdates());
   // Build paths lazily so that paths overridden later (e.g. "temp" in
   // Application constructor) are resolved at call time, not at init time.
   function resolveVortexPaths(): VortexPaths {
@@ -869,15 +877,19 @@ export function init(fs: FileSystem) {
     const chunks: Uint8Array[] = [];
     let collected = 0;
     let done = false;
-    while (collected < max) {
-      const step = await session.reader.read();
-      if (step.done) {
-        done = true;
-        break;
+    try {
+      while (collected < max) {
+        const step = await session.reader.read();
+        if (step.done) {
+          done = true;
+          break;
+        }
+        collected += step.value.length;
+        chunks.push(step.value);
       }
-
-      collected += step.value.length;
-      chunks.push(step.value);
+    } catch (error) {
+      evictStream(handle);
+      throw error;
     }
 
     if (done) {
@@ -925,14 +937,27 @@ export function init(fs: FileSystem) {
     if (session.kind === "write") {
       // Graceful: flush pending node-buffered bytes, then autoClose ends
       // the fd. Evicting afterwards abort()s a no-op writer at worst.
-      await session.writer.close().catch(() => undefined);
-      evictStream(handle);
+      try {
+        await session.writer.close();
+      } finally {
+        evictStream(handle);
+      }
       return;
     }
 
     // Read: cancel is the correct close for a stream that may not be
     // exhausted.
     evictStream(handle);
+  });
+
+  betterIpcMain.handle("fs:stream-abort", async (_event, handle: number) => {
+    const session = streams.get(handle);
+    if (session === undefined) return;
+    try {
+      if (session.kind === "write") await session.writer.abort();
+    } finally {
+      evictStream(handle);
+    }
   });
 }
 

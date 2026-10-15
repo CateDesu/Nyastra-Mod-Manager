@@ -65,7 +65,10 @@ async function doRefresh(
   try {
     reply = await requestTokenRefresh(current.refreshToken);
   } catch (err) {
-    if (REFUSED_OAUTH_CODES.includes(getErrorCode(err) ?? "")) {
+    if (
+      REFUSED_OAUTH_CODES.includes(getErrorCode(err) ?? "") &&
+      credentialsFromState(api)?.refreshToken === current.refreshToken
+    ) {
       refuseLogin(api, err);
     }
     throw err;

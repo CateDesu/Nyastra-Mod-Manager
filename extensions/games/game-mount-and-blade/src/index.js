@@ -6,7 +6,7 @@
 */
 const Promise = require("bluebird");
 const path = require("path");
-const winapi = require("winapi-bindings");
+
 const { fs, util } = require("@nexusmods/vortex-api");
 
 // Mount and Blade module based mods have a module.ini
@@ -16,7 +16,6 @@ const MAB_MODULE_FILE = "module.ini";
 
 // The common registry key path which can be used to
 //  find the installation folder using the game's steam ID.
-const steamReg = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Steam App ";
 
 // A map of file extensions mapped against their
 //  expected folder name. ()
@@ -41,7 +40,6 @@ const MAB_GAMES = {
     id: "mountandblade",
     name: "Mount & Blade",
     steamId: "22100",
-    regPath: steamReg + "22100",
     logo: "gameart.jpg",
     exec: "mount&blade.exe",
     nativeModuleName: "native",
@@ -51,7 +49,6 @@ const MAB_GAMES = {
     id: "mbwarband",
     name: "Mount & Blade:\tWarband",
     steamId: "48700",
-    regPath: steamReg + "48700",
     logo: "gameartwarband.png",
     exec: "mb_warband.exe",
     nativeModuleName: "native",
@@ -61,7 +58,6 @@ const MAB_GAMES = {
     id: "mbwithfireandsword",
     name: "Mount & Blade:\tWith Fire and Sword",
     steamId: "48720",
-    regPath: steamReg + "48720",
     logo: "gameartfire.png",
     exec: "mb_wfas.exe",
     nativeModuleName: "Ogniem i Mieczem",
@@ -75,24 +71,13 @@ const MAB_GAMES = {
   //   id: 'mountandbladevikingconquest',
   //   name: 'Mount & Blade: Viking Conquest',
   //   steamId: '321300',
-  //   regPath: steamReg + '321300',
   //   logo: 'gameartviking.png',
   //   exec: ?????
   // },
 };
 
 function findGame(mabGame) {
-  const { name, regPath } = mabGame;
-
-  try {
-    const instPath = winapi.RegGetValue("HKEY_LOCAL_MACHINE", regPath, "InstallLocation");
-    if (!instPath) {
-      throw new Error("empty registry key");
-    }
-    return Promise.resolve(instPath.value);
-  } catch (err) {
-    return util.GameStoreHelper.findByName(name, "steam").then((game) => game.gamePath);
-  }
+  return util.GameStoreHelper.findByAppId(mabGame.steamId, "steam").then((game) => game.gamePath);
 }
 
 async function resolveGameVersion(discoveryPath, mnbGame) {

@@ -250,20 +250,15 @@ class MainWindow {
     };
 
     this.mWindow.webContents.session.webRequest.onBeforeSendHeaders(
-      REQUEST_HEADER_FILTER,
+      { urls: [...REQUEST_HEADER_FILTER.urls, ...YOUTUBE_HEADER_FILTER.urls] },
       (details, callback) => {
-        details.requestHeaders["User-Agent"] =
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Safari/537.36";
-        callback({ requestHeaders: details.requestHeaders });
-      },
-    );
-
-    // YouTube requires Referer header for embed API compliance
-    // Electron doesn't send Referer headers from iframes, so we inject it manually
-    this.mWindow.webContents.session.webRequest.onBeforeSendHeaders(
-      YOUTUBE_HEADER_FILTER,
-      (details, callback) => {
-        details.requestHeaders["Referer"] = "https://vortex.nexusmods.com";
+        if (new URL(details.url).hostname === "enbdev.com") {
+          details.requestHeaders["User-Agent"] =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Safari/537.36";
+        } else {
+          // Video embeds require a Referer. Electron supports one listener per event.
+          details.requestHeaders["Referer"] = "https://vortex.nexusmods.com";
+        }
         callback({ requestHeaders: details.requestHeaders });
       },
     );

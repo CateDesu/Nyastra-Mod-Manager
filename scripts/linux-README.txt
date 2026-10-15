@@ -34,7 +34,10 @@ Configure Fluffy in $XDG_CONFIG_HOME/nyastra-mod-manager/fluffy.json. The includ
 linux-extensions recipe contains no third-party extension assets. Close Nyastra
 and rerun its installed app/install.sh after adding a supported extension.
 
-Updates are manual from the Nyastra release page. No upstream analytics or
+Updates are checked automatically from the Nyastra release page. Use Linux updates
+in Settings to check now or disable automatic checking. Close the program and install
+the new package when ready. See https://github.com/CateDesu/Nyastra-Mod-Manager/blob/main/docs/updater.md.
+No upstream analytics or
 Nexus crash uploads are enabled. Logs are shared manually through the own issue
 tracker only after you review their contents.
 

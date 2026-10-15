@@ -1,6 +1,6 @@
 const Promise = require("bluebird");
 const path = require("path");
-const winapi = require("winapi-bindings");
+
 const { actions, fs, util } = require("@nexusmods/vortex-api");
 
 const STRACKER_FILES = ["loader-config.json", "loader.dll"];
@@ -13,29 +13,14 @@ const RESHADE_DIRNAME = "reshade-shaders";
 //  mod is supported or not.
 const NATIVE_PC_FOLDER = "nativePC";
 
-// We can rely on the steam uninstall registry key when
-//  figuring out the install location for MH:W; but this is
-//  of course only valid for steam installations.
-//  TODO: Find and test a regkey which does not depend
-//  on steam to cater for non-steam installations.
-const steamReg = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Steam App 582010";
-
 const MHW_EXEC = "MonsterHunterWorld.exe";
 
 const I18N_NAMESPACE = "game-monster-hunter-world";
 
 function findGame() {
-  try {
-    const instPath = winapi.RegGetValue("HKEY_LOCAL_MACHINE", steamReg, "InstallLocation");
-    if (!instPath) {
-      throw new Error("empty registry key");
-    }
-    return Promise.resolve(instPath.value);
-  } catch (err) {
-    return util.GameStoreHelper.findByName("MONSTER HUNTER: WORLD", "steam").then(
-      (game) => game.gamePath,
-    );
-  }
+  return util.GameStoreHelper.findByName("MONSTER HUNTER: WORLD", "steam").then(
+    (game) => game.gamePath,
+  );
 }
 
 const tools = [

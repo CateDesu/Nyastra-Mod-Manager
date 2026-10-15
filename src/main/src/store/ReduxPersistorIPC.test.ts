@@ -88,6 +88,29 @@ async function setupIPC(persistor: IPersistor) {
 }
 
 describe("ReduxPersistorIPC: run grouping", () => {
+  it("hydrates special property names as data without modifying object prototypes", async () => {
+    const persistor = createBulkPersistor();
+    const marker = "nyastraHydrationProbe";
+    persistor.getAllKVs = vi.fn().mockResolvedValue([
+      { key: ["mods", "__proto__", marker], value: '"saved mod"' },
+      { key: ["mods", "constructor", "prototype", marker], value: '"other mod"' },
+    ]);
+    try {
+      const loaded = await new ReduxPersistorIPC().insertPersistor("persistent", persistor);
+      expect(Object.hasOwn(Object.prototype, marker)).toBe(false);
+      const mods = loaded.mods;
+      if (mods === null || typeof mods !== "object") throw new Error("expected saved mods");
+      expect(Object.hasOwn(mods, "__proto__")).toBe(true);
+      expect(JSON.parse(JSON.stringify(loaded))).toEqual(
+        JSON.parse(
+          '{"mods":{"__proto__":{"nyastraHydrationProbe":"saved mod"},"constructor":{"prototype":{"nyastraHydrationProbe":"other mod"}}}}',
+        ),
+      );
+    } finally {
+      Reflect.deleteProperty(Object.prototype, marker);
+    }
+  });
+
   beforeEach(() => vi.clearAllMocks());
 
   it("collapses a uniform set run into one bulkSetItem call", async () => {

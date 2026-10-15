@@ -1,25 +1,11 @@
 const { log, util } = require("@nexusmods/vortex-api");
 
 const path = require("path");
-const winapi = require("winapi-bindings");
 
 function findGame() {
-  try {
-    let regKey =
-      process.arch === "x32"
-        ? "Software\\Zenimax_Online\\Launcher"
-        : "Software\\Wow6432Node\\Zenimax_Online\\Launcher";
-
-    const instPath = winapi.RegGetValue("HKEY_LOCAL_MACHINE", regKey, "InstallPath");
-    if (!instPath) {
-      throw new Error("empty registry key");
-    }
-    return Promise.resolve(path.join(instPath.value, "Launcher"));
-  } catch (err) {
-    return util.GameStoreHelper.findByName("The Elder Scrolls Online", "steam").then(
-      (game) => game.gamePath,
-    );
-  }
+  return util.GameStoreHelper.findByName("The Elder Scrolls Online", "steam").then(
+    (game) => game.gamePath,
+  );
 }
 
 function modPath() {

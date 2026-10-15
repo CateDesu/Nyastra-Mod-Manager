@@ -1,6 +1,6 @@
 const Promise = require("bluebird");
 const path = require("path");
-const winapi = require("winapi-bindings");
+
 const { fs, util } = require("@nexusmods/vortex-api");
 
 const NWN_GAME_ID = "nwn";
@@ -59,41 +59,10 @@ const _MOD_DIRECTORIES = [
   "tlk",
 ];
 
-function findGame() {
-  if (process.platform !== "win32") {
-    return Promise.reject(new Error("Currently only discovered on windows"));
-  }
-  try {
-    const instPath = winapi.RegGetValue(
-      "HKEY_LOCAL_MACHINE",
-      "Software\\Wow6432Node\\Bioware\\NWN\\Neverwinter",
-      "Location",
-    );
-    if (!instPath) {
-      throw new Error("empty registry key");
-    }
-    return Promise.resolve(instPath.value);
-  } catch (err) {
-    return Promise.reject(err);
-  }
-}
-
 function findGameEE() {
-  try {
-    const instPath = winapi.RegGetValue(
-      "HKEY_LOCAL_MACHINE",
-      "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Steam App 704450",
-      "InstallLocation",
-    );
-    if (!instPath) {
-      throw new Error("empty registry key");
-    }
-    return Promise.resolve(instPath.value);
-  } catch (err) {
-    return util.GameStoreHelper.findByName("Neverwinter Nights: Enhanced Edition", "steam").then(
-      (game) => game.gamePath,
-    );
-  }
+  return util.GameStoreHelper.findByName("Neverwinter Nights: Enhanced Edition", "steam").then(
+    (game) => game.gamePath,
+  );
 }
 
 function modPath(context) {
@@ -175,7 +144,7 @@ function main(context) {
     id: NWN_GAME_ID,
     name: "Neverwinter Nights",
     mergeMods: true,
-    queryPath: findGame,
+
     queryModPath: () => modPath(context),
     logo: "gameart.jpg",
     executable: () => "nwmain.exe",

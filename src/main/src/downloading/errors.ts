@@ -11,6 +11,8 @@ import { HTTPError, RequestError, TimeoutError } from "got";
  * or `unknown`).
  */
 export function toNetworkError(endpoint: URL | ResolvedEndpoint, err: unknown): VortexError {
+  if (err instanceof VortexError) return err;
+  if (err instanceof RequestError && err.cause instanceof VortexError) return err.cause;
   const url = endpoint instanceof URL ? endpoint : endpoint.url;
   const urlString = url.toString();
 

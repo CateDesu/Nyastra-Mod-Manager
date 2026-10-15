@@ -1,7 +1,6 @@
 const path = require("path");
 const { fs, util } = require("@nexusmods/vortex-api");
 const { Builder, parseStringPromise } = require("xml2js");
-const winapi = require("winapi-bindings");
 
 const ADDINS_FILE = "AddIns.xml";
 const STEAM_ID = 17450;
@@ -18,26 +17,10 @@ function findGame() {
   return util.GameStoreHelper.findByAppId([
     STEAM_ID.toString(),
     STEAM_ID_ULTIMATE_EDITION.toString(),
-  ])
-    .then((game) => {
-      _APPID = game.appid;
-      return Promise.resolve(game.gamePath);
-    })
-    .catch(() => {
-      try {
-        const instPath = winapi.RegGetValue(
-          "HKEY_LOCAL_MACHINE",
-          "Software\\Wow6432Node\\BioWare\\Dragon Age",
-          "Path",
-        );
-        if (!instPath) {
-          throw new Error("empty registry key");
-        }
-        return Promise.resolve(instPath.value);
-      } catch (err) {
-        return Promise.reject(err);
-      }
-    });
+  ]).then((game) => {
+    _APPID = game.appid;
+    return game.gamePath;
+  });
 }
 
 function queryModPath() {

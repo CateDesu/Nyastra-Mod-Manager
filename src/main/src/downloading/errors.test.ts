@@ -1,3 +1,4 @@
+import { VortexError } from "@vortex/shared";
 import { ReadError, RequestError } from "got";
 import { assert, describe, expect, it } from "vitest";
 
@@ -9,6 +10,15 @@ const url = new URL("https://cdn.nexusmods.com/files/mod.7z");
 const noRequest = {} as never;
 
 describe("toNetworkError", () => {
+  it("preserves a protocol failure wrapped by the HTTP stream", () => {
+    const failure = new VortexError("Wrong byte range", {
+      kind: "http:protocol-violation",
+      url: url.toString(),
+    });
+    expect(toNetworkError(url, new RequestError(failure.message, failure, noRequest))).toBe(
+      failure,
+    );
+  });
   it("keeps the POSIX classification of a reset connection", () => {
     const cause = Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" });
     const result = toNetworkError(url, new RequestError(cause.message, cause, noRequest));

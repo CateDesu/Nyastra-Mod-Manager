@@ -374,7 +374,19 @@ export interface FlagMetricsBucket {
 export type HashAlgorithm = "md5";
 
 /** Type containing all known channels used by renderer processes to send to and receive messages from the main process */
+export interface LinuxUpdateCheck {
+  kind: "package" | "source";
+  status: "available" | "current" | "unavailable" | "error";
+  current: string;
+  latest?: string;
+  checkedAt: number;
+  url: string;
+  dirty?: boolean;
+  reason?: "no-release" | "not-main" | "local-history";
+}
+
 export interface InvokeChannels {
+  "updater:check-linux": () => Promise<LinuxUpdateCheck>;
   // NOTE(erri120): Parameters must be serializable and return values must be Promises resolving serializable content.
 
   // Examples:
@@ -629,6 +641,7 @@ export interface InvokeChannels {
   "fs:stream-read": (handle: number, max: number) => Promise<StreamReadReply>;
   "fs:stream-write": (handle: number, bytes: Uint8Array) => Promise<void>;
   "fs:stream-close": (handle: number) => Promise<void>;
+  "fs:stream-abort": (handle: number) => Promise<void>;
 }
 
 /** Wire reply of {@link InvokeChannels["fs:stream-read"]}. `bytes` holds the

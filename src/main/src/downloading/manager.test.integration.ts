@@ -48,6 +48,33 @@ async function makeTmpDir(): Promise<TmpDir> {
 }
 
 describe("DownloadManager", () => {
+  it("waits for the same in-flight transfer on repeated pause requests", async () => {
+    using route = server.route(serveFile({ body: SMALL_FILE, acceptRanges: true }));
+    await using tmp = await makeTmpDir();
+    const manager = new DownloadManager({ concurrency: 1 });
+    let release: () => void;
+    const resolving = new Promise<void>((resolve) => (release = resolve));
+    const handle = manager.download(route.url, path.join(tmp.dir, "output"), async (url) => {
+      await resolving;
+      return urlResolver(url);
+    });
+    const first = handle.pause();
+    let finished = false;
+    const second = handle.pause().then((result) => {
+      finished = true;
+      return result;
+    });
+    try {
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(finished).toBe(false);
+    } finally {
+      release!();
+      await Promise.all([first, second, handle.promise]);
+    }
+    expect(await second).toEqual(await first);
+    expect(manager.numRunning).toBe(0);
+  });
+
   it("downloads a file and resolves the handle promise", async () => {
     using route = server.route(serveFile({ body: SMALL_FILE, acceptRanges: false }));
     await using tmp = await makeTmpDir();
@@ -139,6 +166,79 @@ describe("DownloadManager", () => {
   });
 
   describe("resume", () => {
+    it.each([true, false])(
+      "preserves every byte after pausing a single stream with range support %s",
+      async (acceptRanges) => {
+        using route = server.route(
+          withHooks(
+            serveFile({ body: LARGE_FILE, acceptRanges, chunkSize: 64 * 1024 }),
+            delayBeforeChunk(4, 300),
+          ),
+        );
+        await using tmp = await makeTmpDir();
+        const manager = new DownloadManager({ concurrency: 1 });
+        const dest = path.join(tmp.dir, "output");
+        const handle = manager.download(route.url, dest, urlResolver, () => []);
+        await vi.waitFor(() => expect(handle.getState().bytesWritten).toBeGreaterThan(0));
+        const paused = await handle.pause();
+        expect(paused.status).toBe("paused");
+        if (paused.status !== "paused") throw new Error("expected paused");
+        const partial = await readFile(dest);
+        expect(partial.length).toBeLessThan(LARGE_FILE.length);
+        expect(paused.checkpoint.completedRanges).toEqual([{ start: 0, end: partial.length - 1 }]);
+        await manager.resume(paused.checkpoint, urlResolver, () => []).promise;
+        expect(Buffer.compare(await readFile(dest), LARGE_FILE)).toBe(0);
+      },
+    );
+
+    it("reports waiting downloads separately from active downloads", async () => {
+      using route = server.route(
+        withHooks(serveFile({ body: SMALL_FILE }), delayAt("onRequest", 50)),
+      );
+      await using tmp = await makeTmpDir();
+      const manager = new DownloadManager({ concurrency: 1 });
+      const handles = [0, 1, 2].map((i) =>
+        manager.download(route.url, path.join(tmp.dir, `file-${i}`), urlResolver),
+      );
+      try {
+        expect(manager.numRunning).toBe(1);
+        expect(manager.numPending).toBe(2);
+      } finally {
+        await Promise.all(handles.map((handle) => handle.promise));
+      }
+    });
+
+    it.each(["cancel", "pause"] as const)(
+      "does not start a waiting download after %s",
+      async (action) => {
+        using blockerRoute = server.route(
+          withHooks(serveFile({ body: SMALL_FILE }), delayAt("onRequest", 50)),
+        );
+        using route = server.route(serveFile({ body: SMALL_FILE }));
+        await using tmp = await makeTmpDir();
+        const manager = new DownloadManager({ concurrency: 1 });
+        const blocker = manager.download(
+          blockerRoute.url,
+          path.join(tmp.dir, "blocker"),
+          urlResolver,
+        );
+        const dest = path.join(tmp.dir, "output");
+        const waiting = manager.download(route.url, dest, urlResolver);
+        const stopped = action === "pause" ? await waiting.pause() : waiting.cancel();
+        await Promise.all([blocker.promise, waiting.promise]);
+        expect(stopped.status).toBe(action === "pause" ? "paused" : "canceled");
+        expect(waiting.getState().status).toBe(stopped.status);
+        expect(route.requests).toHaveLength(0);
+        await expect(access(dest)).rejects.toMatchObject({ code: "ENOENT" });
+        if (action === "pause") {
+          const paused = await waiting.pause();
+          if (paused.status !== "paused") throw new Error("expected paused");
+          await manager.resume(paused.checkpoint, urlResolver, staticChunker()).promise;
+          expect(await readFile(dest)).toEqual(SMALL_FILE);
+        }
+      },
+    );
+
     async function waitForFile(path: string, timeout = 10_000): Promise<void> {
       const start = Date.now();
       while (Date.now() - start < timeout) {
@@ -358,19 +458,14 @@ describe("DownloadManager", () => {
       expect(manager.numPending).toBe(1);
 
       const pauseResult = await handle.pause();
-      expect(pauseResult.status).toBe("queued");
+      expect(pauseResult.status).toBe("paused");
 
-      // Cancel blocker so the queue slot opens, then wait for handle to start
-      // running and cancel it too — otherwise both downloads outlive the route
-      // registrations and produce unhandled 404 rejections.
+      // Release the slot and confirm the paused task cannot start a transfer.
       _blocker.cancel();
       await _blocker.promise.catch(() => {});
-      await vi.waitFor(() => handle.getState().status === "running", {
-        timeout: 5_000,
-        interval: 10,
-      });
-      handle.cancel();
       await handle.promise.catch(() => {});
+      expect(handle.getState().status).toBe("paused");
+      expect(route.requests).toHaveLength(0);
     });
 
     it("does not throw when pause is called after the download has already completed", async () => {

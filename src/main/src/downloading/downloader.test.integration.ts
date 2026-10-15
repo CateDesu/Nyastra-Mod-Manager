@@ -1,7 +1,9 @@
 import { randomBytes } from "node:crypto";
-import { readFile, mkdtemp, mkdir, rm } from "node:fs/promises";
+import { readFile, writeFile, mkdtemp, mkdir, rm } from "node:fs/promises";
+import * as fsPromises from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { gzipSync } from "node:zlib";
 
 import { VortexError } from "@vortex/shared";
 import type { ResolvedResource, ResolvedEndpoint, Resolver, Chunk } from "@vortex/shared/download";
@@ -100,7 +102,198 @@ function runDownload(
 }
 
 describe("download", () => {
+  it("continues decoding a compressed full response whose wire size differs", async () => {
+    const body = Buffer.from("compressed response data".repeat(100));
+    const compressed = gzipSync(body);
+    using route = server.route(({ req, res }) => {
+      res.setHeader("Content-Encoding", "gzip");
+      res.setHeader("Content-Length", compressed.length);
+      res.end(req.method === "HEAD" ? undefined : compressed);
+      return Promise.resolve();
+    });
+    await using tmp = await makeTmpDir();
+    expect(await completeDownload(route.url, tmp.dir)).toEqual(body);
+  });
+
+  it("removes a failed attempt's trailing bytes when retrying an unknown-length response", async () => {
+    const reporter = new ProgressReporter();
+    let requests = 0;
+    const body = Buffer.from("complete retry");
+    using route = server.route(async ({ req, res }) => {
+      if (req.method === "HEAD") {
+        res.end();
+      } else if (++requests === 1) {
+        res.write(Buffer.alloc(1024, 65));
+        await vi.waitFor(() => expect(reporter.getProgress().bytesWritten).toBe(1024));
+        res.destroy();
+      } else {
+        res.end(body);
+      }
+    });
+    await using tmp = await makeTmpDir();
+    const dest = path.join(tmp.dir, "output");
+    await download(
+      route.url,
+      dest,
+      {
+        resolver: urlResolver,
+        chunker: staticChunker(),
+        retry: defaultRetryStrategy(1, 1, 1),
+      },
+      { progressReporter: reporter },
+    );
+    expect(await readFile(dest)).toEqual(body);
+  });
+
+  it.each([512, 1536])(
+    "rejects a full response of %s bytes when the probe promised 1024",
+    async (size) => {
+      using route = server.route(({ req, res }) => {
+        res.setHeader("Content-Length", req.method === "HEAD" ? 1024 : size);
+        res.end(req.method === "HEAD" ? undefined : Buffer.alloc(size));
+        return Promise.resolve();
+      });
+      await using tmp = await makeTmpDir();
+      await expect(completeDownload(route.url, tmp.dir)).rejects.toMatchObject({
+        data: { kind: "http:protocol-violation" },
+      });
+    },
+  );
+
+  it.each([false, true])(
+    "writes every byte after short disk writes with chunked=%s",
+    async (chunked) => {
+      using route = server.route(serveFile({ body: SMALL_FILE, acceptRanges: true }));
+      await using tmp = await makeTmpDir();
+      const handle = await fsPromises.open(path.join(tmp.dir, "probe"), "w");
+      const prototype = Object.getPrototypeOf(handle) as fsPromises.FileHandle;
+      const originalWrite = Reflect.get(prototype, "write") as (
+        buffer: Uint8Array,
+        offset: number,
+        length: number,
+        position: number,
+      ) => Promise<{ bytesWritten: number; buffer: Uint8Array }>;
+      await handle.close();
+      const write = vi.spyOn(prototype, "write").mockImplementation(function (
+        this: fsPromises.FileHandle,
+        buffer: Uint8Array,
+        offset: number,
+        length: number,
+        position: number,
+      ) {
+        return originalWrite.call(this, buffer, offset, Math.min(length, 17), position);
+      } as typeof handle.write);
+      const reporter = new ProgressReporter();
+      try {
+        const result = await completeDownload(route.url, tmp.dir, {
+          chunker: chunked
+            ? () => [
+                { index: 0, range: { start: 0, end: 511 } },
+                { index: 1, range: { start: 512, end: 1023 } },
+              ]
+            : staticChunker(),
+          progressReporter: reporter,
+        });
+        expect(result.equals(SMALL_FILE)).toBe(true);
+        expect(reporter.getProgress().bytesWritten).toBe(SMALL_FILE.length);
+      } finally {
+        write.mockRestore();
+      }
+    },
+  );
+
+  it("rejects a disk write that makes no progress", async () => {
+    using route = server.route(serveFile({ body: SMALL_FILE, acceptRanges: false }));
+    await using tmp = await makeTmpDir();
+    const handle = await fsPromises.open(path.join(tmp.dir, "probe"), "w");
+    const prototype = Object.getPrototypeOf(handle) as fsPromises.FileHandle;
+    await handle.close();
+    const write = vi.spyOn(prototype, "write").mockImplementation(((buffer: Uint8Array) =>
+      Promise.resolve({
+        bytesWritten: 0,
+        buffer,
+      })) as typeof handle.write);
+    try {
+      await expect(completeDownload(route.url, tmp.dir)).rejects.toMatchObject({
+        data: { kind: "os:generic", originalCode: "EIO" },
+      });
+    } finally {
+      write.mockRestore();
+    }
+  });
+
+  it.each(["short", "wrong range"])(
+    "rejects a well-formed HTTP response with %s chunk data",
+    async (failure) => {
+      using route = server.route(({ req, res }) => {
+        if (req.method === "HEAD") {
+          res.writeHead(200, { "content-length": SMALL_FILE.length, "accept-ranges": "bytes" });
+          res.end();
+          return Promise.resolve();
+        }
+        const match = /^bytes=(\d+)-(\d+)$/.exec(req.headers.range!);
+        const start = Number(match![1]);
+        const end = Number(match![2]);
+        const body = SMALL_FILE.subarray(start, failure === "short" ? end : end + 1);
+        res.writeHead(206, {
+          "content-length": body.length,
+          "content-range": `bytes ${failure === "wrong range" ? start + 1 : start}-${end}/${SMALL_FILE.length}`,
+        });
+        res.end(body);
+        return Promise.resolve();
+      });
+      await using tmp = await makeTmpDir();
+      await expect(
+        download(route.url, path.join(tmp.dir, "output"), {
+          resolver: urlResolver,
+          chunker: () => [
+            { index: 0, range: { start: 0, end: 511 } },
+            { index: 1, range: { start: 512, end: 1023 } },
+          ],
+        }),
+      ).rejects.toMatchObject({ data: { kind: "http:protocol-violation" } });
+    },
+  );
+
   describe("non-chunked resume", () => {
+    it("restarts a partial file when the server does not support ranges", async () => {
+      using route = server.route(serveFile({ body: SMALL_FILE, acceptRanges: false }));
+      await using tmp = await makeTmpDir();
+      const dest = path.join(tmp.dir, "output");
+      await writeFile(dest, SMALL_FILE.subarray(0, 200));
+      await download(
+        route.url,
+        dest,
+        { resolver: urlResolver, chunker: () => [] },
+        { checkpoint: { etag: undefined, completedRanges: [{ start: 0, end: 199 }] } },
+      );
+      expect(await readFile(dest)).toEqual(SMALL_FILE);
+      expect(route.requests.find((r) => r.method === "GET")?.range).toBeNull();
+    });
+
+    it("does not request an invalid range when a single stream checkpoint is complete", async () => {
+      using route = server.route(serveFile({ body: SMALL_FILE, acceptRanges: true }));
+      await using tmp = await makeTmpDir();
+      const dest = path.join(tmp.dir, "output");
+      await writeFile(dest, SMALL_FILE);
+      const progressReporter = new ProgressReporter();
+      await download(
+        route.url,
+        dest,
+        { resolver: urlResolver, chunker: () => [] },
+        {
+          progressReporter,
+          checkpoint: {
+            etag: undefined,
+            completedRanges: [{ start: 0, end: SMALL_FILE.length - 1 }],
+          },
+        },
+      );
+      expect(await readFile(dest)).toEqual(SMALL_FILE);
+      expect(route.requests.filter((r) => r.method === "GET")).toHaveLength(0);
+      expect(progressReporter.getProgress().bytesWritten).toBe(SMALL_FILE.length);
+    });
+
     // Force the non-chunked path even when the server supports ranges
     // by returning an empty chunk list from the chunker.
     const noChunks = () => [];
@@ -339,6 +532,7 @@ describe("download", () => {
         etag: originalEtag,
         completedRanges: [{ start: 0, end: 999 }],
       };
+      await writeFile(dest, LARGE_FILE.subarray(0, 1000));
 
       await expect(
         download(
@@ -350,6 +544,7 @@ describe("download", () => {
       ).rejects.toMatchObject({
         data: { kind: "http:protocol-violation", url: route.url.toString() },
       });
+      expect(route.requests.filter((request) => request.method === "GET")).toHaveLength(0);
     });
 
     it("sends the checkpoint etag as If-Match on the probe request", async () => {
@@ -1313,6 +1508,49 @@ describe("download", () => {
   });
 
   describe("cookies", () => {
+    it("retains every byte when ranged responses set cookies", async () => {
+      using route = server.route(
+        serveFile({
+          body: LARGE_FILE,
+          acceptRanges: true,
+          headers: { "set-cookie": "range=seen; Path=/" },
+        }),
+      );
+      await using tmp = await makeTmpDir();
+      const dest = path.join(tmp.dir, "output");
+      await download(
+        route.url,
+        dest,
+        { resolver: urlResolver, chunker: staticChunker(4) },
+        { cookieJar: new CookieJar() },
+      );
+      const downloaded = await readFile(dest);
+      expect(downloaded.length).toBe(LARGE_FILE.length);
+      expect(downloaded.equals(LARGE_FILE)).toBe(true);
+      expect(route.requests.filter((request) => request.headers.range).length).toBeGreaterThan(1);
+    });
+
+    it("retains decoded bytes when a compressed response sets cookies", async () => {
+      const body = Buffer.from("compressed cookie response".repeat(100));
+      const compressed = gzipSync(body);
+      using route = server.route(({ req, res }) => {
+        res.setHeader("Content-Encoding", "gzip");
+        res.setHeader("Content-Length", compressed.length);
+        res.setHeader("Set-Cookie", "compressed=seen; Path=/");
+        res.end(req.method === "HEAD" ? undefined : compressed);
+        return Promise.resolve();
+      });
+      await using tmp = await makeTmpDir();
+      const dest = path.join(tmp.dir, "output");
+      await download(
+        route.url,
+        dest,
+        { resolver: urlResolver, chunker: staticChunker() },
+        { cookieJar: new CookieJar() },
+      );
+      expect(await readFile(dest)).toEqual(body);
+    });
+
     it("sends cookies from the jar in every request", async () => {
       using route = server.route(serveFile({ body: SMALL_FILE }));
       await using tmp = await makeTmpDir();
@@ -1351,6 +1589,7 @@ describe("download", () => {
       );
 
       const cookies = await jar.getCookies(route.url.toString());
+      expect(await readFile(path.join(tmp.dir, "output"))).toEqual(SMALL_FILE);
       expect(cookies).toHaveLength(1);
       expect(cookies[0]!.key).toBe("token");
       expect(cookies[0]!.value).toBe("xyz");
@@ -1380,6 +1619,7 @@ describe("download", () => {
       expect(get!.method).toBe("GET");
       // Cookie set in HEAD response must appear in the GET request.
       expect(get!.headers.cookie).toContain("probe=seen");
+      expect(await readFile(path.join(tmp.dir, "output"))).toEqual(SMALL_FILE);
     });
   });
 });

@@ -1,5 +1,4 @@
 const Promise = require("bluebird");
-const winapi = require("winapi-bindings");
 
 const path = require("path");
 const semver = require("semver");
@@ -22,67 +21,20 @@ const MODS_SUB_PATH = "Vortex Mods";
 // the resource.cfg of previous versions
 const PRIORITY = 1337;
 
-function findGame() {
-  if (process.platform !== "win32") {
-    return Promise.reject(new Error("Currently only discovered on windows"));
-  }
-  try {
-    const instPath = winapi.RegGetValue(
-      "HKEY_LOCAL_MACHINE",
-      "Software\\Maxis\\The Sims 4",
-      "Install Dir",
-    );
-    if (!instPath) {
-      throw new Error("empty registry key");
-    }
-    return Promise.resolve(instPath.value);
-  } catch (err) {
-    return Promise.reject(err);
-  }
-}
-
 let cachedModPath;
 
 function getLocale(eaPath) {
-  let locale;
-  // check registry for the locale
-  try {
-    const candidate = winapi.RegGetValue(
-      "HKEY_LOCAL_MACHINE",
-      "Software\\Maxis\\The Sims 4",
-      "Locale",
-    );
-    if (!!candidate) {
-      locale = candidate.value;
+  const locale = Object.keys(LOCALE_MODS_FOLDER).find((candidate) => {
+    try {
+      fs.statSync(path.join(eaPath, LOCALE_MODS_FOLDER[candidate]));
+      return true;
+    } catch {
+      return false;
     }
-  } catch (err) {}
-
-  if (locale !== undefined && LOCALE_MODS_FOLDER[locale] === undefined) {
-    locale = undefined;
-  }
-
-  // if we didn't find the locale in the registry (suspicious) loop through the known
-  // ones and see if the corresponding mod folder exists
-  if (locale === undefined) {
-    locale = Object.keys(LOCALE_MODS_FOLDER).find((candidate) => {
-      try {
-        const modsFolder = path.join(eaPath, LOCALE_MODS_FOLDER[candidate]);
-        fs.statSync(modsFolder);
-        return true;
-      } catch (err) {
-        return false;
-      }
-    });
-  }
-
-  if (locale === undefined) {
-    // fall back to english directory name ("The Sims 4") because that's what
-    // practically all variants use.
-    log("warn", "[The Sims 4] Falling back to default mod directory because locale is unknown");
-    locale = "en_US";
-  }
-
-  return locale;
+  });
+  if (locale !== undefined) return locale;
+  log("warn", "[The Sims 4] Falling back to default mod directory because locale is unknown");
+  return "en_US";
 }
 
 function findModPath() {
@@ -352,7 +304,7 @@ function main(context) {
     id: "thesims4",
     name: "The Sims 4",
     mergeMods: true,
-    queryPath: findGame,
+
     queryModPath: modPath,
     logo: "gameart.jpg",
     executable: () => "game/bin/TS4_x64.exe",

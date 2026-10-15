@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
-import { copyFile, rename, unlink } from "node:fs/promises";
+import { copyFile, rename } from "node:fs/promises";
 
-import { getErrorCode, unknownToError } from "@vortex/shared";
+import { unknownToError } from "@vortex/shared";
 import PromiseBB from "bluebird";
 import { file } from "tmp";
 
@@ -42,13 +42,19 @@ function writeFileAtomicImpl(
       (fdIn: number, pathIn: string) => {
         fd = fdIn;
         tmpPath = pathIn;
+        cleanup = () => fs.removeSync(pathIn);
         return fs
           .writeAsync(fd, buf, 0, buf.byteLength, 0)
           .then(() => fs.fsyncAsync(fd).catch(() => PromiseBB.resolve()))
-          .then(() => fs.closeAsync(fd).catch(() => PromiseBB.resolve()));
+          .catch((err) => {
+            callCleanup();
+            throw err;
+          })
+          .finally(() => fs.closeAsync(fd).catch(() => PromiseBB.resolve()));
       },
       {
         cleanup: false,
+        detachDescriptor: true,
         template: `${filePath}.XXXXXX.tmp`,
       },
     )
@@ -68,10 +74,7 @@ function writeFileAtomicImpl(
             writeFileAtomicImpl(filePath, input, attempts - 1)
           : PromiseBB.reject(new Error("Write failed, checksums differ"));
       } else {
-        return fs.renameAsync(tmpPath, filePath).catch({ code: "EEXIST" }, () =>
-          // renameAsync is supposed to overwrite so this is likely to fail as well
-          fs.removeAsync(filePath).then(() => fs.renameAsync(tmpPath, filePath)),
-        );
+        return fs.renameAsync(tmpPath, filePath);
       }
     })
     .catch((unknownErr) => {
@@ -87,9 +90,8 @@ function writeFileAtomicImpl(
 /**
  * copy a file in such a way that it will not replace the target if the copy is
  * somehow interrupted. The file is first copied to a temporary file in the same
- * directory as the destination, then deletes the destination and renames the temp
- * to destination. Since the rename is atomic and the deletion only happens after
- * a successful write this should minimize the risk of error.
+ * directory as the destination, then renames it over the destination. A failed
+ * rename leaves the original destination intact.
  *
  * Goes through node's fs: a file another process is holding fails back to the caller, which
  * knows whether that is worth interrupting the user over.
@@ -118,22 +120,6 @@ export function copyFileAtomic(srcPath: string, destPath: string): PromiseBB<voi
     );
   })
     .then(() => copyFile(srcPath, tmpPath))
-    .then(() =>
-      unlink(destPath).catch((err) => {
-        const code = getErrorCode(err);
-        if (code === "EPERM") {
-          // if the file is currently in use, try a second time
-          // 100ms later
-          log("debug", "file locked, retrying delete", destPath);
-          return PromiseBB.delay(100).then(() => unlink(destPath));
-        } else if (code === "ENOENT") {
-          // file doesn't exist anyway? no problem
-          return PromiseBB.resolve();
-        } else {
-          return PromiseBB.reject(err);
-        }
-      }),
-    )
     .then(() => (tmpPath !== undefined ? rename(tmpPath, destPath) : PromiseBB.resolve()))
     .catch((unknownErr) => {
       const err = unknownToError(unknownErr);

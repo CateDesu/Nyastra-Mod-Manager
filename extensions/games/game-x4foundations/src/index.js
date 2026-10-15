@@ -4,7 +4,6 @@ const Promise = require("bluebird");
 const { parseStringPromise } = require("xml2js");
 const path = require("path");
 const { fs, log, selectors, util } = require("@nexusmods/vortex-api");
-const winapi = require("winapi-bindings");
 
 const semver = require("semver");
 
@@ -17,33 +16,10 @@ let _STEAM_USER_ID = "";
 let _STEAM_ENTRY;
 
 function findGame() {
-  return util.GameStoreHelper.findByAppId(STEAM_ID.toString(), "steam")
-    .then((game) => {
-      _STEAM_ENTRY = game;
-      return Promise.resolve(game.gamePath);
-    })
-    .catch(() =>
-      readRegistryKey(
-        "HKEY_LOCAL_MACHINE",
-        `SOFTWARE\\WOW6432Node\\GOG.com\\Games\\${GOG_ID}`,
-        "PATH",
-      ),
-    )
-    .catch(() =>
-      readRegistryKey("HKEY_LOCAL_MACHINE", `SOFTWARE\\GOG.com\\Games\\${GOG_ID}`, "PATH"),
-    );
-}
-
-function readRegistryKey(hive, key, name) {
-  try {
-    const instPath = winapi.RegGetValue(hive, key, name);
-    if (!instPath) {
-      throw new Error("empty registry key");
-    }
-    return Promise.resolve(instPath.value);
-  } catch (err) {
-    return Promise.resolve(undefined);
-  }
+  return util.GameStoreHelper.findByAppId(STEAM_ID.toString(), "steam").then((game) => {
+    _STEAM_ENTRY = game;
+    return game.gamePath;
+  });
 }
 
 function testSupportedContent(files, gameId) {

@@ -485,6 +485,8 @@ async function mapWithConcurrency<T, R>(
 ): Promise<R[]> {
   const results: R[] = new Array(items.length);
   let nextIdx = 0;
+  let failed = false;
+  let failure: unknown;
   async function worker() {
     let abortPromise: Promise<never> | undefined;
     if (signal !== undefined) {
@@ -500,7 +502,7 @@ async function mapWithConcurrency<T, R>(
       // rejects on a late abort
       abortPromise.catch(() => undefined);
     }
-    while (nextIdx < items.length) {
+    while (nextIdx < items.length && !failed) {
       if (signal?.aborted) return;
       const idx = nextIdx++;
       try {
@@ -510,11 +512,16 @@ async function mapWithConcurrency<T, R>(
             : await Promise.race([Promise.resolve(fn(items[idx], idx)), abortPromise]);
       } catch (err) {
         if (signal?.aborted) return;
-        throw err;
+        if (!failed) {
+          failed = true;
+          failure = err;
+        }
+        return;
       }
     }
   }
   await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()));
+  if (failed) throw failure;
   return results;
 }
 
@@ -4276,35 +4283,51 @@ class InstallManager {
   }
 
   private validateInstructions(instructions: IInstruction[]): IInvalidInstruction[] {
-    const sanitizeSep = new RegExp("/", "g");
-    // Validate the ungrouped instructions and return errors (if any)
-    const invalidDestinationErrors: IInvalidInstruction[] = instructions
-      .filter((instr) => {
-        if (instr.destination) {
-          // This is a temporary hack to avoid invalidating fomod instructions
-          //  which will include a path separator at the beginning of a relative path
-          //  when matching nested stop patterns.
-          const destination =
-            instr.destination.charAt(0) === path.sep
-              ? instr.destination.substr(1)
-              : instr.destination;
-
-          // Ensure we use windows path separators as scripted installers
-          //  will sometime return *nix separators.
-          const sanitized = destination;
-          return !isPathValid(sanitized, true);
-        }
-
-        return false;
-      })
-      .map((instr) => {
-        return {
-          type: instr.type,
-          error: `invalid destination path: "${instr.destination}"`,
-        };
-      });
-
-    return [].concat(invalidDestinationErrors);
+    const errors: IInvalidInstruction[] = [];
+    const confined = (value: string, leadingSeparator: boolean): boolean => {
+      const portable = value.replace(/\\/g, "/");
+      // Nested FOMOD destinations may start with one separator.
+      const relative = leadingSeparator ? portable.replace(/^\/(?!\/)/, "") : portable;
+      const normalized = path.posix.normalize(relative);
+      return (
+        !path.posix.isAbsolute(relative) &&
+        !path.win32.isAbsolute(relative) &&
+        !/^[a-z]:/i.test(relative) &&
+        normalized !== ".." &&
+        !normalized.startsWith("../") &&
+        isPathValid(relative.replace(/\//g, path.sep), true)
+      );
+    };
+    for (const instruction of instructions) {
+      if (
+        ["copy", "generatefile"].includes(instruction.type) &&
+        (!instruction.destination ||
+          path.posix.normalize(
+            instruction.destination.replace(/\\/g, "/").replace(/^\/(?!\/)/, ""),
+          ) === ".")
+      ) {
+        errors.push({
+          type: instruction.type,
+          error: "A file destination must name a file inside staging",
+        });
+      }
+      if (instruction.destination && !confined(instruction.destination, true)) {
+        errors.push({
+          type: instruction.type,
+          error: `invalid destination path: "${instruction.destination}"`,
+        });
+      }
+      if (
+        instruction.type === "copy" &&
+        (!instruction.source || !confined(instruction.source, false))
+      ) {
+        errors.push({
+          type: instruction.type,
+          error: `invalid source path: "${instruction.source}"`,
+        });
+      }
+    }
+    return errors;
   }
 
   private transformInstructions(input: IInstruction[]): InstructionGroups {
@@ -7529,6 +7552,7 @@ class InstallManager {
           // File is already there - don't care
           return;
         }
+        throw err;
       }
     };
 

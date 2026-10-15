@@ -19,6 +19,7 @@ import { terminate } from "../errorHandling";
 import { log } from "../logging";
 import type LevelPersist from "./LevelPersist";
 import type QueryInvalidator from "./QueryInvalidator";
+import { insertStateValue } from "./stateTree";
 
 /**
  * Helper to insert a value at a leaf position in a nested object.
@@ -31,24 +32,7 @@ function insertValueAtLeaf<T extends Record<string, unknown>, V>(
   hive: string,
 ) {
   try {
-    key.reduce<Record<string, unknown>>((prev, keySegment, idx, fullKey) => {
-      if (idx === fullKey.length - 1) {
-        if (typeof prev !== "object") {
-          log("error", "invalid application state", {
-            key: fullKey.slice(0, idx).join("."),
-            was: prev,
-          });
-          return { [keySegment]: value };
-        }
-        prev[keySegment] = value;
-        return prev;
-      } else {
-        if (!prev[keySegment]) {
-          prev[keySegment] = {};
-        }
-        return prev[keySegment] as Record<string, unknown>;
-      }
-    }, target);
+    insertStateValue(target, key, value);
   } catch (err) {
     const newErr = new Error(`Failed to load application state ${hive}.${key.join(".")}`);
     if (err instanceof Error) {

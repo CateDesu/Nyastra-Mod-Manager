@@ -68,6 +68,7 @@ import { setModEnabled, setModsEnabled } from "../../profile_management/actions/
 import type { IProfileMod } from "../../profile_management/types/IProfile";
 import { removeMod, setModAttribute } from "../actions/mods";
 import { setShowModDropzone } from "../actions/settings";
+import { ModEnableControls } from "../components/mod_enable_controls/ModEnableControls";
 import { ModsTableSwitch } from "../components/mods_table_switch/ModsTableSwitch";
 import { ModsToolbar } from "../components/mods_toolbar/ModsToolbar";
 import { DOWNLOAD_TIME, ENABLED_TIME, INSTALL_TIME } from "../modAttributes";
@@ -314,6 +315,11 @@ class ModList extends ComponentEx<IProps, IComponentState> {
     ];
 
     this.staticButtons = [
+      {
+        component: ModEnableControls,
+        position: 20,
+        props: () => ({}),
+      },
       {
         component: InstallArchiveButton,
         position: 25,

@@ -2,26 +2,13 @@
 const { getFileVersion, getFileVersionLocalized } = require("exe-version");
 const path = require("path");
 const { actions, selectors, util } = require("@nexusmods/vortex-api");
-const winapi = require("winapi-bindings");
 
 const GAME_ID = "skyrimvr";
 const ESL_ENABLER_LIB = "skyrimvresl.dll";
 const ESL_NOTIF_ID = "skyvr-esl-enabler-notif";
 
 function findGame() {
-  try {
-    const instPath = winapi.RegGetValue(
-      "HKEY_LOCAL_MACHINE",
-      "Software\\Wow6432Node\\Bethesda Softworks\\Skyrim VR",
-      "Installed Path",
-    );
-    if (!instPath) {
-      throw new Error("empty registry key");
-    }
-    return Promise.resolve(instPath.value);
-  } catch (err) {
-    return util.GameStoreHelper.findByAppId(["611670"]).then((game) => game.gamePath);
-  }
+  return util.GameStoreHelper.findByAppId(["611670"]).then((game) => game.gamePath);
 }
 
 function getGameVersion(gamePath, exePath) {

@@ -29,9 +29,10 @@ supported Vortex game or live gameplay.
 
 Nexus Mods application registration is pending. Personal API keys are offered
 for testing and registration review only. Integrated public sign-in needs
-Nyastra's own approved application identifiers. Automatic updates, Nexus crash
-uploads and upstream analytics are disabled. Use the Nyastra repository for
-support and manual releases.
+Nyastra's own approved application identifiers. The program checks for new Linux
+releases automatically, with a switch and manual check in Settings. Installing
+updates remains your choice. Nexus crash uploads and upstream analytics are
+disabled. Use the Nyastra repository for support and releases.
 
 License: GPL-3.0. See LICENSE.md, NOTICE.md and Dependency Report.md in the package.
 Linux work reviewed from atabisz/Vortex is credited in NOTICE.md. The source tag

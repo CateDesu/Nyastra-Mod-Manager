@@ -1,5 +1,4 @@
-import type { UpdaterSnapshot } from "@vortex/shared/ipc";
-import * as reduxAct from "redux-act";
+import type { LinuxUpdateCheck, UpdaterSnapshot } from "@vortex/shared/ipc";
 
 import safeCreateAction from "../../actions/safeCreateAction";
 
@@ -8,6 +7,15 @@ import safeCreateAction from "../../actions/safeCreateAction";
  * currently either 'beta', 'stable' or 'none'
  */
 export const setUpdateChannel = safeCreateAction("SET_UPDATE_CHANNEL", (channel) => channel);
+
+export const setLinuxUpdateCheck = safeCreateAction(
+  "SET_LINUX_UPDATE_CHECK",
+  (result: LinuxUpdateCheck) => result,
+);
+export const setUpdateChecking = safeCreateAction(
+  "SET_UPDATE_CHECKING",
+  (checking: boolean) => checking,
+);
 
 /**
  * the latest updater snapshot the renderer has polled from main, kept in

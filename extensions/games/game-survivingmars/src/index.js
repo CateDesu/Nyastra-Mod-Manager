@@ -1,6 +1,6 @@
 const Promise = require("bluebird");
 const path = require("path");
-const winapi = require("winapi-bindings");
+
 const { log, fs, util } = require("@nexusmods/vortex-api");
 
 // Mods for Surviving Mars normally have this file cont#aining mod data.
@@ -16,21 +16,9 @@ const GOG_EXE = "MarsGOG.exe";
 const EPIC_EXE = "MarsEpic.exe";
 
 function findGame() {
-  try {
-    const instPath = winapi.RegGetValue(
-      "HKEY_LOCAL_MACHINE",
-      "SOFTWARE\\WOW6432Node\\GOG.com\\Games\\2129244347",
-      "PATH",
-    );
-    if (!instPath) {
-      throw new Error("empty registry key");
-    }
-    return Promise.resolve(instPath.value);
-  } catch (err) {
-    return util.GameStoreHelper.findByAppId("464920", "steam")
-      .catch(() => util.GameStoreHelper.findByAppId("Ovenbird", "epic"))
-      .then((game) => game.gamePath);
-  }
+  return util.GameStoreHelper.findByAppId("464920", "steam")
+    .catch(() => util.GameStoreHelper.findByAppId("Ovenbird", "epic"))
+    .then((game) => game.gamePath);
 }
 
 function modPath() {

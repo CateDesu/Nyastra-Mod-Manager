@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -52,6 +52,73 @@ function database(seed: Record<string, unknown>) {
 }
 
 describe("imported profile preparation", () => {
+  it.each(["nyastra-import.json", "nyastra-import-complete.json"])(
+    "rebases copied extension paths from %s while preserving profiles and mod paths",
+    async (marker) => {
+      await writeFile(
+        path.join(root, marker),
+        JSON.stringify({ version: 1, source: "/previous/Vortex" }),
+      );
+      await mkdir(path.join(root, "plugins", "game-re9"), { recursive: true });
+      const db = database({
+        "app###extensions###extension###path": "/previous/Vortex/plugins/game-re9",
+        "app###extensions###extension###enabled": true,
+        "app###extensions###disabled###path": "/previous/Vortex/plugins/game-re9",
+        "app###extensions###disabled###enabled": false,
+        "app###extensions###external###path": "/separate/plugins/custom-game",
+        "app###extensions###missing###path": "/previous/Vortex/plugins/not-copied",
+        "settings###gameMode###discovered###re9###extensionPath":
+          "/previous/Vortex/plugins/game-re9",
+        "settings###mods###installPath###re9": "/previous/Vortex/staging/re9",
+        "persistent###profiles###p###modState###off###enabled": false,
+        "persistent###mods###re9###mod###state": "installed",
+        "confidential###account###nexus###APIKey": "current-login",
+      });
+      await finishProfileImport(db.persistor, root);
+      expect(db.read("app###extensions###extension###path")).toBe(
+        path.join(root, "plugins", "game-re9"),
+      );
+      expect(db.read("app###extensions###disabled###path")).toBe(
+        path.join(root, "plugins", "game-re9"),
+      );
+      expect(db.read("app###extensions###disabled###enabled")).toBe(false);
+      expect(db.read("app###extensions###external###path")).toBe("/separate/plugins/custom-game");
+      expect(db.read("app###extensions###missing###path")).toBe(
+        "/previous/Vortex/plugins/not-copied",
+      );
+      expect(db.read("settings###gameMode###discovered###re9###extensionPath")).toBe(
+        path.join(root, "plugins", "game-re9"),
+      );
+      expect(db.read("settings###mods###installPath###re9")).toBe("/previous/Vortex/staging/re9");
+      expect(db.read("persistent###profiles###p###modState###off###enabled")).toBe(false);
+      expect(db.read("persistent###mods###re9###mod###state")).toBe("installed");
+      if (marker === "nyastra-import-complete.json") {
+        expect(db.read("confidential###account###nexus###APIKey")).toBe("current-login");
+      }
+      expect(
+        JSON.parse(await readFile(path.join(root, "nyastra-import-complete.json"), "utf8")),
+      ).toMatchObject({ version: 2 });
+      db.persistor.setItem.mockClear();
+      await finishProfileImport(db.persistor, root);
+      expect(db.persistor.setItem).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rolls back an existing import repair without clearing its login or advancing the marker", async () => {
+    const marker = path.join(root, "nyastra-import-complete.json");
+    await writeFile(marker, JSON.stringify({ version: 1, source: "/previous/Vortex" }));
+    await mkdir(path.join(root, "plugins", "game-re9"), { recursive: true });
+    const db = database({
+      "app###extensions###ext###path": "/previous/Vortex/plugins/game-re9",
+      "confidential###account###nexus###APIKey": "current-login",
+    });
+    const before = new Map(db.values);
+    db.persistor.setItem.mockRejectedValueOnce(new Error("disk failure"));
+    await expect(finishProfileImport(db.persistor, root)).rejects.toThrow("disk failure");
+    expect(db.values).toEqual(before);
+    expect(JSON.parse(await readFile(marker, "utf8"))).toMatchObject({ version: 1 });
+  });
+
   it("preserves mod paths and instance ownership while clearing inherited credentials", async () => {
     await writeFile(
       path.join(root, "nyastra-import.json"),

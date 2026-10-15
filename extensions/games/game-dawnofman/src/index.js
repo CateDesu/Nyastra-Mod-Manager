@@ -1,6 +1,6 @@
 const Promise = require("bluebird");
 const path = require("path");
-const winapi = require("winapi-bindings");
+
 const { actions, fs, util } = require("@nexusmods/vortex-api");
 
 let _API;
@@ -15,37 +15,14 @@ function getSceneFolder() {
   return path.join(util.getVortexPath("documents"), "DawnOfMan", "Scenarios");
 }
 
-function readRegistryKey(hive, key, name) {
-  try {
-    const instPath = winapi.RegGetValue(hive, key, name);
-    if (!instPath) {
-      throw new Error("empty registry key");
-    }
-    return Promise.resolve(instPath.value);
-  } catch (err) {
-    return Promise.reject(new util.ProcessCanceled(err));
-  }
-}
-
-function findUnityModManager() {
-  return readRegistryKey("HKEY_CURRENT_USER", "Software\\UnityModManager", "Path").then((value) =>
-    fs.statAsync(path.join(value, UMM_DLL)),
-  );
+function findUnityModManager(discovery) {
+  return fs.statAsync(path.join(discovery.path, "UnityModManager", UMM_DLL));
 }
 
 function findGame() {
-  return util.GameStoreHelper.findByAppId(STEAM_ID.toString(), "steam")
-    .then((game) => game.gamePath)
-    .catch(() =>
-      readRegistryKey(
-        "HKEY_LOCAL_MACHINE",
-        `SOFTWARE\\WOW6432Node\\GOG.com\\Games\\${GOG_ID}`,
-        "PATH",
-      ),
-    )
-    .catch(() =>
-      readRegistryKey("HKEY_LOCAL_MACHINE", `SOFTWARE\\GOG.com\\Games\\${GOG_ID}`, "PATH"),
-    );
+  return util.GameStoreHelper.findByAppId(STEAM_ID.toString(), "steam").then(
+    (game) => game.gamePath,
+  );
 }
 
 function prepareForModding(discovery) {
@@ -95,7 +72,7 @@ function prepareForModding(discovery) {
     .then(() =>
       fs.ensureDirWritableAsync(path.join(discovery.path, "Mods"), () => Promise.resolve()),
     )
-    .then(() => findUnityModManager().catch((err) => showUMMDialog()));
+    .then(() => findUnityModManager(discovery).catch((err) => showUMMDialog()));
 }
 
 function endsWithPattern(instructions, pattern) {

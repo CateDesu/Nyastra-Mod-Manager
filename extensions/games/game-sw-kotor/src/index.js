@@ -9,7 +9,7 @@
 
 const Promise = require("bluebird");
 const path = require("path");
-const winapi = require("winapi-bindings");
+
 const { fs, selectors, util } = require("@nexusmods/vortex-api");
 
 const STEAM_DLL = "steam_api.dll";
@@ -65,32 +65,8 @@ function requiresLauncher(gamePath) {
     .catch((err) => Promise.reject(err));
 }
 
-function readRegistryKey(hive, key, name) {
-  try {
-    const instPath = winapi.RegGetValue(hive, key, name);
-    if (!instPath) {
-      throw new Error("empty registry key");
-    }
-    return Promise.resolve(instPath.value);
-  } catch (err) {
-    return Promise.reject(new util.ProcessCanceled(err));
-  }
-}
-
 function findGame(kotorGame) {
-  const { gogId, steamId } = kotorGame;
-  return util.GameStoreHelper.findByAppId(steamId, "steam")
-    .then((game) => game.gamePath)
-    .catch(() =>
-      readRegistryKey(
-        "HKEY_LOCAL_MACHINE",
-        `SOFTWARE\\WOW6432Node\\GOG.com\\Games\\${gogId}`,
-        "PATH",
-      ),
-    )
-    .catch(() =>
-      readRegistryKey("HKEY_LOCAL_MACHINE", `SOFTWARE\\GOG.com\\Games\\${gogId}`, "PATH"),
-    );
+  return util.GameStoreHelper.findByAppId(kotorGame.steamId, "steam").then((game) => game.gamePath);
 }
 
 function prepareForModding(discovery) {

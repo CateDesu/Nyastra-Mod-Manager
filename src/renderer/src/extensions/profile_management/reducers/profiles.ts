@@ -1,5 +1,4 @@
 import type { IReducerSpec } from "../../../types/IExtensionContext";
-import { log } from "../../../util/log";
 import { deleteOrNop, getSafe, setSafe } from "../../../util/storeHelper";
 import * as actions from "../actions/profiles";
 import type { IProfile } from "../types/IProfile";
@@ -43,6 +42,20 @@ export const profilesReducer: IReducerSpec = {
     },
     [actions.forgetMod as any]: (state, payload) =>
       deleteOrNop(state, [payload.profileId, "modState", payload.modId]),
+    [actions.setEnabledModsBeforeDisable as any]: (
+      state: Record<string, IProfile>,
+      { profileId, modIds }: { profileId: string; modIds: string[] | undefined },
+    ) => {
+      const profile = state[profileId];
+      if (profile === undefined) {
+        return state;
+      }
+      const { enabledModsBeforeDisable: _, ...rest } = profile;
+      return {
+        ...state,
+        [profileId]: modIds === undefined ? rest : { ...profile, enabledModsBeforeDisable: modIds },
+      };
+    },
     [actions.setFeature as any]: (state, payload) => {
       const { profileId, featureId, value } = payload;
 
@@ -84,6 +97,21 @@ export const profilesReducer: IReducerSpec = {
           required: true,
           silent: true,
           repair: () => ({}),
+        },
+        enabledModsBeforeDisable: {
+          type: "array",
+          noNull: true,
+          deleteBroken: true,
+          description: () => "Invalid saved list of enabled mods will be removed",
+          elements: {
+            _: {
+              type: "string",
+              noNull: true,
+              noEmpty: true,
+              deleteBroken: "parent",
+              description: () => "Invalid saved list of enabled mods will be removed",
+            },
+          },
         },
       },
     },

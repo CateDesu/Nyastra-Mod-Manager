@@ -1,22 +1,9 @@
 const Promise = require("bluebird");
 const path = require("path");
 const { fs, util } = require("@nexusmods/vortex-api");
-const winapi = require("winapi-bindings");
 
 function findGame() {
-  try {
-    const instPath = winapi.RegGetValue(
-      "HKEY_LOCAL_MACHINE",
-      "Software\\CD Project Red\\The Witcher 2",
-      "InstallFolder",
-    );
-    if (!instPath) {
-      throw new Error("empty registry key");
-    }
-    return Promise.resolve(instPath.value);
-  } catch (err) {
-    return util.GameStoreHelper.findByAppId("20920", "steam").then((game) => game.gamePath);
-  }
+  return util.GameStoreHelper.findByAppId("20920", "steam").then((game) => game.gamePath);
 }
 
 function testUserContent(instructions) {

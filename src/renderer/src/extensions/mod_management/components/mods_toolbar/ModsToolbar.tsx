@@ -6,6 +6,7 @@ import { useToolbarAnalytics } from "@/ui/components/toolbar/useToolbarAnalytics
 import type { TFunction } from "@/util/i18n";
 
 import { useModToolbarActions } from "../../hooks/useModToolbarActions.hook";
+import { ModEnableControls } from "../mod_enable_controls/ModEnableControls";
 
 /**
  * The mods page toolbar. See {@link useModToolbarActions} for how the page's own
@@ -21,6 +22,7 @@ export const ModsToolbar = ({ t }: { t: TFunction }) => {
   return (
     // without `flex-1` the toolbar keeps every action and runs over the page title
     <Toolbar className="flex-1 justify-end" pinningId="mods" tracking={tracking}>
+      <ModEnableControls />
       <ToolbarGroup actions={actions} />
     </Toolbar>
   );

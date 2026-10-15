@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { type VortexError, parseError } from "@vortex/shared";
+import { VortexError, parseError } from "@vortex/shared";
 import type {
   ByteRange,
   Chunker,
@@ -100,7 +100,7 @@ export class DownloadManager {
 
   /** Number of pending downloads. */
   get numPending(): number {
-    return this.#downloadQueue.pending;
+    return this.#downloadQueue.size;
   }
 
   /** Number of running downloads. */
@@ -221,6 +221,9 @@ export class DownloadManager {
     log("debug", "queuing download", { downloadId, dest });
 
     const rawPromise = this.#downloadQueue.add(() => {
+      if (abortController.signal.aborted) {
+        throw new VortexError("Download cancelled", { kind: "user-canceled", skipped: false });
+      }
       log("debug", "download starting", { downloadId });
       progressReporter.status = "running";
       return download(
@@ -256,9 +259,10 @@ export class DownloadManager {
     });
 
     let terminalError: VortexError | null = null;
+    let pauseSettled: Promise<void> = Promise.resolve();
 
     const cancel = (): DownloadState => {
-      if (progressReporter.status === "running") {
+      if (["queued", "running"].includes(progressReporter.status)) {
         log("debug", "cancelling download", { downloadId });
         progressReporter.status = "canceled";
         abortController.abort();
@@ -278,7 +282,7 @@ export class DownloadManager {
           })
           .map((c) => c.chunkRange);
       } else if (progress.bytesWritten > 0) {
-        completedRanges = [{ start: 0, end: progress.bytesWritten }];
+        completedRanges = [{ start: 0, end: progress.bytesWritten - 1 }];
       }
 
       return {
@@ -294,11 +298,18 @@ export class DownloadManager {
       const currentStatus = progressReporter.status;
 
       if (currentStatus === "paused") {
+        await pauseSettled;
         return {
           ...getState(),
           status: currentStatus,
           checkpoint: buildCheckpoint(),
         };
+      }
+
+      if (currentStatus === "queued") {
+        progressReporter.status = "paused";
+        abortController.abort();
+        return { ...getState(), status: "paused", checkpoint: buildCheckpoint() };
       }
 
       if (currentStatus !== "running") {
@@ -310,6 +321,7 @@ export class DownloadManager {
       }
 
       log("debug", "pausing download", { downloadId });
+      pauseSettled = settled;
       progressReporter.status = "paused";
       abortController.abort();
       // Wait for the download to fully settle (settled never rejects).
@@ -346,6 +358,7 @@ export class DownloadManager {
     // precedence.
     void rawPromise.then(
       () => {
+        if (progressReporter.status !== "running") return;
         log("debug", "download completed", { downloadId });
         progressReporter.status = "completed";
       },

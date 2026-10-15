@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { realpath, rm } from "node:fs/promises";
 import * as path from "path";
 
 import { unknownToError } from "@vortex/shared";
@@ -22,6 +24,36 @@ import { diffFiles, patchFiles } from "./bsdiff";
 function crcFromBuf(data: Buffer) {
   // >>> 0 converts signed to unsigned
   return (crc32.buf(data) >>> 0).toString(16).toUpperCase().padStart(8, "0");
+}
+
+export function patchPath(base: string, value: string): string {
+  const portable = typeof value === "string" ? value.replace(/\\/g, "/") : "";
+  const relative = path.posix.normalize(portable);
+  if (
+    !portable ||
+    relative === "." ||
+    relative === ".." ||
+    relative.startsWith("../") ||
+    path.posix.isAbsolute(portable) ||
+    path.win32.isAbsolute(portable) ||
+    /^[a-z]:/i.test(portable)
+  )
+    throw new DataInvalid(`Invalid collection patch path: ${value}`);
+  return path.join(base, relative);
+}
+
+async function confinedPatchPath(base: string, filename: string): Promise<string> {
+  const [root, resolved] = await Promise.all([realpath(base), realpath(filename)]);
+  const relative = path.relative(root, resolved);
+  if (
+    !relative ||
+    relative === ".." ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  ) {
+    throw new DataInvalid(`Collection patch path is outside its directory: ${filename}`);
+  }
+  return resolved;
 }
 
 async function validatePatch(srcFilePath: string, patchFilePath: string) {
@@ -170,22 +202,34 @@ export async function applyPatches(
   const state = api.getState();
   const installPath = selectors.installPathForGame(state, gameId);
   const mod = state.persistent.mods[gameId][modId];
-  const modPath = path.join(installPath, mod.installationPath);
-  const patchesPath = path.join(installPath, collection.installationPath, PATCHES_PATH, modName);
-
   for (const filePath of Object.keys(patches ?? {})) {
     try {
-      const srcPath = path.join(modPath, filePath);
-      const diffPath = path.join(patchesPath, filePath) + ".diff";
+      const modPath = patchPath(installPath, mod.installationPath);
+      const patchesRoot = path.join(
+        patchPath(installPath, collection.installationPath),
+        PATCHES_PATH,
+      );
+      const patchesPath = patchPath(patchesRoot, modName);
+      const source = patchPath(modPath, filePath);
+      const diff = patchPath(patchesPath, filePath) + ".diff";
+      const realModPath = await confinedPatchPath(installPath, modPath);
+      const realPatchesPath = await confinedPatchPath(patchesRoot, patchesPath);
+      await confinedPatchPath(installPath, realPatchesPath);
+      const srcPath = await confinedPatchPath(realModPath, source);
+      const diffPath = await confinedPatchPath(realPatchesPath, diff);
       // if the patch is missing, trigger the error here because bsdiff would produce a non-standard
       // string exception
       await fs.statAsync(diffPath);
       const srcDat = await fs.readFileAsync(srcPath);
       const srcCRC = crcFromBuf(srcDat);
       if (srcCRC === patches[filePath]) {
-        await patchFiles(srcPath, srcPath + ".patched", diffPath);
-        await fs.removeAsync(srcPath);
-        await fs.renameAsync(srcPath + ".patched", srcPath);
+        const output = `${srcPath}.${randomUUID()}.patched`;
+        try {
+          await patchFiles(srcPath, output, diffPath);
+          await fs.renameAsync(output, srcPath);
+        } finally {
+          await rm(output, { force: true });
+        }
         log("info", "patched", srcPath);
       } else {
         log("warn", "patch not applied because reference CRC differs", {

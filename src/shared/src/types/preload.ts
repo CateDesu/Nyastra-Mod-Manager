@@ -23,6 +23,7 @@ import type {
   DiffOperation,
   AppInitMetadata,
   HashAlgorithm,
+  LinuxUpdateCheck,
   Serializable,
   UpdaterStatusResponse,
   VortexPaths,
@@ -46,6 +47,8 @@ export interface PreloadWindow {
 
 /** All API methods available to the renderer */
 export interface Api {
+  /** Checks this installation against Nyastra releases or main. */
+  updates: { check(): Promise<LinuxUpdateCheck> };
   /** Sends a log message to the main process */
   log(level: Level, message: string, metadata?: string): void;
 

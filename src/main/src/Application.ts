@@ -470,9 +470,7 @@ class Application {
     // fetches it via getInitMetadata() early in its boot.
     log("debug", "checking how Vortex was installed");
     this.identifyInstallType();
-    // the renderer's updater extension gates on this; it cannot work it out itself because
-    // VORTEX_DEV_UPDATER is read at runtime and only NODE_ENV is inlined into its bundle
-    this.mAppMetadata!.updaterActive = false;
+    this.mAppMetadata!.updaterActive = true;
     this.mAppMetadata!.version = app.getVersion();
 
     log("debug", "checking if migration is required");

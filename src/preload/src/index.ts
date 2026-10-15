@@ -217,6 +217,8 @@ try {
       forwardSpan: (span) => betterIpcRenderer.send("telemetry:forward-span", span),
     },
 
+    updates: { check: () => betterIpcRenderer.invoke("updater:check-linux") },
+
     downloader: {
       start: (dest, collationId, downloadId) =>
         betterIpcRenderer.invoke("download:start", dest, collationId, downloadId),
@@ -417,19 +419,15 @@ async function openWriteStream(
     async write(chunk) {
       await betterIpcRenderer.invoke("fs:stream-write", handle, chunk);
     },
-    close() {
+    async close() {
       if (closed) return;
       closed = true;
-      betterIpcRenderer.invoke("fs:stream-close", handle).catch(() => undefined);
+      await betterIpcRenderer.invoke("fs:stream-close", handle);
     },
-    abort() {
-      // An errored WritableStream aborts instead of closing. Main evicts on
-      // write failures already, so this is a tolerated no-op there; for a
-      // caller-initiated abort it releases the handle and truncates the
-      // file at the last flushed offset (writer.abort on main).
+    async abort() {
       if (closed) return;
       closed = true;
-      betterIpcRenderer.invoke("fs:stream-close", handle).catch(() => undefined);
+      await betterIpcRenderer.invoke("fs:stream-abort", handle);
     },
   });
 }

@@ -196,4 +196,20 @@ describe("getAccessToken", () => {
     await expect(pending).resolves.toBe(storedCredentials(harness)?.token);
     expect(storedCredentials(harness)?.refreshToken).toBe("refresh-other");
   });
+
+  test("does not sign out a replacement session when the old refresh is refused", async ({
+    makeApi,
+  }) => {
+    const harness = makeApi();
+    logIn(harness, makeToken(10));
+    let refuse: (error: Error) => void = () => undefined;
+    refreshMock.mockReturnValueOnce(new Promise((_, reject) => (refuse = reject)));
+    const pending = getAccessToken(harness.api);
+    const replacement = makeToken(3600, "replacement");
+    logIn(harness, replacement, "refresh-replacement");
+    refuse(invalidGrant());
+    await expect(pending).resolves.toBe(replacement);
+    expect(storedCredentials(harness)?.refreshToken).toBe("refresh-replacement");
+    expect(harness.errorNotifications).toEqual([]);
+  });
 });

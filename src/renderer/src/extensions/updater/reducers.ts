@@ -1,16 +1,25 @@
-import type { UpdaterSnapshot } from "@vortex/shared/ipc";
+import type { LinuxUpdateCheck, UpdaterSnapshot } from "@vortex/shared/ipc";
 import update from "immutability-helper";
 
 import type { IReducerSpec } from "../../types/IExtensionContext";
-import { setUpdateChannel, setUpdaterSnapshot } from "./actions";
+import {
+  setLinuxUpdateCheck,
+  setUpdateChecking,
+  setUpdateChannel,
+  setUpdaterSnapshot,
+} from "./actions";
 
 /** session.updater: what the updater is doing, as last polled from main */
 export interface IUpdaterSessionState {
   snapshot?: UpdaterSnapshot;
+  check?: LinuxUpdateCheck;
+  checking?: boolean;
 }
 
 export const sessionReducer: IReducerSpec = {
   reducers: {
+    [setLinuxUpdateCheck as any]: (state, payload) => ({ ...state, check: payload }),
+    [setUpdateChecking as any]: (state, payload) => ({ ...state, checking: payload }),
     [setUpdaterSnapshot as any]: (state, payload) => update(state, { snapshot: { $set: payload } }),
   },
   defaults: {} satisfies IUpdaterSessionState,

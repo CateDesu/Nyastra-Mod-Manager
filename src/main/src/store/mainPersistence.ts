@@ -32,6 +32,7 @@ import { parseAllQueries } from "./queryParser";
 import QueryRegistry from "./QueryRegistry";
 import QueryWatcher from "./QueryWatcher";
 import ReduxPersistorIPC from "./ReduxPersistorIPC";
+import { insertStateValue } from "./stateTree";
 import SubPersistor from "./SubPersistor";
 
 let mainPersistor: ReduxPersistorIPC | undefined;
@@ -258,21 +259,13 @@ export async function readPersistedValue<T>(hive: string, path: string[]): Promi
         continue;
       }
 
-      let current: Record<string, unknown> = result;
-      for (const segment of remainingKey.slice(0, -1)) {
-        if (current[segment] === undefined) {
-          current[segment] = {};
-        }
-        current = current[segment] as Record<string, unknown>;
-      }
-
-      const lastKey = remainingKey.at(-1);
-      if (lastKey === undefined) continue;
+      let parsed: unknown;
       try {
-        current[lastKey] = JSON.parse(value);
+        parsed = JSON.parse(value);
       } catch {
-        current[lastKey] = value;
+        parsed = value;
       }
+      insertStateValue(result, remainingKey, parsed);
     }
 
     return result as T;

@@ -1,6 +1,5 @@
 const path = require("path");
 const { fs, selectors, util } = require("@nexusmods/vortex-api");
-const winapi = require("winapi-bindings");
 
 const GAME_ID = "divinityoriginalsin2";
 const GAME_ID_DE = "divinityoriginalsin2definitiveedition";
@@ -24,21 +23,9 @@ function modPathDE() {
 }
 
 function findGame() {
-  try {
-    const instPath = winapi.RegGetValue(
-      "HKEY_LOCAL_MACHINE",
-      "SOFTWARE\\WOW6432Node\\GOG.com\\Games\\1584823040",
-      "path",
-    );
-    if (!instPath) {
-      throw new Error("empty registry key");
-    }
-    return Promise.resolve(instPath.value);
-  } catch (err) {
-    return util.GameStoreHelper.findByName("Divinity: Original Sin 2", "steam").then(
-      (game) => game.gamePath,
-    );
-  }
+  return util.GameStoreHelper.findByName("Divinity: Original Sin 2", "steam").then(
+    (game) => game.gamePath,
+  );
 }
 
 function isPak(file) {

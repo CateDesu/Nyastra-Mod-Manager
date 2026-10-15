@@ -8,7 +8,6 @@ import * as querystring from "node:querystring";
 import * as url from "node:url";
 
 import { BRAND_NAME, SERVICE_NAME, PROGRAM_NAME, unknownToError } from "@vortex/shared";
-import { v1 as uuidv1 } from "uuid";
 
 import { ArgumentInvalid } from "../../../util/CustomErrors";
 import getVortexPath from "../../../util/getVortexPath";
@@ -113,14 +112,12 @@ async function postRequest(tokenUrl: string, request: any): Promise<string> {
       },
       (res) => {
         let responseStr = "";
-        let error: Error;
         res
           .on("data", (chunk) => (responseStr += chunk.toString()))
-          .on("error", (err) => (error = err))
+          .on("error", reject)
+          .on("aborted", () => reject(new Error("Token response was interrupted")))
           .on("end", () => {
-            if (error) {
-              reject(error);
-            } else if (res.statusCode !== 200) {
+            if (res.statusCode !== 200) {
               try {
                 const errDetails = JSON.parse(responseStr);
                 const err = new Error(`Invalid request: "${errDetails?.error}"`);
@@ -140,7 +137,9 @@ async function postRequest(tokenUrl: string, request: any): Promise<string> {
           });
       },
     );
-    req.on("error", (err) => console.error("token req error", err));
+    const timeout = setTimeout(() => req.destroy(new Error("Token request timed out")), 30_000);
+    req.once("close", () => clearTimeout(timeout));
+    req.on("error", reject);
     req.write(requestStr);
     req.end();
   });
@@ -160,13 +159,16 @@ export async function requestTokenRefresh(refreshToken: string): Promise<ITokenR
  * deals with token exchange for OAuth2
  **/
 class OAuth {
-  private mVerifier: string;
   private mServerSettings: IOAuthServerSettings;
   private mStates: {
-    [state: string]: (err: Error, token: ITokenReply) => void;
-  } = {};
+    [state: string]: {
+      callback: (err: Error, token: ITokenReply) => void;
+      verifier: string;
+      redirectUrl: string;
+    };
+  } = Object.create(null);
   private mServer: http.Server;
-  private mLastServerPort: number;
+  private mServerStarted: Promise<void>;
   private mLocalhost: boolean;
 
   constructor(settings: IOAuthServerSettings) {
@@ -179,26 +181,24 @@ class OAuth {
     onToken: (err: Error, token: ITokenReply) => void,
     onOpenPage: (url: string) => void,
   ): Promise<void> {
-    const state = uuidv1();
-    this.mStates[state] = onToken;
-
-    // see https://www.rfc-editor.org/rfc/rfc7636#section-4.1
-    this.mVerifier = Buffer.from(uuidv1().replace(/-/g, "")).toString("base64");
-    // see https://www.rfc-editor.org/rfc/rfc7636#section-4.2
-    const challenge = crypto.createHash("sha256").update(this.mVerifier).digest("base64");
+    const state = crypto.randomBytes(32).toString("base64url");
+    const verifier = crypto.randomBytes(32).toString("base64url");
+    const request = { callback: onToken, verifier, redirectUrl: "" };
+    this.mStates[state] = request;
 
     try {
-      this.mLastServerPort = this.mLocalhost ? await this.ensureServer() : -1;
+      const port = this.mLocalhost ? await this.ensureServer() : -1;
+      request.redirectUrl = this.mServerSettings.getRedirectUrl
+        ? this.mServerSettings.getRedirectUrl(port)
+        : this.mServerSettings.redirectUrl.replace("PORT", port.toString());
+      const challenge = crypto.createHash("sha256").update(verifier).digest("base64url");
+      onOpenPage(this.authorizeUrl(challenge, state, request.redirectUrl));
     } catch (err) {
+      delete this.mStates[state];
+      this.checkServerStillRequired();
       log("error", "failed to start server", err);
       throw err;
     }
-
-    // see https://www.rfc-editor.org/rfc/rfc7636#section-4.3
-    const url = this.authorizeUrl(challenge, state);
-
-    // call callback with generated url
-    onOpenPage(url);
   }
 
   public async receiveCode(code: string, state?: string): Promise<void> {
@@ -207,29 +207,40 @@ class OAuth {
         await this.receiveCode(code, key);
       }
     } else {
-      if (this.mStates[state] === undefined) {
-        // State token not found — the callback arrived after the login flow was
-        // already completed or abandoned (e.g. the user clicked login twice).
-        // Silently ignore, matching the behavior of the local HTTP server path.
-        log("debug", "ignoring OAuth callback with unknown state token", { state });
-        return;
-      }
-      try {
-        const tokenReply = await this.sentAuthorizeToken(code);
-        this.mStates[state]?.(null, tokenReply);
-      } catch (unknownError) {
-        const err = unknownToError(unknownError);
-        this.mStates[state]?.(err, undefined);
-      }
-      delete this.mStates[state];
+      await this.exchangeCode(code, state);
+    }
+  }
+
+  private async exchangeCode(code: string, state: string): Promise<boolean> {
+    const request = this.mStates[state];
+    if (request === undefined) {
+      // State token not found — the callback arrived after the login flow was
+      // already completed or abandoned (e.g. the user clicked login twice).
+      // Silently ignore, matching the behavior of the local HTTP server path.
+      log("debug", "ignoring OAuth callback with unknown state token", { state });
+      return false;
+    }
+    // Claim the callback before awaiting so it can only be exchanged once.
+    delete this.mStates[state];
+    try {
+      const tokenReply = await this.sentAuthorizeToken(code, request.verifier, request.redirectUrl);
+      request.callback(null, tokenReply);
+      return true;
+    } catch (unknownError) {
+      const err = unknownToError(unknownError);
+      request.callback(err, undefined);
+      return false;
+    } finally {
+      this.checkServerStillRequired();
     }
   }
 
   private async ensureServer(): Promise<number> {
     if (this.mServer === undefined) {
       log("info", "starting localhost server to receive oauth response");
-      await this.startServer();
+      this.mServerStarted = this.startServer();
     }
+    await this.mServerStarted;
     const addr: AddressInfo = this.mServer.address() as AddressInfo;
     log("info", "using localhost server for oauth response", {
       port: addr.port,
@@ -258,7 +269,11 @@ class OAuth {
           .on("error", reject)
           .on("listening", resolve)
           .on("request", (req, resp) => {
-            this.onHTTPRequest(req, resp);
+            void this.onHTTPRequest(req, resp).catch((error: unknown) => {
+              log("error", "OAuth callback failed", error);
+              if (!resp.headersSent) resp.statusCode = 500;
+              resp.end();
+            });
           });
       } catch (err) {
         reject(err);
@@ -266,13 +281,19 @@ class OAuth {
     });
   }
 
-  private onHTTPRequest(
+  private async onHTTPRequest(
     req: http.IncomingMessage,
     resp: http.ServerResponse<http.IncomingMessage> & {
       req: http.IncomingMessage;
     },
   ) {
-    const parsedUrl = new URL(req.url, `http://${req.headers.host}`);
+    if (req.method !== "GET") {
+      resp.statusCode = 405;
+      resp.setHeader("Allow", "GET");
+      resp.end();
+      return;
+    }
+    const parsedUrl = new URL(req.url, "http://127.0.0.1");
     const queryItems = Object.fromEntries(parsedUrl.searchParams);
     const getQueryParam = (key: string): string => {
       const tmp = queryItems[key];
@@ -283,27 +304,14 @@ class OAuth {
     const error = getQueryParam("error");
     const error_description = getQueryParam("error_description");
 
-    req.setEncoding("utf-8");
-    let msg: string = "";
-    req.on("data", (chunk) => {
-      msg += chunk;
-    });
-
     if (code !== undefined && state !== undefined) {
-      (async () => {
-        try {
-          await this.receiveCode(code, state);
-        } catch (err) {
-          // ignore unexpected codes
-        }
-      })();
-      resp.write(makeResultPage(true));
-
-      this.checkServerStillRequired();
+      const success = await this.exchangeCode(code, state);
+      resp.statusCode = success ? 200 : 400;
+      resp.write(makeResultPage(success));
     } else if (error !== undefined) {
       const err = new Error(error_description ?? "Description missing");
       err["code"] = error;
-      this.mStates[state]?.(err, undefined);
+      this.mStates[state]?.callback(err, undefined);
       resp.write(makeResultPage(false));
       delete this.mStates[state];
 
@@ -313,39 +321,30 @@ class OAuth {
     resp.end();
   }
 
-  // sanitize a base64 string to use in urls
-  private static sanitizeBase64(input: string) {
-    const replacements = {
-      "+": "-",
-      "/": "_",
-    };
-    return input.replace(/[+/]/g, (char) => replacements[char]).replace(/=*$/, "");
-  }
-
-  private authorizeUrl(challenge: string, state: string): string {
+  private authorizeUrl(challenge: string, state: string, redirectUrl: string): string {
     const request = {
       response_type: "code",
       scope: "openid profile email",
       code_challenge_method: "S256",
       client_id: this.mServerSettings.clientId,
-      redirect_uri: this.mServerSettings.getRedirectUrl
-        ? this.mServerSettings.getRedirectUrl(this.mLastServerPort)
-        : this.mServerSettings.redirectUrl.replace("PORT", this.mLastServerPort.toString()),
+      redirect_uri: redirectUrl,
       state,
-      code_challenge: OAuth.sanitizeBase64(challenge),
+      code_challenge: challenge,
     };
     return `${this.mServerSettings.baseUrl}/authorize?${querystring.stringify(request)}`;
   }
 
-  private async sentAuthorizeToken(code: string): Promise<ITokenReply> {
+  private async sentAuthorizeToken(
+    code: string,
+    verifier: string,
+    redirectUrl: string,
+  ): Promise<ITokenReply> {
     const request = {
       grant_type: "authorization_code",
       client_id: this.mServerSettings.clientId,
-      redirect_uri: this.mServerSettings.getRedirectUrl
-        ? this.mServerSettings.getRedirectUrl(this.mLastServerPort)
-        : this.mServerSettings.redirectUrl.replace("PORT", this.mLastServerPort.toString()),
+      redirect_uri: redirectUrl,
       code,
-      code_verifier: this.mVerifier,
+      code_verifier: verifier,
     };
     const tokenUrl = `${this.mServerSettings.baseUrl}/token`;
     // TODO: validate result

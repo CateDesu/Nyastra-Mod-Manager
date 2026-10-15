@@ -1,13 +1,6 @@
 Tool: built-in image_gen
 Mode: new generation from a written brief, no reference images
 Background: transparent
+Selected by Master: Download Tail, unchanged original PNG
 
-Use case: illustration-story
-Asset type: a square transparent PNG mascot illustration suitable for a Linux Downloads folder or a mod manager.
-Primary request: Create a fresh, original cute Astra catgirl illustration from this written description. Do not reference, trace, reproduce, or imitate any earlier attached picture, any existing character, or any named artist.
-Subject: one cheerful adult catgirl depicted in an adorable chibi style, with a large expressive face, long softly wavy ink-black hair, a sweeping galaxy-purple and lavender hair streak with tiny star speckles, black cat ears with purple inner fur, a fluffy curled black tail with a purple tip, big sparkling violet eyes, rosy cheeks, and a mischievous delighted smile. Give her a small simple crescent-moon hair clip instead of any brand emblem.
-Outfit and pose: a cozy oversized purple hoodie, dark leggings and little ankle boots; seated with her feet tucked beside a golden-yellow file folder that she hugs lovingly, looking toward the viewer. The folder has a single clear downward arrow in cream and no words. Keep the silhouette compact and readable at icon size.
-Style/medium: polished original digital character illustration, confident clean ink contours, smooth soft cel shading, warm expressive charm and restrained galaxy details. Distinct new face, hairstyle arrangement, pose and clothing. Cute and fully clothed.
-Composition/framing: square canvas, centered complete character and folder, all ears, hair, tail and feet inside the image, approximately 8 percent clear padding. Make the face prominent while keeping the full little seated figure visible.
-Scene/backdrop: genuine transparent alpha background, including empty areas between limbs and hair; no floor, backdrop, frame or drop-shadow rectangle.
-Constraints: original design, one character only, no text, no lettering, no watermark, no OpenAI logo, no Nexus logo, no other existing brand or emblem. No checkerboard drawn into the image.
+Use case: logo-brand. Asset: one original transparent PNG app logo for Nyastra's Mod Manager. Create a custom two-color symbol combining a relaxed black cat and a downward download arrow. The cat is a very simple clever silhouette with two pointed ears; its long violet tail curls below the body to form a bold downward arrow tip. The silhouette should feel playfully drawn and intentionally designed rather than a stock pictogram. Use charcoal and muted medium lilac, rounded clean curves, generous negative space, and a single cream eye cutout. No letters. A distinct compact mark that reads at 24 to 48 pixels, centered with transparent padding. No 3D, bevels, gradients, shadows, glitter, galaxy textures, illustration background, busy details, watermark, OpenAI logo or Nexus branding. Genuine alpha background.

@@ -1,24 +1,11 @@
 const Promise = require("bluebird");
 const path = require("path");
 const { fs, util } = require("@nexusmods/vortex-api");
-const winapi = require("winapi-bindings");
 
 function findGame() {
-  try {
-    const instPath = winapi.RegGetValue(
-      "HKEY_LOCAL_MACHINE",
-      "Software\\CD Project Red\\Witcher",
-      "InstallFolder",
-    );
-    if (!instPath) {
-      throw new Error("empty registry key");
-    }
-    return Promise.resolve(instPath.value);
-  } catch (err) {
-    return util.GameStoreHelper.findByName("The Witcher: Enhanced Edition Director's Cut", "steam")
-      .catch(() => util.GameStoreHelper.findByAppId("20900", "steam"))
-      .then((game) => game.gamePath);
-  }
+  return util.GameStoreHelper.findByName("The Witcher: Enhanced Edition Director's Cut", "steam")
+    .catch(() => util.GameStoreHelper.findByAppId("20900", "steam"))
+    .then((game) => game.gamePath);
 }
 
 function testUserContent(instructions) {

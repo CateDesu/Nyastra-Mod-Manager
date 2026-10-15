@@ -2333,35 +2333,6 @@ class ExtensionManager {
       }
     }
 
-    const cwd = options.cwd || path.dirname(executable);
-
-    // Detect if executable is a script file that requires shell: true
-    // Common script extensions that need shell interpretation
-    const scriptExtensions = [".ps1", ".bat", ".cmd", ".sh", ".bash"];
-    const ext = path.extname(executable).toLowerCase();
-    const isScript = scriptExtensions.includes(ext);
-
-    // If it's a script and shell isn't explicitly set, enable shell mode
-    if (isScript && options.shell === undefined) {
-      options.shell = true;
-    }
-
-    // process.env is case insensitive (on windows at least?), but the spawn parameter isn't.
-    // I think the key is called "Path" on windows but I'm not willing to bet this is consistent
-    // across all language variants and versions
-    const pathEnvName = Object.keys(process.env).find((key) => key.toLowerCase() === "path");
-    const env = {
-      ...filteredEnvironment(),
-      [pathEnvName]: process.env["PATH_ORIG"] || process.env["PATH"],
-      ...options.env,
-    };
-
-    // TODO: we might want to be much more restrictive in what keys we allow in environment variables,
-    //   based on a quick google I could only find rules for Linux which appears to not allow the equal
-    //   sign in keys either (which makes sense).
-    //   On windows the empty string is the only thing I found that causes a problem though
-    delete env[""];
-
     return (
       this.applyStartHooks({ executable, args, options })
         .then((updatedParameters) => {
@@ -2371,19 +2342,29 @@ class ExtensionManager {
         .then(
           () =>
             new PromiseBB<void>((resolve, reject) => {
-              const runExe = options.shell ? `"${executable}"` : executable;
+              const scriptExtensions = [".ps1", ".bat", ".cmd", ".sh", ".bash"];
+              const shell =
+                options.shell ?? scriptExtensions.includes(path.extname(executable).toLowerCase());
+              const cwd = options.cwd || path.dirname(executable);
+              const env = {
+                ...filteredEnvironment(),
+                PATH: process.env["PATH_ORIG"] || process.env["PATH"],
+                ...options.env,
+              };
+              delete env[""];
+              const runExe = shell ? `'${executable.replace(/'/g, "'\\''")}'` : executable;
               const spawnOptions: SpawnOptions = {
                 cwd,
                 env,
                 detached: options.detach !== undefined ? options.detach : true,
-                shell: options.shell ?? false,
+                shell,
               };
 
               try {
                 const runParams = {
                   executable,
                   args,
-                  options: { ...options, env },
+                  options: { ...options, env, shell },
                 };
                 const vars = this.mToolParameterCBs.reduce((prev, cb) => {
                   return { ...prev, ...cb(runParams) };
@@ -2393,7 +2374,7 @@ class ExtensionManager {
 
                 const child = spawn(
                   runExe,
-                  options.shell ? args : args.map((arg) => arg.replace(/"/g, "")),
+                  shell ? args : args.map((arg) => arg.replace(/^"(.*)"$/s, "$1")),
                   spawnOptions,
                 );
                 if (truthy(child["exitCode"])) {

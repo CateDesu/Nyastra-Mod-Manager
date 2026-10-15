@@ -1,5 +1,5 @@
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path/posix";
+import { isAbsolute, join } from "node:path/posix";
 
 import type { ILinuxPathProvider, LinuxPathBase } from "@vortex/shared/filesystem";
 import { QualifiedPath, PathProviderError, XDG } from "@vortex/shared/filesystem";
@@ -36,7 +36,7 @@ export class LinuxPathProvider implements ILinuxPathProvider {
       return this.#getXDGBaseDirectory("XDG_STATE_HOME", ".local/state");
     } else if (base === XDG.runtime) {
       const envValue = process.env["XDG_RUNTIME_DIR"];
-      if (envValue) return this.#create(envValue);
+      if (envValue && isAbsolute(envValue)) return this.#create(envValue);
       return this.#create(tmpdir());
     }
 
@@ -46,7 +46,7 @@ export class LinuxPathProvider implements ILinuxPathProvider {
 
   #getXDGBaseDirectory(envName: string, relative: string): Promise<QualifiedPath> {
     const envValue = process.env[envName];
-    if (envValue) return this.#create(envValue);
+    if (envValue && isAbsolute(envValue)) return this.#create(envValue);
 
     const value = join(homedir(), relative);
     return this.#create(value);

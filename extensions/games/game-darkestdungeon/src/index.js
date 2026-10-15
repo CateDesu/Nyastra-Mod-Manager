@@ -1,6 +1,6 @@
 const Promise = require("bluebird");
 const path = require("path");
-const winapi = require("winapi-bindings");
+
 const { parseStringPromise } = require("xml2js");
 const { fs, log, util, actions, selectors } = require("@nexusmods/vortex-api");
 
@@ -90,31 +90,8 @@ function walkAsync(dir, gamePathIndex) {
   });
 }
 
-function readRegistryKey(hive, key, name) {
-  try {
-    const instPath = winapi.RegGetValue(hive, key, name);
-    if (!instPath) {
-      throw new Error("empty registry key");
-    }
-    return Promise.resolve(instPath.value);
-  } catch (err) {
-    return Promise.resolve(undefined);
-  }
-}
-
 function findGame() {
-  return util.GameStoreHelper.findByAppId(DISCOVERY_IDS)
-    .then((game) => game.gamePath)
-    .catch(() =>
-      readRegistryKey(
-        "HKEY_LOCAL_MACHINE",
-        `SOFTWARE\\WOW6432Node\\GOG.com\\Games\\${GOG_ID}`,
-        "PATH",
-      ),
-    )
-    .catch(() =>
-      readRegistryKey("HKEY_LOCAL_MACHINE", `SOFTWARE\\GOG.com\\Games\\${GOG_ID}`, "PATH"),
-    );
+  return util.GameStoreHelper.findByAppId(DISCOVERY_IDS).then((game) => game.gamePath);
 }
 
 async function requiresLauncher(gamePath, store) {

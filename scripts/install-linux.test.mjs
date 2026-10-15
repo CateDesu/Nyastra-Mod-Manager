@@ -97,10 +97,21 @@ test("installed launcher survives extraction removal and passes literal NXM argu
 test("updates replace the runtime and self installation is idempotent", () => {
   const f = fixture();
   try {
+    writeFileSync(path.join(f.source, "obsolete-runtime"), "old");
     assert.equal(f.run().status, 0);
+    const profile = path.join(f.env.XDG_CONFIG_HOME, "NyastraModManager", "state.v2");
+    const archive = path.join(f.env.XDG_DATA_HOME, "downloads", "saved-mod.zip");
+    mkdirSync(path.dirname(profile), { recursive: true });
+    mkdirSync(path.dirname(archive), { recursive: true });
+    writeFileSync(profile, "existing profile and settings");
+    writeFileSync(archive, "downloaded mod");
+    rmSync(path.join(f.source, "obsolete-runtime"));
     writeFileSync(path.join(f.source, "version"), "two");
     assert.equal(f.run().status, 0);
     assert.equal(readFileSync(path.join(f.app, "version"), "utf8"), "two");
+    assert.ok(!existsSync(path.join(f.app, "obsolete-runtime")));
+    assert.equal(readFileSync(profile, "utf8"), "existing profile and settings");
+    assert.equal(readFileSync(archive, "utf8"), "downloaded mod");
     assert.equal(f.run(f.app).status, 0);
     assert.equal(readFileSync(path.join(f.app, "version"), "utf8"), "two");
   } finally {

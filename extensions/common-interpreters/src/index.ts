@@ -18,12 +18,15 @@ function findJava(): string {
 }
 
 function findPython(): string {
-  try {
-    return which.sync("python");
-  } catch (err) {
-    log("info", "python not found", err.message);
-    return undefined;
+  for (const name of ["python3", "python"]) {
+    try {
+      return which.sync(name);
+    } catch {
+      // Try the next available interpreter name.
+    }
   }
+  log("info", "python not found");
+  return undefined;
 }
 
 const javaPath: string = findJava();
@@ -40,14 +43,6 @@ function init(context: types.IExtensionContext): boolean {
     return {
       executable: javaPath,
       args: ["-jar", input.executable].concat(input.args),
-      options: input.options,
-    };
-  });
-
-  context.registerInterpreter(".vbs", (input: types.IRunParameters) => {
-    return {
-      executable: path.join(process.env.windir, "system32", "cscript.exe"),
-      args: [input.executable].concat(input.args),
       options: input.options,
     };
   });

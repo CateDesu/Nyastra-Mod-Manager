@@ -1,5 +1,5 @@
 const path = require("path");
-const winapi = require("winapi-bindings");
+
 const { fs, util } = require("@nexusmods/vortex-api");
 
 // Nexus Mods id for the game.
@@ -23,19 +23,7 @@ function modPath() {
 }
 
 function findGame() {
-  try {
-    const instPath = winapi.RegGetValue(
-      "HKEY_LOCAL_MACHINE",
-      "SOFTWARE\\WOW6432Node\\runic games\\torchlight ii",
-      "instdir",
-    );
-    if (!instPath) {
-      throw new Error("empty registry key");
-    }
-    return Promise.resolve(instPath.value);
-  } catch (err) {
-    return util.GameStoreHelper.findByAppId([STEAM_ID, GOG_ID]).then((game) => game.gamePath);
-  }
+  return util.GameStoreHelper.findByAppId([STEAM_ID, GOG_ID]).then((game) => game.gamePath);
 }
 
 function prepareForModding(discovery) {

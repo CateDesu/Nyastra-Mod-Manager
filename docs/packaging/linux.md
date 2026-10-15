@@ -50,7 +50,10 @@ The import refuses an existing destination or an open database. It copies the
 state and plugins, rejects symlinks and preserves the source. Archives and mod
 staging folders remain at their existing paths. Credentials are removed and
 analytics disabled before hydration. The staging ownership ID is retained.
-The import does not read or migrate a Lutris or Wine Windows profile.
+The import does not read or migrate a Lutris or Wine Windows profile. Copied game
+extensions use their paths in the Nyastra profile. Earlier imports repair these
+paths on startup while preserving current credentials, staging paths and mod
+enabled states.
 
 For hardlink deployment, staging and game or mod output must share a filesystem.
 The portable [Linux extension recipe](linux-extensions.md) adapts supported

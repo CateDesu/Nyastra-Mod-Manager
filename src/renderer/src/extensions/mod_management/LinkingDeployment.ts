@@ -772,7 +772,9 @@ abstract class LinkingActivator implements IDeploymentMethod {
       )
       .then(() =>
         restoreBackup
-          ? fs.renameAsync(outputPath + BACKUP_TAG, outputPath).catch(() => undefined)
+          ? fs.renameAsync(outputPath + BACKUP_TAG, outputPath).catch((err: unknown) => {
+              if (getErrorCode(err) !== "ENOENT") throw err;
+            })
           : Promise.resolve(),
       )
       .then(() => {

@@ -1,10 +1,10 @@
 import Bluebird from "bluebird";
-import * as reduxAct from "redux-act";
 
 import safeCreateAction from "../../../actions/safeCreateAction";
 import type { IExtensionApi } from "../../../types/IExtensionContext";
 import { batchDispatch } from "../../../util/util";
 import type { ModChangeReason } from "../../analytics/mixpanel/MixpanelEvents";
+import { profileById } from "../selectors";
 import type { IProfile } from "../types/IProfile";
 
 /**
@@ -31,6 +31,11 @@ export const setModEnabled = safeCreateAction(
 export const forgetMod = safeCreateAction(
   "FORGET_PROFILE_MOD",
   (profileId: string, modId: string) => ({ profileId, modId }),
+);
+
+export const setEnabledModsBeforeDisable = safeCreateAction(
+  "SET_ENABLED_MODS_BEFORE_DISABLE",
+  (profileId: string, modIds: string[] | undefined) => ({ profileId, modIds }),
 );
 
 export const setFeature = safeCreateAction(
@@ -76,8 +81,6 @@ const setModsEnabled = (() => {
     enableIn: boolean,
     optionsIn?: IEnableOptions,
   ) => {
-    const { profileById } = require("../selectors");
-
     if (ppFunc === undefined) {
       ppFunc = api.withPrePost(
         "enable-mods",

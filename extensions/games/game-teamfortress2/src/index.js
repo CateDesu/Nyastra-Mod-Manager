@@ -1,5 +1,5 @@
 const Promise = require("bluebird");
-const winapi = require("winapi-bindings");
+
 const { fs, log, util } = require("@nexusmods/vortex-api");
 const path = require("path");
 const MOD_FILE_EXT = ".vpk";

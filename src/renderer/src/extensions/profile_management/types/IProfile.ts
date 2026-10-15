@@ -12,6 +12,8 @@ export interface IProfile {
   gameId: string;
   name: string;
   modState: { [id: string]: IProfileMod };
+  /** Enabled mods remembered by Disable all until restored or Enable all is used. */
+  enabledModsBeforeDisable?: string[];
   lastActivated: number;
   pendingRemove?: boolean;
   features?: { [featureId: string]: any };

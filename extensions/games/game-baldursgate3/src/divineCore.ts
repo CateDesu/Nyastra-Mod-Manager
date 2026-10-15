@@ -4,7 +4,7 @@ import * as nodeUtil from "util";
 
 import type { DivineAction, IDivineOptions, IDivineOutput } from "./types";
 
-const exec = nodeUtil.promisify(child_process.exec);
+const execFile = nodeUtil.promisify(child_process.execFile);
 
 export const DEFAULT_TIMEOUT_MS = 10000;
 
@@ -66,17 +66,17 @@ export function buildDivineArgs(action: DivineAction, opts: IDivineOptions): str
     "--action",
     action,
     "--source",
-    `"${opts.source}"`,
+    opts.source,
     "--game",
     "bg3",
     "--loglevel",
     opts.loglevel ?? "error",
   ];
   if (opts.destination !== undefined) {
-    args.push("--destination", `"${opts.destination}"`);
+    args.push("--destination", opts.destination);
   }
   if (opts.expression !== undefined) {
-    args.push("--expression", `"${opts.expression}"`);
+    args.push("--expression", opts.expression);
   }
   return args;
 }
@@ -156,9 +156,6 @@ export async function runDivineCore(
   opts: IDivineOptions,
   runOpts: IDivineRunOptions = {},
 ): Promise<IDivineOutput> {
-  // exec runs via the shell, so a missing target surfaces as a generic
-  // non-zero exit code rather than ENOENT on the spawn itself. Pre-check
-  // so DivineExecMissing fires for its intended case (LSLib not installed).
   try {
     await fs.stat(exePath);
   } catch (e) {
@@ -169,8 +166,7 @@ export async function runDivineCore(
   }
 
   const args = buildDivineArgs(action, opts);
-  const command = `"${exePath}" ${args.join(" ")}`;
-  const execOpts: child_process.ExecOptions = {
+  const execOpts: child_process.ExecFileOptions = {
     timeout: runOpts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     signal: runOpts.signal,
   };
@@ -178,7 +174,7 @@ export async function runDivineCore(
   let stdout: string;
   let stderr: string;
   try {
-    const result = await exec(command, execOpts);
+    const result = await execFile(exePath, args, execOpts);
     stdout = typeof result.stdout === "string" ? result.stdout : (result.stdout?.toString() ?? "");
     stderr = typeof result.stderr === "string" ? result.stderr : (result.stderr?.toString() ?? "");
   } catch (e) {

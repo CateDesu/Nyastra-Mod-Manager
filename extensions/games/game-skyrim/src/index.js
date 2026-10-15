@@ -1,28 +1,15 @@
 const Promise = require("bluebird");
 const path = require("path");
 const { fs, util } = require("@nexusmods/vortex-api");
-const winapi = require("winapi-bindings");
 
 const BODYSLIDE_DIR = path.join("Data", "CalienteTools", "BodySlide");
 const BODYSLIDE_X64 = path.join(BODYSLIDE_DIR, "BodySlide x64.exe");
 const BODYSLIDE_EXE = path.join(BODYSLIDE_DIR, "BodySlide.exe");
 
 function findGame() {
-  try {
-    const instPath = winapi.RegGetValue(
-      "HKEY_LOCAL_MACHINE",
-      "Software\\Wow6432Node\\Bethesda Softworks\\skyrim",
-      "Installed Path",
-    );
-    if (!instPath) {
-      throw new Error("empty registry key");
-    }
-    return Promise.resolve(instPath.value);
-  } catch (err) {
-    return util.GameStoreHelper.findByName("The Elder Scrolls V: Skyrim", "steam").then(
-      (game) => game.gamePath,
-    );
-  }
+  return util.GameStoreHelper.findByName("The Elder Scrolls V: Skyrim", "steam").then(
+    (game) => game.gamePath,
+  );
 }
 
 let tools = [

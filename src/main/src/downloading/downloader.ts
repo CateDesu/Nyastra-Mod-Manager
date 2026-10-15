@@ -1,5 +1,6 @@
+import { once } from "node:events";
 import { type FileHandle as NodeFileHandle, access, open } from "node:fs/promises";
-import type { IncomingHttpHeaders } from "node:http";
+import type { ClientRequest, IncomingHttpHeaders, IncomingMessage } from "node:http";
 
 import { getErrorCode } from "@vortex/shared";
 import { VortexError, parseError } from "@vortex/shared";
@@ -117,6 +118,9 @@ export async function download<T>(
     if (probe.fileName) options.progressReporter.fileName = probe.fileName;
   }
 
+  // A full response must replace the partial file when range resumption is unavailable.
+  if (!probe.acceptsRanges || !probe.size) checkpoint = undefined;
+
   const chunks: Chunk[] =
     probe.acceptsRanges && probe.size
       ? await Promise.resolve(strategy.chunker(probe.size, resource))
@@ -142,15 +146,14 @@ export async function download<T>(
     throw parseError(err, { path: dest }, () => `Failed to open ${dest}`);
   }
 
-  if (checkpoint && probe.size) {
-    try {
-      await handle.fd.truncate(probe.size);
-    } catch (err) {
-      throw parseError(err, { path: handle.path }, () => `Failed to truncate ${handle.path}`);
-    }
-  }
-
   try {
+    if (checkpoint && probe.size) {
+      try {
+        await handle.fd.truncate(probe.size);
+      } catch (err) {
+        throw parseError(err, { path: handle.path }, () => `Failed to truncate ${handle.path}`);
+      }
+    }
     if (isChunked) {
       const chunkQueue = new PQueue({
         concurrency: options?.chunkConcurrency ?? defaultChunkConcurrency,
@@ -175,32 +178,37 @@ export async function download<T>(
         }
       }
 
-      await chunkQueue.addAll(
-        pendingChunks.map(
-          (chunk) => async () =>
-            withRetry(
-              () => {
-                // Reset chunk progress before each attempt so a failed
-                // partial download doesn't leave stale byte counts.
-                if (chunkProgress) {
-                  const progress = chunkProgress.get(chunk.index);
-                  if (progress) {
-                    progress.bytesReceived = 0;
-                    progress.bytesWritten = 0;
+      try {
+        await chunkQueue.addAll(
+          pendingChunks.map(
+            (chunk) => async () =>
+              withRetry(
+                () => {
+                  // Reset chunk progress before each attempt so a failed
+                  // partial download doesn't leave stale byte counts.
+                  if (chunkProgress) {
+                    const progress = chunkProgress.get(chunk.index);
+                    if (progress) {
+                      progress.bytesReceived = 0;
+                      progress.bytesWritten = 0;
+                    }
                   }
-                }
 
-                return downloadChunk(sessionGot, chunk, resolved, probe, handle, {
-                  abortSignal: options?.abortSignal,
-                  rateLimiter: strategy.rateLimiter,
-                  progress: chunkProgress ? chunkProgress.get(chunk.index) : undefined,
-                });
-              },
-              strategy.retry,
-              options?.abortSignal,
-            ),
-        ),
-      );
+                  return downloadChunk(sessionGot, chunk, resolved, probe, handle, {
+                    abortSignal: options?.abortSignal,
+                    rateLimiter: strategy.rateLimiter,
+                    progress: chunkProgress ? chunkProgress.get(chunk.index) : undefined,
+                  });
+                },
+                strategy.retry,
+                options?.abortSignal,
+              ),
+          ),
+        );
+      } finally {
+        // Other chunks must release the file before the owner closes its handle.
+        await chunkQueue.onIdle();
+      }
     } else {
       // Compute the checkpoint baseline: the contiguous byte position
       // that was already completed before this download call. On retry
@@ -228,19 +236,32 @@ export async function download<T>(
 
       const progress = options?.progressReporter?.init(probe.size);
 
+      if (checkpoint !== undefined && checkpointPosition === probe.size) {
+        if (progress) {
+          progress.bytesReceived = checkpointPosition;
+          progress.bytesWritten = checkpointPosition;
+        }
+        return;
+      }
+
       await withRetry(
-        () => {
+        async () => {
           // Reset write position and progress back to the checkpoint
           // baseline on every attempt. Any bytes written by a previous
           // failed attempt will be overwritten.
           const writePosition = checkpointPosition;
+          try {
+            await handle.fd.truncate(writePosition);
+          } catch (err) {
+            throw parseError(err, { path: dest }, () => `Failed to truncate ${dest}`);
+          }
 
           if (progress) {
             progress.bytesReceived = checkpointPosition;
             progress.bytesWritten = checkpointPosition;
           }
 
-          let expectedRemainingBytes: number | undefined = undefined;
+          let expectedRemainingBytes = probe.size || undefined;
           let rangeChunk: Chunk | undefined = undefined;
 
           if (probe.size && writePosition > 0) {
@@ -304,7 +325,9 @@ async function probeUrl(
     });
   }
 
-  const size = getSize(response.headers, "content-length");
+  const encoded = response.headers["content-encoding"];
+  const size =
+    encoded && encoded !== "identity" ? undefined : getSize(response.headers, "content-length");
 
   // https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Accept-Ranges
   // NOTE(erri120): only valid range units are "bytes" and "none"
@@ -351,6 +374,10 @@ function createGotStream(
   });
 
   stream.on("error", () => {});
+  // Keep got's timing listeners from draining bytes while it awaits the cookie jar.
+  stream.on("request", (request: ClientRequest) => {
+    request.prependOnceListener("response", (response: IncomingMessage) => response.pause());
+  });
 
   return stream;
 }
@@ -391,8 +418,23 @@ async function downloadStream(
   });
 
   let remaining = options.expectedRemainingBytes;
-
   try {
+    // Wait for got to finish cookie processing before pulling bytes or validating headers.
+    const [response] = (await once(stream, "response")) as [IncomingMessage];
+    if (options.chunk) {
+      const range = /^bytes (\d+)-(\d+)\/(?:\d+|\*)$/.exec(response.headers["content-range"] ?? "");
+      if (
+        response.statusCode !== 206 ||
+        range === null ||
+        Number(range[1]) !== options.chunk.range.start ||
+        Number(range[2]) !== options.chunk.range.end
+      ) {
+        throw new VortexError("Server returned a different byte range", {
+          kind: "http:protocol-violation",
+          url: endpoint.url.toString(),
+        });
+      }
+    }
     for await (const data of stream) {
       const buffer = data as Buffer;
       if (progress) progress.bytesReceived += buffer.length;
@@ -411,18 +453,41 @@ async function downloadStream(
         await consumeTokens(options.rateLimiter, buffer.length, options.abortSignal);
       }
 
-      try {
-        const result = await handle.fd.write(buffer, 0, buffer.length, writePosition);
-
-        if (progress) progress.bytesWritten += result.bytesWritten;
-        writePosition += result.bytesWritten;
-      } catch (err) {
-        throw parseError(err, { path: handle.path }, () => `Failed to write to ${handle.path}`);
+      let offset = 0;
+      while (offset < buffer.length) {
+        options.abortSignal?.throwIfAborted();
+        try {
+          const result = await handle.fd.write(
+            buffer,
+            offset,
+            buffer.length - offset,
+            writePosition,
+          );
+          if (result.bytesWritten === 0) {
+            throw new VortexError("Disk write made no progress", {
+              kind: "os:generic",
+              originalCode: "EIO",
+            });
+          }
+          offset += result.bytesWritten;
+          if (progress) progress.bytesWritten += result.bytesWritten;
+          writePosition += result.bytesWritten;
+        } catch (err) {
+          throw parseError(err, { path: handle.path }, () => `Failed to write to ${handle.path}`);
+        }
       }
+    }
+    if (remaining !== undefined && remaining !== 0) {
+      throw new VortexError(`Server omitted ${remaining} requested bytes`, {
+        kind: "http:protocol-violation",
+        url: endpoint.url.toString(),
+      });
     }
   } catch (err) {
     if (err instanceof VortexError || isCancellation(err)) throw err;
     throw toNetworkError(stream.requestUrl!, err);
+  } finally {
+    stream.destroy();
   }
 }
 

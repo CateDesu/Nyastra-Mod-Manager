@@ -2,7 +2,6 @@ const Promise = require("bluebird");
 const path = require("path");
 const { getFileVersion } = require("exe-version");
 const { actions, selectors, util } = require("@nexusmods/vortex-api");
-const winapi = require("winapi-bindings");
 
 const GAME_ID = "fallout4vr";
 const ESL_ENABLER_LIB = "Daytripper4.dll";
@@ -16,19 +15,7 @@ This issue is compounded by users extracting all their BA2s.
 const IGNORED_FILES = [path.join("**", "PersistantSubgraphInfoAndOffsetData.txt")];
 
 function findGame() {
-  try {
-    const instPath = winapi.RegGetValue(
-      "HKEY_LOCAL_MACHINE",
-      "Software\\Wow6432Node\\Bethesda Softworks\\Fallout 4 VR",
-      "Installed Path",
-    );
-    if (!instPath) {
-      throw new Error("empty registry key");
-    }
-    return Promise.resolve(instPath.value);
-  } catch (err) {
-    return util.GameStoreHelper.findByName("Fallout 4 VR", "steam").then((game) => game.gamePath);
-  }
+  return util.GameStoreHelper.findByName("Fallout 4 VR", "steam").then((game) => game.gamePath);
 }
 
 function getGameVersion(gamePath, exePath) {

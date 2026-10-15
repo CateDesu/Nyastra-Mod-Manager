@@ -40,7 +40,7 @@ import type {
   ICollectionModRule,
   ICollectionModRuleEx,
 } from "../types/ICollection";
-import { scanForDiffs } from "./binaryPatching";
+import { patchPath, scanForDiffs } from "./binaryPatching";
 import { matchChecksums } from "./checksumMatcher";
 import { generateConfig } from "./collectionConfig";
 import { REFERENCE_TAG_SCHEME } from "./deterministicReferenceTag";
@@ -164,7 +164,7 @@ async function rulesToCollectionMods(
 
         let patches: Record<string, string>;
         if (collectionInfo.saveEdits?.[mod.id] === true) {
-          const destPath = path.join(collectionPath, PATCHES_PATH, modName);
+          const destPath = patchPath(path.join(collectionPath, PATCHES_PATH), modName);
           await fs.ensureDirWritableAsync(destPath);
           patches = await scanForDiffs(api, game.id, mod.id, destPath, onProgress);
         }

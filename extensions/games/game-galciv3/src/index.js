@@ -1,7 +1,6 @@
 const Promise = require("bluebird");
 const path = require("path");
 const { fs, selectors, util } = require("@nexusmods/vortex-api");
-const winapi = require("winapi-bindings");
 
 const GAME_ID = "galacticcivilizations3";
 
@@ -11,21 +10,9 @@ const GOG_ID = 1444400383;
 const FACTION_EXT = ".faction";
 
 function findGame() {
-  try {
-    const instPath = winapi.RegGetValue(
-      "HKEY_LOCAL_MACHINE",
-      `SOFTWARE\\WOW6432Node\\GOG.com\\Games\\${GOG_ID.toString()}`,
-      "path",
-    );
-    if (!instPath) {
-      throw new Error("empty registry key");
-    }
-    return Promise.resolve(instPath.value);
-  } catch (err) {
-    return util.GameStoreHelper.findByAppId(STEAM_ID.toString(), "steam").then(
-      (game) => game.gamePath,
-    );
-  }
+  return util.GameStoreHelper.findByAppId(STEAM_ID.toString(), "steam").then(
+    (game) => game.gamePath,
+  );
 }
 
 function modPath() {

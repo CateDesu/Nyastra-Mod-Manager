@@ -1,7 +1,6 @@
 const Promise = require("bluebird");
 const path = require("path");
 const { fs, util } = require("@nexusmods/vortex-api");
-const winapi = require("winapi-bindings");
 
 /*
 Ignore the Meshes\AnimTextData\AnimationOffsets\PersistantSubgraphInfoAndOffsetData.txt file as a conflict. 

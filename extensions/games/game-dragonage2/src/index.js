@@ -1,29 +1,10 @@
 const path = require("path");
 const { fs, util } = require("@nexusmods/vortex-api");
-const winapi = require("winapi-bindings");
 
 const STEAM_IDS = ["15543", "1238040"];
-function regget(key, val) {
-  try {
-    const instPath = winapi.RegGetValue("HKEY_LOCAL_MACHINE", key, val);
-    if (!instPath) {
-      throw new Error("empty registry key");
-    }
-    return Promise.resolve(instPath.value);
-  } catch (err) {
-    return Promise.reject(err);
-  }
-}
 
 function findGame() {
-  // Dragon Age 2 seems to store the installation directory information
-  //  in different registry paths (possibly tied to game edition or localisation),
-  //  namely within HKLM...\Dragon Age 2\Install Dir; OR HKLM...\Dragon Age II\Install Dir;
-  //  we're going to test both.
-  return util.GameStoreHelper.findByAppId(STEAM_IDS)
-    .then((game) => game.gamePath)
-    .catch(() => regget("Software\\Wow6432Node\\BioWare\\Dragon Age 2", "Install Dir"))
-    .catch(() => regget("Software\\Wow6432Node\\BioWare\\Dragon Age II", "Install Dir"));
+  return util.GameStoreHelper.findByAppId(STEAM_IDS).then((game) => game.gamePath);
 }
 
 function queryModPath() {

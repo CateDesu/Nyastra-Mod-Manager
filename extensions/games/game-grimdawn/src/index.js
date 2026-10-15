@@ -1,23 +1,10 @@
 const path = require("path");
 const { fs, util } = require("@nexusmods/vortex-api");
-const winapi = require("winapi-bindings");
 
 const GAME_ID = "grimdawn";
 
 function findGame() {
-  try {
-    const instPath = winapi.RegGetValue(
-      "HKEY_LOCAL_MACHINE",
-      "SOFTWARE\\WOW6432Node\\GOG.com\\Games\\1449651388",
-      "path",
-    );
-    if (!instPath) {
-      throw new Error("empty registry key");
-    }
-    return Promise.resolve(instPath.value);
-  } catch (err) {
-    return util.GameStoreHelper.findByName("Grim Dawn", "steam").then((game) => game.gamePath);
-  }
+  return util.GameStoreHelper.findByName("Grim Dawn", "steam").then((game) => game.gamePath);
 }
 
 function prepareForModding(discovery) {

@@ -7,6 +7,7 @@
   "scripts": {
     "build": "node build.mjs && pnpm extractInfo",
     "typecheck": "pnpm tsc",
+    "test": "pnpm vitest run",
     "lint:strict": "pnpm exec node ../../scripts/strict-lint.mjs"
   },
   "devDependencies": {

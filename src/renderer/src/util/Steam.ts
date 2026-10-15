@@ -84,7 +84,7 @@ class Steam implements IGameStore {
       api?.runExecutable(execInfo.execPath, execInfo.arguments, {
         cwd: path.dirname(execInfo.execPath),
         suggestDeploy: true,
-        shell: true,
+        shell: false,
       }),
     );
   }
@@ -110,20 +110,19 @@ class Steam implements IGameStore {
 
     const isDirPath = appId.indexOf(path.sep) !== -1;
     const entries = await this.allGames();
-    const found = entries.find((entry) =>
-      !isDirPath
-        ? entry.appid === appId
-        : // Checking by gamepath is inefficient but I can't think of a different
-          //  way to ascertain whether the launcher has this game entry with the
-          //  provided information...
-          appId.toLowerCase().indexOf(entry.gamePath.toLowerCase()) !== -1,
-    );
+    const found = entries.find((entry) => {
+      if (!isDirPath) return entry.appid === appId;
+      const relative = path.relative(entry.gamePath, appId);
+      return (
+        relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)
+      );
+    });
 
     if (found === undefined) throw new GameEntryNotFound(appId, STORE_ID);
 
     return {
-      execPath: path.join(this.#baseFolder, STEAM_EXEC),
-      arguments: ["-applaunch", appId, ...parameters],
+      execPath: path.join(found.steamRoot ?? this.#baseFolder, STEAM_EXEC),
+      arguments: ["-applaunch", found.appid, ...parameters],
     };
   }
 

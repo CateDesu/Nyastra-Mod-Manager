@@ -1,6 +1,5 @@
 const path = require("path");
 const { log, util } = require("@nexusmods/vortex-api");
-const winapi = require("winapi-bindings");
 
 // List of folders in the various languages on Xbox, for now we default to English but this could be enhanced to select a folder based on the Vortex locale.
 // It's possible that some mods don't work with the non-English variant.
@@ -22,13 +21,6 @@ const STEAMAPP_ID2 = "900883";
 const GOG_ID = "1458058109";
 const MS_ID = "BethesdaSoftworks.TESOblivion-PC";
 
-async function findRegistryGame(key) {
-  const instPath = winapi.RegGetValue("HKEY_LOCAL_MACHINE", key, "Installed Path");
-  if (instPath.type !== "REG_SZ") return undefined;
-  const gamePath = instPath.value;
-  return { appid: key, name: path.basename(gamePath), gamePath, gameStoreId: "registry" };
-}
-
 async function findGame() {
   // Same order as the removed GameStoreHelper.find; the first hit wins.
   const lookups = [
@@ -37,7 +29,6 @@ async function findGame() {
     util.GameStoreHelper.findByName("The Elder Scrolls IV: Oblivion", "steam"),
     util.GameStoreHelper.findByAppId(MS_ID, "xbox"),
     util.GameStoreHelper.findByAppId(GOG_ID, "gog"),
-    findRegistryGame("Software\\Wow6432Node\\Bethesda Softworks\\oblivion"),
   ];
   const storeGames = (
     await Promise.all(lookups.map((lookup) => lookup.catch(() => undefined)))

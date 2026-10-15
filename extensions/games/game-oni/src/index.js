@@ -1,9 +1,7 @@
 const Promise = require("bluebird");
 const path = require("path");
-const winapi = require("winapi-bindings");
-const { actions, fs, util } = require("@nexusmods/vortex-api");
 
-const IsWin = process.platform === "win32";
+const { actions, fs, util } = require("@nexusmods/vortex-api");
 
 const NexusId = "oxygennotincluded";
 const Name = "Oxygen Not Included";
@@ -38,33 +36,15 @@ function main(context) {
     );
   }
 
-  function readRegistryKey(hive, key, name) {
-    if (!IsWin) {
-      return Promise.reject(new util.ProcessCanceled("registry is only available on Windows"));
-    }
-
-    try {
-      const instPath = winapi.RegGetValue(hive, key, name);
-      if (!instPath) {
-        throw new Error("empty registry key");
-      }
-      return Promise.resolve(instPath.value);
-    } catch (err) {
-      return Promise.reject(new util.ProcessCanceled(err));
-    }
-  }
-
-  function findUnityModManager() {
-    return readRegistryKey("HKEY_CURRENT_USER", "Software\\UnityModManager", "Path").then((value) =>
-      fs.statAsync(path.join(value, UMM_DLL)),
-    );
+  function findUnityModManager(discovery) {
+    return fs.statAsync(path.join(discovery.path, "UnityModManager", UMM_DLL));
   }
 
   function setup(discovery) {
     return fs
       .ensureDirWritableAsync(path.join(discovery.path, "Mods"), () => Promise.resolve())
       .then(() =>
-        findUnityModManager().catch((err) => {
+        findUnityModManager(discovery).catch((err) => {
           return new Promise((resolve, reject) => {
             context.api.store.dispatch(
               actions.showDialog(
