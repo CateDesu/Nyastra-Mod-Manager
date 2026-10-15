@@ -2,7 +2,7 @@ import path from "node:path";
 
 import { defineConfig, mergeConfig } from "vitest/config";
 
-import baseConfig from "../../vitest.base.config";
+import baseConfig from "../../config/vitest";
 
 export default mergeConfig(
   baseConfig,

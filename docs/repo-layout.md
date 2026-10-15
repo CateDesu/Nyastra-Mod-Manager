@@ -55,12 +55,14 @@ own workspace glob):
 
 ## Supporting areas
 
-- `docs/` - Project and coding documentation; start at [README.md](README.md)
+- `docs/` - Program and coding documentation; start at [README.md](README.md)
+- `config/` - Shared build, lint, test and TypeScript configuration
+- `.github/` - Workflows and community documents
 - `scripts/` - Workspace, build and automation scripts
 - `tools/` - One-off utilities and build helpers
 - `assets/` - Static bundled assets
 - `locales/` - Translations
-- `eslint-rules/` - Custom ESLint rules
+- `config/eslint-rules/` - Custom ESLint rules
 - `flatpak/` - Flatpak manifest and build scripts
 - `etc/` - Generated API report (`vortex.api.md`) and dependency report
 
@@ -95,7 +97,8 @@ Generated or vendored, and not worth searching:
 - `linux/extension-adaptations/` owns the portable RE4 and Requiem adaptation code.
 - `linux/extension-adaptations/local/` keeps ignored local third-party source copies.
 - `scripts/install-linux.mjs` installs the runtime into XDG application data.
-- `scripts/stage-linux-release.mjs` stages ZIP, AppImage and Debian packages and the release text.
+- `scripts/releases/stage-linux-release.mjs` stages ZIP, AppImage and Debian packages and the release text.
+- `scripts/releases/cleanup-builds.mjs` removes superseded local and GitHub builds.
 - `dist/release/assets/` holds the generated binary release assets.
 - `mods/vortex/` holds the ignored local Vortex archive and staging libraries.
 - `mods/fluffy/` holds the ignored local Fluffy runtime, mods and game settings.

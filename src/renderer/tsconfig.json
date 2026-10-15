@@ -1,6 +1,6 @@
 {
   "$schema": "https://www.schemastore.org/tsconfig.json",
-  "extends": "../../tsconfig.base.json",
+  "extends": "../../config/typescript/base.json",
   "include": [
     "src/**/*",
     "./test-setup.mts",

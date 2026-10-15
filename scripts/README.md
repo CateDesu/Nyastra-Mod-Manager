@@ -1,7 +1,6 @@
 # Scripts
 
-Standalone build and release scripts. These are not part of any app package
-and are intended for developers maintaining the Vortex repository.
+Standalone build and release scripts for maintaining the program.
 
 ---
 
@@ -56,6 +55,18 @@ Scripts wired into `package.json` can also be called with `pnpm run <name>`.
 ## TypeScript Editor Support
 
 The `.ts` files in this directory are standalone Node scripts run via
-`pnpm tsx`. They are not part of any app package. `tsconfig.node.json` (repo
-root) provides type checking and includes `"./scripts/**/*.ts"` so the editor
+`pnpm tsx`. They are not part of any program package. `config/typescript/node.json`
+provides type checking for these scripts so the editor
 resolves `node:*` imports.
+
+Run `pnpm exec tsc -p config/typescript/node.json` to check these scripts and
+shared configuration. DuckDB types resolve from the main workspace, matching
+the query generator's runtime dependency lookup.
+
+## Releases
+
+`releases/` groups release staging, build cleanup and their tests. Run
+`node scripts/releases/stage-linux-release.mjs` after packaging, and
+`pnpm --filter @nyastra/releases test` to check retention behavior. GitHub cleanup
+runs through `.github/workflows/cleanup-builds.yml`. See
+[Linux packaging](../docs/packaging/linux.md) for its retention policy.

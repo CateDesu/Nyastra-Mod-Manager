@@ -15,16 +15,21 @@
       { "env": "NODE_ENV" }
     ],
     "typescript": [
-      "{workspaceRoot}/rolldown.base.mjs",
+      "{workspaceRoot}/config/rolldown.mjs",
       "{workspaceRoot}/tsconfig*.json",
+      "{workspaceRoot}/config/typescript/*.json",
       "{projectRoot}/tsconfig*.json",
       "{projectRoot}/build.mjs",
       "{projectRoot}/tsdown.config.ts",
       "{projectRoot}/src/**/*.{ts,tsx,js,jsx}"
     ],
     "stylesheets": ["{projectRoot}/**/*.{scss,css}"],
-    "eslint": ["{projectRoot}/eslint.config.mjs", "{workspaceRoot}/eslint.config.base.mjs"],
-    "oxlint": ["{workspaceRoot}/oxlint.base.config.json", "{projectRoot}/.oxlintrc.json"],
+    "eslint": [
+      "{projectRoot}/eslint.config.mjs",
+      "{workspaceRoot}/config/eslint.mjs",
+      "{workspaceRoot}/config/eslint-rules/*.mjs"
+    ],
+    "oxlint": ["{workspaceRoot}/config/oxlint.json", "{projectRoot}/.oxlintrc.json"],
     "vortex-api": [
       "{workspaceRoot}/scripts/extensions-rolldown.mjs",
       { "dependentTasksOutputFiles": "packages/vortex-api/lib/api.d.ts" }

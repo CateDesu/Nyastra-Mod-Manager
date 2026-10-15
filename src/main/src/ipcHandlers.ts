@@ -1,8 +1,3 @@
-/**
- * IPC handlers for main process.
- * These handlers respond to requests from the renderer process via preload.
- */
-
 import { appendFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -53,7 +48,6 @@ import { openUrl, openFile, showItemInFolder } from "./open";
 import { createUpdateChecker } from "./updateCheck";
 import { extraWebViews } from "./webview";
 
-// Type-safe interface for global Redux state accessors
 export interface GlobalWithRedux {
   getReduxState?: () => object;
   getReduxStateMsgpack?: (idx: number) => string;
@@ -67,8 +61,7 @@ export function init(fs: FileSystem) {
     arch: process.arch,
   }));
   betterIpcMain.handle("updater:check-linux", () => checkUpdates());
-  // Build paths lazily so that paths overridden later (e.g. "temp" in
-  // Application constructor) are resolved at call time, not at init time.
+  // Resolve lazily because Application can override paths after IPC initialization.
   function resolveVortexPaths(): VortexPaths {
     const paths: VortexPaths = {
       base: getVortexPath("base"),
@@ -92,10 +85,7 @@ export function init(fs: FileSystem) {
       desktop: getVortexPath("desktop"),
     };
 
-    // Normalize all paths to use consistent separators. This is necessary
-    // because the scoped package name "@vortex/main" contains a forward slash
-    // which Electron preserves in app.getPath("userData"), producing mixed
-    // separators that break symlink detection (readlink returns OS-normalized paths).
+    // Match readlink's normalization when comparing paths.
     for (const [key, value] of Object.entries(paths)) {
       paths[key as keyof VortexPaths] = path.normalize(value);
     }
@@ -103,44 +93,19 @@ export function init(fs: FileSystem) {
     return paths;
   }
 
-  // ============================================================================
-  // Example handler
-  // ============================================================================
-
   betterIpcMain.handle("example:ping", () => "pong", { includeArgs: true });
 
-  // ============================================================================
-  // Helper functions
-  // ============================================================================
-
-  /**
-   * Returns the executable path and arguments for protocol client registration.
-   *
-   * Matching Vortex 1.x, the handler is registered without a --user-data
-   * argument, so the registry entry is identical regardless of which userdata
-   * directory the running instance was launched with. When a nxm:// link fires
-   * while Vortex is already running, the secondary launch forwards its argv to
-   * the running instance via the single-instance lock (see Application.ts
-   * "second-instance"), so the active profile handles the link rather than
-   * anything baked into the registry. udPath is accepted but intentionally
-   * unused; the surrounding IPC plumbing still carries it.
-   */
+  // Omit --user-data so protocol links reach the active instance and profile.
   function selfCL(_udPath: string | undefined): [string, string[]] {
-    // The "-d" flag is required so that when Windows appends the NXM URL to the command line,
-    // it becomes "-d nxm://..." which commander parses as "--download nxm://..."
+    // -d makes the appended protocol URL a download argument.
     if (process.env.NODE_ENV === "development" && process.argv[1]) {
-      // Use absolute path for the app entry point - process.argv[1] may be relative (e.g. ".")
-      // and would fail when launched from a different working directory (e.g. C:\WINDOWS\system32)
+      // Protocol launches may use another working directory.
       const appPath = path.resolve(process.argv[1]);
       return [process.execPath, [appPath, "-d"]];
     } else {
       return [process.execPath, ["-d"]];
     }
   }
-
-  // ============================================================================
-  // Dialog handlers
-  // ============================================================================
 
   betterIpcMain.handle(
     "dialog:showOpen",
@@ -174,10 +139,6 @@ export function init(fs: FileSystem) {
     },
   );
 
-  // ============================================================================
-  // App protocol client handlers
-  // ============================================================================
-
   betterIpcMain.handle(
     "app:setProtocolClient",
     (_event: IpcMainInvokeEvent, protocol: string, udPath: string | undefined) => {
@@ -206,9 +167,7 @@ export function init(fs: FileSystem) {
     app.exit(exitCode);
   });
 
-  // Sync write: the caller is typically about to die, so the line must be on
-  // disk before we return. Raw ipcMain because betterIpcMain has no sync
-  // handler.
+  // Flush synchronously because the renderer may exit immediately.
   ipcMain.on("diag:fatal", (event, message: string) => {
     try {
       const line =
@@ -223,7 +182,6 @@ export function init(fs: FileSystem) {
     event.returnValue = null;
   });
 
-  // Shell
   betterIpcMain.on("shell:openUrl", (_event, url) => {
     openUrl(new URL(url));
   });
@@ -235,10 +193,6 @@ export function init(fs: FileSystem) {
   betterIpcMain.on("shell:showItemInFolder", (_event, filePath) => {
     showItemInFolder(filePath);
   });
-
-  // ============================================================================
-  // App info handlers
-  // ============================================================================
 
   betterIpcMain.on("app:relaunch", (_event, args) => {
     relaunch(args);
@@ -271,10 +225,6 @@ export function init(fs: FileSystem) {
   betterIpcMain.handle("app:getVortexPaths", () => {
     return resolveVortexPaths();
   });
-
-  // ============================================================================
-  // WebContentsView handlers (migrated from BrowserView, removed in Electron 39)
-  // ============================================================================
 
   betterIpcMain.handle(
     "browserView:create",
@@ -340,7 +290,6 @@ export function init(fs: FileSystem) {
       const viewId = `${contentsId}_${Object.keys(extraWebViews[contentsId]).length}`;
       extraWebViews[contentsId][viewId] = view;
 
-      // Manual auto-resize: update view bounds when window resizes
       const updateBounds = () => {
         if (window && !window.isDestroyed()) {
           const bounds = window.getContentBounds();
@@ -357,7 +306,6 @@ export function init(fs: FileSystem) {
       window?.contentView.addChildView(view);
       await view.webContents.loadURL(src);
 
-      // Forward events from WebContentsView to renderer
       forwardEvents.forEach((eventId) => {
         view.webContents.on(
           eventId as Parameters<typeof view.webContents.on>[0],
@@ -397,10 +345,6 @@ export function init(fs: FileSystem) {
     },
   );
 
-  // ============================================================================
-  // Jump list (Windows)
-  // ============================================================================
-
   betterIpcMain.handle(
     "app:setJumpList",
     (_event: IpcMainInvokeEvent, categories: JumpListCategory[]) => {
@@ -412,20 +356,12 @@ export function init(fs: FileSystem) {
     },
   );
 
-  // ============================================================================
-  // Session cookies
-  // ============================================================================
-
   betterIpcMain.handle(
     "session:getCookies",
     async (event: IpcMainInvokeEvent, filter: Electron.CookiesGetFilter) => {
       return event.sender.session.cookies.get(filter);
     },
   );
-
-  // ============================================================================
-  // Window operations
-  // ============================================================================
 
   betterIpcMain.handle("window:getId", (event: IpcMainInvokeEvent) => {
     const window = BrowserWindow.fromWebContents(event.sender);
@@ -538,10 +474,6 @@ export function init(fs: FileSystem) {
     win?.webContents.toggleDevTools();
   });
 
-  // ============================================================================
-  // Content tracing operations
-  // ============================================================================
-
   betterIpcMain.handle(
     "contentTracing:startRecording",
     async (_event: IpcMainInvokeEvent, options: TraceConfig | TraceCategoriesAndOptions) => {
@@ -555,10 +487,6 @@ export function init(fs: FileSystem) {
       return await contentTracing.stopRecording(resultPath);
     },
   );
-
-  // ============================================================================
-  // Redux state transfer
-  // ============================================================================
 
   betterIpcMain.handle("redux:getState", () => {
     const getReduxState = (global as GlobalWithRedux).getReduxState;
@@ -576,10 +504,6 @@ export function init(fs: FileSystem) {
     return undefined;
   });
 
-  // ============================================================================
-  // Login item settings
-  // ============================================================================
-
   betterIpcMain.handle(
     "app:setLoginItemSettings",
     (_event: IpcMainInvokeEvent, settings: Settings) => {
@@ -591,10 +515,6 @@ export function init(fs: FileSystem) {
     return app.getLoginItemSettings();
   });
 
-  // ============================================================================
-  // Clipboard operations
-  // ============================================================================
-
   betterIpcMain.handle("clipboard:writeText", async (_event: IpcMainInvokeEvent, text: string) => {
     await clipboard.writeText(text);
   });
@@ -602,10 +522,6 @@ export function init(fs: FileSystem) {
   betterIpcMain.handle("clipboard:readText", () => {
     return clipboard.readText();
   });
-
-  // ============================================================================
-  // Menu operations
-  // ============================================================================
 
   betterIpcMain.handle("menu:setApplicationMenu", (event, template) => {
     const processTemplate = (
@@ -616,14 +532,12 @@ export function init(fs: FileSystem) {
           ...item,
         } as Electron.MenuItemConstructorOptions;
 
-        // If item has an ID (from renderer's processMenuTemplate), add a click handler
         if (item.id) {
           processed.click = () => {
             event.sender.send("menu:click", item.id);
           };
         }
 
-        // Process submenus recursively
         if (item.submenu && Array.isArray(item.submenu)) {
           processed.submenu = processTemplate(item.submenu);
         }
@@ -635,10 +549,6 @@ export function init(fs: FileSystem) {
     const menu = Menu.buildFromTemplate(processTemplate(template as SerializableMenuItem[]));
     Menu.setApplicationMenu(menu);
   });
-
-  // ============================================================================
-  // Power save blocker
-  // ============================================================================
 
   betterIpcMain.handle(
     "powerSaveBlocker:start",
@@ -655,10 +565,6 @@ export function init(fs: FileSystem) {
     return powerSaveBlocker.isStarted(id);
   });
 
-  // ============================================================================
-  // bsdiff binary patching (delegated to a worker_thread, off the main loop)
-  // ============================================================================
-
   betterIpcMain.handle(
     "bsdiff:create",
     (_event: IpcMainInvokeEvent, oldPath: string, newPath: string, patchPath: string) =>
@@ -671,17 +577,12 @@ export function init(fs: FileSystem) {
       bsdiffPatch(oldPath, outputPath, patchPath),
   );
 
-  // ============================================================================
-  // file hashing (delegated to a worker_thread, off the main and renderer loops)
-  // ============================================================================
-
   betterIpcMain.handle(
     "hash:compute",
     (_event: IpcMainInvokeEvent, algorithm: HashAlgorithm, filePath: string) =>
       hashFile(algorithm, filePath),
   );
 
-  // FS
   betterIpcMain.handle("fs:copy", (_event, source, target, options) =>
     fs.copy(QualifiedPath.of(source), QualifiedPath.of(target), options),
   );
@@ -717,10 +618,8 @@ export function init(fs: FileSystem) {
     return statToWire(result);
   });
 
-  // Directory enumeration: the FS API returns an async iterator, which
-  // cannot cross IPC. Main holds the iterator behind a numeric handle and
-  // the renderer pulls fixed-size batches through fs:enumerate-next.
-  // Handles evict on exhaustion, explicit close, or renderer destruction.
+  // Iterators stay in main because they cannot cross IPC.
+  // Release handles on exhaustion, close or renderer destruction.
   const enumerations = new Map<
     number,
     {
@@ -738,9 +637,7 @@ export function init(fs: FileSystem) {
     enumerations.delete(handle);
     session.sender.removeListener("destroyed", session.onDestroyed);
 
-    // Releases the opendir handle inside the backend iterator. Detaching
-    // the destroyed listener here is what keeps repeated enumerations from
-    // leaking listeners onto the sender.
+    // Release the directory and detach the sender listener to prevent leaks.
     void session.iterator.return?.(undefined);
   };
 
@@ -778,9 +675,6 @@ export function init(fs: FileSystem) {
     }
 
     if (done) {
-      // Exhausted: full eviction so the opendir handle is released and the
-      // destroyed listener is detached. A close call from the renderer
-      // afterwards is a tolerated no-op.
       evictEnumeration(handle);
     }
 
@@ -792,10 +686,8 @@ export function init(fs: FileSystem) {
     evictEnumeration(handle);
   });
 
-  // Streams: the FS API returns web streams, which cannot cross IPC. Main
-  // holds the stream behind a numeric handle; the renderer pulls batches of
-  // bytes through fs:stream-read or pushes bytes through fs:stream-write.
-  // Handles evict on exhaustion, explicit close, or renderer destruction.
+  // Streams stay in main and exchange byte batches through numeric handles.
+  // Release handles on exhaustion, close or renderer destruction.
   type StreamSession =
     | {
         kind: "read";
@@ -820,14 +712,10 @@ export function init(fs: FileSystem) {
     streams.delete(handle);
     session.sender.removeListener("destroyed", session.onDestroyed);
     if (session.kind === "read") {
-      // Releases the fd inside the backend stream (autoClose). Ignoring the
-      // rejection: eviction also happens on error/destroyed where cancel is
-      // a tolerated no-op.
+      // Cancellation may reject if the stream already failed or closed.
       void session.reader.cancel().catch(() => undefined);
     } else {
-      // abort, not close: a renderer that died mid-way must not leave a
-      // file that looks like it completed. Discards buffered bytes, closes
-      // the fd, leaves the file truncated at the last flushed offset.
+      // Abandoned writes discard buffered bytes. Already flushed bytes remain on disk.
       void session.writer.abort().catch(() => undefined);
     }
   };
@@ -893,9 +781,6 @@ export function init(fs: FileSystem) {
     }
 
     if (done) {
-      // Exhausted: full eviction so the fd is released and the destroyed
-      // listener is detached. A close call from the renderer afterwards is
-      // a tolerated no-op.
       evictStream(handle);
     }
 
@@ -921,8 +806,7 @@ export function init(fs: FileSystem) {
     try {
       await session.writer.write(bytes);
     } catch (err) {
-      // A failed write leaves the stream unusable: evict (aborting the
-      // writer) before the rejection travels back to the renderer.
+      // Abort the failed writer before reporting its error.
       evictStream(handle);
       throw err;
     }
@@ -930,13 +814,11 @@ export function init(fs: FileSystem) {
 
   betterIpcMain.handle("fs:stream-close", async (_event, handle: number) => {
     const session = streams.get(handle);
-    // A close call for an unknown handle is a tolerated no-op: main evicts
-    // on exhaustion and on write errors already.
+    // Exhaustion or an earlier error may have already evicted this handle.
     if (session === undefined) return;
 
     if (session.kind === "write") {
-      // Graceful: flush pending node-buffered bytes, then autoClose ends
-      // the fd. Evicting afterwards abort()s a no-op writer at worst.
+      // Flush before eviction aborts the writer.
       try {
         await session.writer.close();
       } finally {
@@ -945,8 +827,6 @@ export function init(fs: FileSystem) {
       return;
     }
 
-    // Read: cancel is the correct close for a stream that may not be
-    // exhausted.
     evictStream(handle);
   });
 

@@ -1,7 +1,6 @@
 import { AST_NODE_TYPES, ESLintUtils } from "@typescript-eslint/utils";
 
-/** @type {import("eslint").Rule.RuleModule} */
-export default {
+export default /** @type {import("eslint").Rule.RuleModule} */ ({
   meta: {
     type: "problem",
     docs: {
@@ -82,4 +81,4 @@ export default {
       },
     };
   },
-};
+});

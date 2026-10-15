@@ -1,6 +1,6 @@
 {
   "$schema": "../../node_modules/oxlint/configuration_schema.json",
-  "extends": ["../../oxlint.base.config.json"],
+  "extends": ["../../config/oxlint.json"],
   "rules": {
     "vitest/require-mock-type-parameters": "warn"
   }

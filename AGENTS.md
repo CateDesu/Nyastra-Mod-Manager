@@ -69,4 +69,4 @@ Read the doc for the area you're touching rather than the whole tree.
 - Installers, release pipeline: `docs/packaging/linux.md`
 - The auto-updater: `docs/updater.md`
 - Writing documentation: `docs/writing-documentation.md`
-- Code style: `CODESTYLE.md`
+- Code style: `docs/code-style.md`

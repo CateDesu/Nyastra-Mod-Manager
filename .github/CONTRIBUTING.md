@@ -71,7 +71,6 @@ Before you start, make sure you have:
 ## Setup
 
 1. Install distro-specific prerequisites:
-    - [Windows setup]
     - Linux:
         - [Arch-based setup] (Arch, CachyOS, Manjaro)
         - [Debian-based setup] (Debian, Ubuntu, Pop!\_OS, Linux Mint)
@@ -120,12 +119,10 @@ instructions.
 
 ## Packaging
 
-To build a Windows installer locally (unsigned, for testing production
-behavior), run `pnpm package:nosign` from the repo root; the output lands in
-`dist/`. Signed installers are produced by CI only.
+To build unsigned Linux packages locally, run `pnpm package:nosign` from the
+repository root. The output lands in `dist/`.
 
-- [Windows packaging]: commands, the version placeholder, what the pipeline
-  does, and the traps
+- [Linux packaging]: prerequisites, build commands and release cleanup
 - [Flatpak packaging]
 
 ## FAQ
@@ -141,25 +138,24 @@ information.
 - [Debugging]
 - [Docker Dev Containers]
 
-[All documentation]: ./docs/README.md
-[Arch-based setup]: ./docs/install-instructions/archlinux.md
+[All documentation]: ../docs/README.md
+[Arch-based setup]: ../docs/install-instructions/archlinux.md
 [CLI]: https://git-scm.com/
-[Debian-based setup]: ./docs/install-instructions/debian-based.md
-[Debugging]: ./docs/DEBUGGING-GUIDE.md
-[Docker Dev Containers]: ./docker
-[docs/DEBUGGING-GUIDE.md]: ./docs/DEBUGGING-GUIDE.md
-[docs/branching-and-release-strategy.md]: ./docs/branching-and-release-strategy.md
-[Fedora setup]: ./docs/install-instructions/fedora.md
-[Flatpak packaging]: ./docs/packaging/flatpak.md
+[Debian-based setup]: ../docs/install-instructions/debian-based.md
+[Debugging]: ../docs/DEBUGGING-GUIDE.md
+[Docker Dev Containers]: ../docker
+[docs/DEBUGGING-GUIDE.md]: ../docs/DEBUGGING-GUIDE.md
+[docs/branching-and-release-strategy.md]: ../docs/branching-and-release-strategy.md
+[Fedora setup]: ../docs/install-instructions/fedora.md
+[Flatpak packaging]: ../docs/packaging/flatpak.md
 [GUI client]: https://git-scm.com/tools/guis
-[Generic Installation Instructions]: ./docs/install-instructions/generic.md
+[Generic Installation Instructions]: ../docs/install-instructions/generic.md
 [GitHub account]: https://github.com/login
 [GitHub Desktop]: https://github.com/apps/desktop
 [Neovim]: https://neovim.io/
-[NixOS setup]: ./docs/install-instructions/nixos.md
-[Shared Setup]: ./docs/install-instructions/shared.md
+[NixOS setup]: ../docs/install-instructions/nixos.md
+[Shared Setup]: ../docs/install-instructions/shared.md
 [VS Code]: https://code.visualstudio.com/
 [VS Code download]: https://code.visualstudio.com/download
 [WebStorm]: https://www.jetbrains.com/webstorm/
-[Windows setup]: ./docs/install-instructions/windows.md
-[Windows packaging]: ./docs/packaging/windows.md
+[Linux packaging]: ../docs/packaging/linux.md

@@ -2,7 +2,7 @@ import { createRequire } from "node:module";
 
 import { mergeConfig, defineConfig } from "vitest/config";
 
-import baseConfig from "../../../vitest.base.config";
+import baseConfig from "../../../config/vitest";
 
 // Resolve through Node's package resolution so the alias survives any future
 // move of the mock package. Regex `find` ensures `vortex-api` is the only

@@ -36,6 +36,7 @@ yarn-error.log
 [Dd]ebugPublic/
 [Rr]elease/
 [Rr]eleases/
+!scripts/releases/
 api/lib/
 # we need to include the installer image
 build/

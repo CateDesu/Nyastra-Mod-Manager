@@ -4,7 +4,7 @@ import * as path from "node:path";
 
 import { rolldown } from "rolldown";
 
-import { createConfig, mainOutputDirectory } from "../../rolldown.base.mjs";
+import { createConfig, mainOutputDirectory } from "../../config/rolldown.mjs";
 
 const INPUT = path.resolve(import.meta.dirname, "src", "main.ts");
 const OUTPUT = path.join(mainOutputDirectory, "main.cjs");

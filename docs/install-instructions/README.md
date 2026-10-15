@@ -4,7 +4,7 @@ Building Nyastra’s Mod Manager from a clone. Pick the page for your Linux dist
 prerequisites it lists, then finish with [shared.md](shared.md), which covers
 the repository bootstrap common to all of them.
 
-[CONTRIBUTING.md](../../CONTRIBUTING.md) is the shorter route if you already
+[.github/CONTRIBUTING.md](../../.github/CONTRIBUTING.md) is the shorter route if you already
 have a working toolchain.
 
 ## Prerequisites by platform

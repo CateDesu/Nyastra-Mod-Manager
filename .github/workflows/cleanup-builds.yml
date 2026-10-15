@@ -1,0 +1,39 @@
+name: Clean old builds
+
+on:
+  release:
+    types: [published]
+  workflow_run:
+    workflows: [Package Linux preview]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: cleanup-builds
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: >-
+      github.repository == 'CateDesu/Nyastra-Mod-Manager' &&
+      (github.event_name != 'workflow_run' ||
+        (github.event.workflow_run.conclusion == 'success' &&
+         github.event.workflow_run.head_branch == 'main' &&
+         github.event.workflow_run.head_repository.full_name == github.repository))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: ./.github/actions/setup-pnpm
+      - run: pnpm --filter @nyastra/releases install --frozen-lockfile --ignore-scripts
+      - run: node --test scripts/releases/*.test.mjs
+      - run: node scripts/releases/cleanup-builds.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

@@ -17,13 +17,49 @@ pnpm run verify
 NODE_ENV=production pnpm nx run @vortex/main:publish
 pnpm --filter @vortex/main run package:nosign --x64
 node scripts/verify-packaged-asar.mjs
-node scripts/stage-linux-release.mjs
+node scripts/releases/stage-linux-release.mjs
 ```
 
 The package version is maintained in src/main/package.json. Packaging produces
 ZIP, AppImage and Debian artifacts in dist/. Staging collects them under
 dist/release/assets with release notes and the matching source tag. Publish the
 source tag before distributing a binary. Preserve GPL and dependency notices.
+
+After a successful package build, older versioned Linux packages and their
+blockmaps in `dist/` are removed for the architecture being built. All three new
+formats must exist and be nonempty first. Failed or incomplete builds preserve
+previous versions. Other files and architectures are left in place.
+Targeted builds such as ZIP-only or `--dir` builds skip cleanup when the full
+replacement set is absent.
+
+## Old builds
+
+Upload all three assets to a draft GitHub release before publishing it. The
+**Clean old builds** workflow runs when the release is published. It keeps the
+highest complete stable and preview versions for each architecture, using the
+same version ordering as update checking, then removes superseded Nyastra binary
+assets and blockmaps. Source tags, release notes and license files remain.
+Keeping both channels ensures preview releases do not remove stable downloads.
+
+The workflow also removes older `nyastra-linux-preview` Actions artifacts after
+a successful packaging run on `main`, retaining its newest successful artifact.
+Newer unfinished artifacts are preserved until a successful replacement exists.
+Unrelated Actions artifacts are not included.
+
+Incomplete release uploads or failed metadata requests stop cleanup before any
+deletion. A deletion failure stops the remaining operations. Rerun the workflow
+after resolving the problem, or use its manual dispatch to apply the policy to
+existing builds. Publishing from automation with `GITHUB_TOKEN` does not trigger
+another workflow, so that publisher must explicitly dispatch cleanup. Release
+tags must contain the cleanup workflow. Use manual dispatch for older tags that
+predate it. These constraints follow GitHub's
+[workflow triggers](https://docs.github.com/en/actions/concepts/workflows-and-actions/workflows#workflow-triggers)
+and [workflow token behavior](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow).
+
+Local packaging cleanup runs when rebuilding from a clone. Installed ZIP updates
+remove the previous runtime and abandoned installer build directories only after
+installation succeeds, while still holding the install lock. AppImages and
+downloaded archives outside the build directory remain under the user's control.
 
 Run commands from the workspace. Running pnpm inside src/main/dist can cause
 pnpm to replace the deployed dependency tree. Recreate it with the publish
@@ -84,6 +120,7 @@ tests. It excludes the official game E2E suite. Linux installer checks are:
 
 ```bash
 node --test scripts/install-linux.test.mjs scripts/import-linux-profile.test.mjs
+pnpm --filter @nyastra/releases test
 node scripts/smoke-linux.mjs dist/linux-unpacked/nyastra-mod-manager
 node linux/extension-adaptations/verify.mjs --source-plugins /path/to/original/plugins
 ```

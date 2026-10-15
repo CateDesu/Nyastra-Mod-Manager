@@ -70,8 +70,7 @@ function writeFileAtomicImpl(
       if (data === undefined || checksum(data) !== hash) {
         callCleanup();
         return attempts > 0
-          ? // retry
-            writeFileAtomicImpl(filePath, input, attempts - 1)
+          ? writeFileAtomicImpl(filePath, input, attempts - 1)
           : PromiseBB.reject(new Error("Write failed, checksums differ"));
       } else {
         return fs.renameAsync(tmpPath, filePath);
@@ -87,26 +86,12 @@ function writeFileAtomicImpl(
     });
 }
 
-/**
- * copy a file in such a way that it will not replace the target if the copy is
- * somehow interrupted. The file is first copied to a temporary file in the same
- * directory as the destination, then renames it over the destination. A failed
- * rename leaves the original destination intact.
- *
- * Goes through node's fs: a file another process is holding fails back to the caller, which
- * knows whether that is worth interrupting the user over.
- *
- * @export
- * @param {string} srcPath
- * @param {string} destPath
- * @returns {PromiseBB<void>}
- */
+/** Copy to a sibling temporary file so failures leave the destination intact. */
 export function copyFileAtomic(srcPath: string, destPath: string): PromiseBB<void> {
   let cleanup: (next?: (err?: Error) => void) => void;
   let tmpPath: string;
   return new PromiseBB<void>((resolve, reject) => {
-    // the copy only ever works on the temp PATH; discardDescriptor makes tmp close its
-    // descriptor immediately, so no descriptor is held (or ever double-closed) here
+    // Close tmp's descriptor before copyFile opens the temporary path.
     file(
       { template: `${destPath}.XXXXXX.tmp`, discardDescriptor: true },
       (err: any, genPath: string, _fd: number, cleanupCB: () => void) => {
@@ -124,8 +109,7 @@ export function copyFileAtomic(srcPath: string, destPath: string): PromiseBB<voi
     .catch((unknownErr) => {
       const err = unknownToError(unknownErr);
       log("info", "failed to copy", { srcPath, destPath, err: err.stack });
-      // with the descriptor discarded, tmp's cleanup only unlinks; awaiting it keeps
-      // the temp file from outliving the rejection
+      // Remove the temporary file before rejecting.
       const removeTmp =
         cleanup !== undefined
           ? new PromiseBB<void>((removed) => cleanup(() => removed()))

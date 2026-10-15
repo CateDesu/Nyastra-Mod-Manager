@@ -2,7 +2,7 @@ import { createRequire } from "node:module";
 
 import { mergeConfig, defineConfig } from "vitest/config";
 
-import baseConfig from "../../vitest.base.config";
+import baseConfig from "../../config/vitest";
 
 const require_ = createRequire(import.meta.url);
 const VORTEX_API_MOCK = require_.resolve("@vortex/extension-test-mocks");

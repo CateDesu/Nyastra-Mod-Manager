@@ -155,9 +155,6 @@ export async function requestTokenRefresh(refreshToken: string): Promise<ITokenR
   return JSON.parse(reply);
 }
 
-/**
- * deals with token exchange for OAuth2
- **/
 class OAuth {
   private mServerSettings: IOAuthServerSettings;
   private mStates: {
@@ -173,7 +170,6 @@ class OAuth {
 
   constructor(settings: IOAuthServerSettings) {
     this.mServerSettings = settings;
-    // Check if we're using localhost redirect (http protocol)
     this.mLocalhost = OAUTH_REDIRECT_BASE.startsWith("http:");
   }
 
@@ -214,9 +210,6 @@ class OAuth {
   private async exchangeCode(code: string, state: string): Promise<boolean> {
     const request = this.mStates[state];
     if (request === undefined) {
-      // State token not found — the callback arrived after the login flow was
-      // already completed or abandoned (e.g. the user clicked login twice).
-      // Silently ignore, matching the behavior of the local HTTP server path.
       log("debug", "ignoring OAuth callback with unknown state token", { state });
       return false;
     }

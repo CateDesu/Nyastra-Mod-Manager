@@ -119,6 +119,41 @@ test("updates replace the runtime and self installation is idempotent", () => {
   }
 });
 
+test("successful updates remove abandoned installer builds while failures preserve recovery files", () => {
+  const f = fixture();
+  try {
+    assert.equal(f.run().status, 0);
+    const installRoot = path.dirname(f.app);
+    const previous = path.join(installRoot, ".app-previous-999999");
+    const partial = path.join(installRoot, ".app-install-999998");
+    const unrelated = path.join(installRoot, ".app-personal-999997");
+    const external = path.join(f.root, "keep-external");
+    const linked = path.join(installRoot, ".app-previous-999996");
+    for (const folder of [previous, partial, unrelated, external]) {
+      mkdirSync(folder);
+      writeFileSync(path.join(folder, "keep-or-clean"), "fixture runtime");
+    }
+    symlinkSync(external, linked, "dir");
+    symlinkSync(external, path.join(previous, "nested-link"), "dir");
+    writeFileSync(path.join(f.source, "version"), "two");
+    const failed = f.run(f.source, { FAIL_ASSOCIATION: "1" });
+    assert.equal(failed.status, 1, failed.stderr);
+    assert.equal(readFileSync(path.join(f.app, "version"), "utf8"), "one");
+    assert.ok(existsSync(previous));
+    assert.ok(existsSync(partial));
+    const installed = f.run();
+    assert.equal(installed.status, 0, installed.stderr);
+    assert.equal(readFileSync(path.join(f.app, "version"), "utf8"), "two");
+    assert.ok(!existsSync(previous));
+    assert.ok(!existsSync(partial));
+    assert.ok(existsSync(unrelated));
+    assert.ok(existsSync(linked));
+    assert.equal(readFileSync(path.join(external, "keep-or-clean"), "utf8"), "fixture runtime");
+  } finally {
+    f.clean();
+  }
+});
+
 test("concurrent installation cannot capture state before owning the lock", async () => {
   const f = fixture();
   const queryStarted = path.join(f.root, "query-started");

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://www.schemastore.org/tsconfig.json",
+  "include": [
+    "../../config/eslint-rules/*.mjs",
+    "../../eslint.config.mjs",
+    "../../scripts/**/*.mjs",
+    "../../scripts/**/*.ts",
+    "../../src/main/src/store/queryParser.ts",
+    "../../ts-to-zod.config.mjs",
+    "../../vitest.config.ts",
+    "../*.ts",
+    "../*.mjs"
+  ],
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "composite": true,
+    "noEmit": true,
+    "allowJs": true,
+    "skipLibCheck": true,
+    "paths": {
+      "@duckdb/node-api": ["../../src/main/node_modules/@duckdb/node-api"]
+    },
+    "types": ["node"]
+  }
+}

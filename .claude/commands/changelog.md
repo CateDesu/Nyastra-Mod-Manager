@@ -1,5 +1,5 @@
 ---
-description: Draft next CHANGELOG.md entry from merged PRs
+description: Draft next docs/changelog.md entry from merged PRs
 argument-hint: "[version] [date]"
 ---
 

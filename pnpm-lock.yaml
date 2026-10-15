@@ -3754,6 +3754,12 @@ importers:
         specifier: 'catalog:'
         version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@24.12.2)(@vitest/coverage-v8@4.1.9)(@vitest/ui@4.1.9)(happy-dom@20.10.6)(vite@8.1.3)
 
+  scripts/releases:
+    dependencies:
+      semver:
+        specifier: 'catalog:'
+        version: 7.7.4
+
   src/main:
     dependencies:
       '@duckdb/node-api':

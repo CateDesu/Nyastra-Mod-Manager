@@ -4,10 +4,10 @@ import betterTailwindcss from "eslint-plugin-better-tailwindcss";
 import { defineConfig } from "eslint/config";
 import globals from "globals";
 
-import noBluebirdPromiseAliasRule from "../../eslint-rules/no-bluebird-promise-alias.mjs";
-import noBluebirdResolveWithPromiseLike from "../../eslint-rules/no-bluebird-resolve-promiselike.mjs";
-import noRestrictedImportsRule from "../../eslint-rules/no-restricted-imports.mjs";
-import { baseConfig } from "../../eslint.config.base.mjs";
+import noBluebirdPromiseAliasRule from "../../config/eslint-rules/no-bluebird-promise-alias.mjs";
+import noBluebirdResolveWithPromiseLike from "../../config/eslint-rules/no-bluebird-resolve-promiselike.mjs";
+import noRestrictedImportsRule from "../../config/eslint-rules/no-restricted-imports.mjs";
+import { baseConfig } from "../../config/eslint.mjs";
 
 export default defineConfig([
   ...baseConfig(import.meta.dirname),

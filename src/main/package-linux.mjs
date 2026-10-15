@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { pruneLocalBuilds } from "../../scripts/releases/cleanup-builds.mjs";
+
 if (process.platform !== "linux" || process.arch !== "x64") {
   throw new Error("The Linux preview currently packages x64 only");
 }
@@ -54,6 +56,10 @@ try {
   );
   if (result.error) throw result.error;
   status = result.status ?? 1;
+  if (status === 0) {
+    const removed = await pruneLocalBuilds(path.join(directory, "../../dist"), pkg.version, "x64");
+    console.log(`Removed ${removed} old local builds`);
+  }
 } finally {
   await rm(temporary, { recursive: true, force: true });
 }

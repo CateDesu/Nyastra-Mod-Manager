@@ -41,7 +41,6 @@ async function githubJson(endpoint: string): Promise<unknown> {
   }).json();
 }
 
-/** Checks metadata only. Installation and Git changes remain explicit user actions. */
 export function createUpdateChecker(
   installation: () => IInstallation,
   request: (endpoint: string) => Promise<unknown> = githubJson,

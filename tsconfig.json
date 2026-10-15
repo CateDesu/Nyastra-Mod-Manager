@@ -15,7 +15,7 @@
       "path": "./src/renderer/tsconfig.json"
     },
     {
-      "path": "./tsconfig.node.json"
+      "path": "./config/typescript/node.json"
     }
   ]
 }

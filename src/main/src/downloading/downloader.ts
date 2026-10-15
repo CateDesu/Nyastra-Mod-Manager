@@ -136,9 +136,7 @@ export async function download<T>(
   let handle: FileHandle;
 
   try {
-    // https://nodejs.org/api/fs.html#file-system-flags
-    // 'w+': Open file for reading and writing. The file is created (if it does not exist) or truncated (if it exists).
-    // 'r+': Open file for reading and writing. An exception occurs if the file does not exist.
+    // Preserve checkpoint bytes when resuming and truncate fresh downloads.
     const flag = checkpoint ? "r+" : "w+";
     const fd = await open(dest, flag);
     handle = { fd, path: dest };
@@ -163,7 +161,6 @@ export async function download<T>(
       if (options?.progressReporter) {
         chunkProgress = options.progressReporter.initChunked(chunks, probe.size!);
 
-        // fast forward progress reporter to checkpoint
         for (const chunk of chunks) {
           const isComplete = completedRanges.some(
             (r) => r.start <= chunk.range.start && r.end >= chunk.range.end,
@@ -184,8 +181,7 @@ export async function download<T>(
             (chunk) => async () =>
               withRetry(
                 () => {
-                  // Reset chunk progress before each attempt so a failed
-                  // partial download doesn't leave stale byte counts.
+                  // Exclude failed attempts from progress totals.
                   if (chunkProgress) {
                     const progress = chunkProgress.get(chunk.index);
                     if (progress) {
@@ -210,10 +206,7 @@ export async function download<T>(
         await chunkQueue.onIdle();
       }
     } else {
-      // Compute the checkpoint baseline: the contiguous byte position
-      // that was already completed before this download call. On retry
-      // we reset back to this position rather than to zero, because
-      // those bytes are already valid on disk.
+      // Preserve only the contiguous completed prefix when retrying.
       let checkpointPosition = 0;
 
       if (checkpoint && completedRanges.length > 0) {
@@ -246,9 +239,7 @@ export async function download<T>(
 
       await withRetry(
         async () => {
-          // Reset write position and progress back to the checkpoint
-          // baseline on every attempt. Any bytes written by a previous
-          // failed attempt will be overwritten.
+          // Discard bytes left by failed attempts while preserving the checkpoint.
           const writePosition = checkpointPosition;
           try {
             await handle.fd.truncate(writePosition);
@@ -268,10 +259,7 @@ export async function download<T>(
             expectedRemainingBytes = probe.size - writePosition;
           }
 
-          // When the server supports range requests, use a Range header
-          // even in the non-chunked path. This avoids re-downloading
-          // already-completed bytes when resuming and lets the server
-          // send only the remainder of the file.
+          // Single-stream resumes also need a Range header to skip valid bytes.
           if (probe.acceptsRanges && probe.size && writePosition > 0) {
             rangeChunk = {
               index: 0,
@@ -351,16 +339,6 @@ async function probeUrl(
   return { size, acceptsRanges, etag, fileName };
 }
 
-/**
- * Create a got stream with an immediate no-op error listener.
- *
- * got internally calls `this.destroy(new AbortError())` inside an
- * `abort` event listener on the signal.  If the stream has no `error`
- * listener at that moment Node promotes the error to an uncaught
- * exception.  Attaching a no-op listener here prevents that;
- * downstream consumers still receive the error
- * through their own mechanisms.
- */
 function createGotStream(
   got: Got,
   endpoint: ResolvedEndpoint,
@@ -373,6 +351,7 @@ function createGotStream(
     headers: createHeaders(options?.etag, options?.chunk, endpoint.headers),
   });
 
+  // Prevent uncaught abort errors before consumers attach their own listeners.
   stream.on("error", () => {});
   // Keep got's timing listeners from draining bytes while it awaits the cookie jar.
   stream.on("request", (request: ClientRequest) => {

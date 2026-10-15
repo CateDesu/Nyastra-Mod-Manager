@@ -1,8 +1,8 @@
 # Vortex Documentation
 
 Project and coding documentation. To set up and build Vortex, start with
-[CONTRIBUTING.md](../CONTRIBUTING.md). For code style, see
-[CODESTYLE.md](../CODESTYLE.md). Agents should also read
+[.github/CONTRIBUTING.md](../.github/CONTRIBUTING.md). For code style, see
+[docs/code-style.md](code-style.md). Agents should also read
 [AGENTS.md](../AGENTS.md).
 
 ## Start here
@@ -17,6 +17,7 @@ Project and coding documentation. To set up and build Vortex, start with
 
 ## Writing code
 
+- [code-style.md](code-style.md) - Code conventions and review expectations
 - [frontend.md](frontend.md) - Renderer conventions: React, types, props, styling, icons, accessibility
 - [state.md](state.md) - Renderer Redux state: the hives, writing and registering a reducer, verifiers, the deprecated `storeHelper` helpers
 - [testing.md](testing.md) - Running tests, component-test selectors, mocking `vortex-api` in extension tests
@@ -45,7 +46,8 @@ Project and coding documentation. To set up and build Vortex, start with
 - [branching-and-release-strategy.md](branching-and-release-strategy.md) - Master, release branches, what lands where
 - [cherry-pick-workflow.md](cherry-pick-workflow.md) - Automated cherry-picks between branches
 - [publishing-releases.md](publishing-releases.md) - What happens when a release goes out
-- [RELEASES.md](../RELEASES.md) - Which versions are supported, deprecation windows for `vortex-api` and the backend API, and how extension authors are notified
+- [release-support.md](release-support.md) - Which versions are supported, deprecation windows for `vortex-api` and the backend API, and how extension authors are notified
+- [changelog.md](changelog.md) - Release history
 
 ## Installing from source
 

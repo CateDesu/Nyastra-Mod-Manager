@@ -9,7 +9,6 @@ import {
   setUpdaterSnapshot,
 } from "./actions";
 
-/** session.updater: what the updater is doing, as last polled from main */
 export interface IUpdaterSessionState {
   snapshot?: UpdaterSnapshot;
   check?: LinuxUpdateCheck;
@@ -25,9 +24,6 @@ export const sessionReducer: IReducerSpec = {
   defaults: {} satisfies IUpdaterSessionState,
 };
 
-/**
- * reducer for changes to interface settings
- */
 const settingsReducer: IReducerSpec = {
   reducers: {
     [setUpdateChannel as any]: (state, payload) => update(state, { channel: { $set: payload } }),

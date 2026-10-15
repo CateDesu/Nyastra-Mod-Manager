@@ -2,7 +2,7 @@ import { copyFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promi
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const root = fileURLToPath(new URL("../", import.meta.url));
+const root = fileURLToPath(new URL("../../", import.meta.url));
 const pkg = JSON.parse(await readFile(path.join(root, "src/main/package.json"), "utf8"));
 const prefix = `nyastra-${pkg.version}-linux-x64`;
 const names = (await readdir(path.join(root, "dist"))).filter(

@@ -18,9 +18,9 @@ in `docs/`.
 
 One home, one audience-neutral voice, and the docs get maintained.
 
-These files stay at the repo root by convention: `README.md`,
-`CONTRIBUTING.md`, `CODESTYLE.md`, `CHANGELOG.md`, `RELEASES.md`,
-`SECURITY.md`, `SUPPORT.md`, `CODE_OF_CONDUCT.md`.
+Keep the introduction, license notices and agent entry points at the repository
+root. Community documents live in `.github/`, where GitHub discovers them.
+Code style, changelog and release support documents live in `docs/`.
 
 ## Add it to the index
 

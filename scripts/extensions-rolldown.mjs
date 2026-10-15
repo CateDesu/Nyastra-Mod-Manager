@@ -4,7 +4,7 @@ import * as path from "node:path";
 
 import { rolldown } from "rolldown";
 
-import { createConfig as createCoreConfig } from "../rolldown.base.mjs";
+import { createConfig as createCoreConfig } from "../config/rolldown.mjs";
 
 /**
  * Shared Rolldown helpers for bundled extensions.

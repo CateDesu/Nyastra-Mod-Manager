@@ -9,6 +9,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -301,6 +302,15 @@ StartupNotify=true
       rmSync(staging, { recursive: true, force: true });
     }
     if (movedPrevious) rmSync(previousApp, { recursive: true, force: true });
+    for (const entry of readdirSync(installRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !/^\.app-(?:install|previous)-[1-9]\d*$/.test(entry.name))
+        continue;
+      try {
+        rmSync(path.join(installRoot, entry.name), { recursive: true, force: true });
+      } catch (error) {
+        console.warn(`Old build cleanup failed: ${error.message}`);
+      }
+    }
     console.log(`Program files: ${installedApp}`);
     console.log(`Installed ${wrapper}`);
     console.log(`Desktop entry: ${desktop}`);

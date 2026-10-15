@@ -51,7 +51,7 @@ metadata file serves the Vortex auto-updater and stays on GitHub Releases.
 | ------------------------------ | ---------------------------------------------------------------------------- |
 | **Stable releases only**       | The `released` event does not fire for pre-releases.                         |
 | **Draft/prerelease rejection** | The script re-checks the release and refuses drafts and pre-releases.        |
-| **Changelog required**         | Publishing fails if `CHANGELOG.md` has no entry for the version.             |
+| **Changelog required**         | Publishing fails if `docs/changelog.md` has no entry for the version.        |
 | **Identifiers required**       | Publishing fails if the Nexus file/mod ID variables are unset.               |
 | **Paired overrides**           | A file-id/mod-id override must set both, keeping them on one mod page.       |
 | **Concurrency control**        | Only one publish run executes at a time (`publish-nexus` concurrency group). |

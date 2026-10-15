@@ -1,16 +1,3 @@
-/**
- * Redux Persistor that receives diff operations via IPC from the renderer process.
- *
- * This replaces the store-subscription model where the persistor directly observed
- * the Redux store. Instead, the renderer computes state diffs and sends them to
- * main process via IPC for persistence.
- *
- * Key differences from the original ReduxPersistor:
- * - No Redux store dependency in constructor
- * - Receives pre-computed DiffOperations via IPC
- * - Provides hydration data to renderer on startup
- */
-
 import { unknownToError } from "@vortex/shared";
 import type { DiffOperation, Serializable } from "@vortex/shared/ipc";
 import type { IPersistor, PersistorKey } from "@vortex/shared/state";
@@ -21,10 +8,6 @@ import type LevelPersist from "./LevelPersist";
 import type QueryInvalidator from "./QueryInvalidator";
 import { insertStateValue } from "./stateTree";
 
-/**
- * Helper to insert a value at a leaf position in a nested object.
- * Creates intermediate objects as needed.
- */
 function insertValueAtLeaf<T extends Record<string, unknown>, V>(
   target: T,
   key: string[],
@@ -42,16 +25,9 @@ function insertValueAtLeaf<T extends Record<string, unknown>, V>(
   }
 }
 
-/**
- * Factory function type for creating persistors on demand.
- * Used when receiving diffs for unknown hives (e.g., extension-registered hives).
- */
 export type PersistorFactory = (hive: string) => IPersistor | undefined;
 
-/**
- * ReduxPersistor that works via IPC instead of direct store subscription.
- * Receives diff operations from renderer and persists them to LevelDB.
- */
+/** Persist renderer diffs and supply startup state. */
 class ReduxPersistorIPC {
   private mPersistors: { [hive: string]: IPersistor } = {};
   private mUpdateQueue: Promise<void> = Promise.resolve();
@@ -59,38 +35,22 @@ class ReduxPersistorIPC {
   #mLevelPersist: LevelPersist | undefined;
   #mInvalidator: QueryInvalidator | undefined;
 
-  constructor() {
-    // No store dependency - we receive diffs via IPC
-  }
+  constructor() {}
 
-  /**
-   * Set the LevelPersist instance and QueryInvalidator for dirty table tracking.
-   */
   public setQueryInvalidator(levelPersist: LevelPersist, invalidator: QueryInvalidator): void {
     this.#mLevelPersist = levelPersist;
     this.#mInvalidator = invalidator;
   }
 
-  /**
-   * Set a factory function for creating persistors on demand.
-   * This allows handling diffs for hives that weren't registered upfront
-   * (e.g., extension-registered hives).
-   */
   public setPersistorFactory(factory: PersistorFactory): void {
     this.mPersistorFactory = factory;
   }
 
-  /**
-   * Wait for all pending persistence operations to complete.
-   */
   public finalizeWrite(): Promise<void> {
     return this.mUpdateQueue;
   }
 
-  /**
-   * Register a persistor for a specific hive.
-   * Returns a promise that resolves with the hydration data for that hive.
-   */
+  /** Register a persistor and return its hydration data. */
   public insertPersistor(
     hive: string,
     persistor: IPersistor,
@@ -104,10 +64,6 @@ class ReduxPersistorIPC {
     });
   }
 
-  /**
-   * Get hydration data for all registered hives.
-   * Called by the main process to send initial state to renderer.
-   */
   public async getAllHydrationData(): Promise<{
     [hive: string]: Serializable;
   }> {
@@ -128,14 +84,9 @@ class ReduxPersistorIPC {
     return result;
   }
 
-  /**
-   * Apply diff operations received from the renderer process.
-   * This is the main entry point for IPC-based persistence.
-   */
   public applyDiffOperations(hive: string, operations: DiffOperation[]): void {
     let persistor = this.mPersistors[hive];
 
-    // If we don't have a persistor for this hive, try to create one on demand
     if (persistor === undefined && this.mPersistorFactory !== undefined) {
       const newPersistor = this.mPersistorFactory(hive);
       if (newPersistor !== undefined) {
@@ -155,7 +106,7 @@ class ReduxPersistorIPC {
     this.mUpdateQueue = this.mUpdateQueue
       .then(() => this.processOperations(hive, persistor, operations))
       .catch((unknownError) => {
-        // Ensure errors don't break the queue
+        // Recover so later diffs still run.
         const err = unknownToError(unknownError);
         log("error", "Failed to process persistence operations", {
           hive,
@@ -164,23 +115,10 @@ class ReduxPersistorIPC {
       });
   }
 
-  // Maximum operations bundled into a single bulk INSERT or DELETE.
-  // Bounds failure granularity (a Write failure loses at most this many
-  // operations of progress) while still collapsing typical Redux diffs
-  // into a small number of LevelDB writes. Each set chunk uses 2*N
-  // positional parameters; each remove chunk uses N. 256 keeps both
-  // comfortably below any reasonable parameter limit.
+  // Limit SQL parameters and the work lost when a batch fails.
   private static readonly BULK_CHUNK_SIZE = 256;
 
-  /**
-   * Process a batch of diff operations for a hive.
-   *
-   * Consecutive operations of the same type are coalesced into multi-row
-   * INSERT or DELETE statements (chunked at BULK_CHUNK_SIZE) when the
-   * persistor supports the optional bulk methods. Order is preserved across
-   * type boundaries - a set->remove->set sequence on the same key still
-   * resolves last-write-wins.
-   */
+  /** Coalesce only consecutive operations to preserve set/remove ordering. */
   private async processOperations(
     hive: string,
     persistor: IPersistor,
@@ -198,11 +136,10 @@ class ReduxPersistorIPC {
       await this.applyOperationsInRuns(persistor, operations);
 
       if (useTransaction) {
-        // Check dirty tables BEFORE commit (while transaction is active)
+        // Read while the transaction is active and notify only after commit.
         const dirtyTables = await levelPersist.getDirtyTables();
         await levelPersist.commitTransaction();
 
-        // Notify after commit
         if (dirtyTables.length > 0) {
           invalidator.notifyDirtyTables(dirtyTables);
         }
@@ -242,10 +179,6 @@ class ReduxPersistorIPC {
     }
   }
 
-  /**
-   * Walk the operation list, grouping consecutive same-type ops into runs
-   * and dispatching each run to the bulk path when available.
-   */
   private async applyOperationsInRuns(
     persistor: IPersistor,
     operations: DiffOperation[],
@@ -300,10 +233,6 @@ class ReduxPersistorIPC {
     }
   }
 
-  /**
-   * Load all persisted data for a hive.
-   * Returns a nested object structure reconstructed from the flat key-value store.
-   */
   private async loadHydrationData(
     hive: string,
     persistor: IPersistor,
@@ -311,14 +240,12 @@ class ReduxPersistorIPC {
     let kvPairs: Array<{ key: PersistorKey; value: Serializable }>;
 
     if (persistor.getAllKVs !== undefined) {
-      // Fast path: persistor can return all key-value pairs at once
       const allKvs = await persistor.getAllKVs();
       kvPairs = allKvs.map((kv: { key: PersistorKey; value: string }) => ({
         key: kv.key,
         value: this.deserialize(kv.value),
       }));
     } else {
-      // Slow path: get all keys first, then fetch values individually
       const keys = await persistor.getAllKeys();
       const results = await Promise.all(
         keys.map(async (key) => {
@@ -335,13 +262,11 @@ class ReduxPersistorIPC {
           }
         }),
       );
-      // Filter out undefined values (keys that weren't found)
       kvPairs = results.filter(
         (kvPair): kvPair is { key: PersistorKey; value: Serializable } => kvPair !== undefined,
       );
     }
 
-    // Reconstruct nested object from flat key-value pairs
     const result: { [key: string]: Serializable } = {};
     kvPairs.forEach((pair) => {
       insertValueAtLeaf(result, pair.key, pair.value, hive);
@@ -354,7 +279,6 @@ class ReduxPersistorIPC {
       return "";
     }
     try {
-      // JSON.parse returns any, but we know persisted data is Serializable
       return JSON.parse(input) as Serializable;
     } catch {
       return undefined;

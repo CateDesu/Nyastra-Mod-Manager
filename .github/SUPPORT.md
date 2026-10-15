@@ -19,11 +19,11 @@ forum or Discord.
 We accept bug reports against the current stable release and the current beta. If you're on an older
 version, update first: the bug may already be fixed, and older versions aren't supported.
 
-See [RELEASES.md](RELEASES.md) for the full policy, including how long extension and backend APIs stay
+See [docs/release-support.md](../docs/release-support.md) for the full policy, including how long extension and backend APIs stay
 available after they're deprecated.
 
 Found an actual bug? Open a
 [bug report](https://github.com/Nexus-Mods/Vortex/issues/new?template=bug_report.md).
 
-Found a security issue? See [SECURITY.md](SECURITY.md) instead, and please don't
+Found a security issue? See [.github/SECURITY.md](SECURITY.md) instead, and please don't
 report it publicly.

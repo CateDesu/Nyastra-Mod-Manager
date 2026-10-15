@@ -38,7 +38,7 @@ jobs:
         run: sudo chown root:root dist/linux-unpacked/chrome-sandbox && sudo chmod 4755 dist/linux-unpacked/chrome-sandbox
       - name: Check packaged startup
         run: xvfb-run -a node scripts/smoke-linux.mjs dist/linux-unpacked/nyastra-mod-manager
-      - run: node scripts/stage-linux-release.mjs
+      - run: node scripts/releases/stage-linux-release.mjs
       - uses: actions/upload-artifact@v7
         with:
           name: nyastra-linux-preview

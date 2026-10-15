@@ -373,7 +373,6 @@ export interface FlagMetricsBucket {
 /** Hash algorithms the app requests over `hash:compute`. Closed set; extend as callers need. */
 export type HashAlgorithm = "md5";
 
-/** Type containing all known channels used by renderer processes to send to and receive messages from the main process */
 export interface LinuxUpdateCheck {
   kind: "package" | "source";
   status: "available" | "current" | "unavailable" | "error";

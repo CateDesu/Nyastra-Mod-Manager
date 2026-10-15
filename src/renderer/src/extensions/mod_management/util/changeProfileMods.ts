@@ -35,7 +35,6 @@ export const modEnableControlsBlocked = (state: IState): boolean => {
   );
 };
 
-/** Changes installed mods through the normal hooks and deployment notifications. */
 export async function changeProfileMods(
   api: IExtensionApi,
   profileId: string,
@@ -65,7 +64,7 @@ export async function changeProfileMods(
       if (change === "disable" && saved === undefined) {
         const toRemember = installed.filter((id) => profile.modState?.[id]?.enabled === true);
         if (toRemember.length > 0) {
-          // Save before hooks run so a failed or interrupted disable remains recoverable.
+          // Save first so interrupted disables can be restored.
           api.store.dispatch(setEnabledModsBeforeDisable(profileId, toRemember));
         }
       }

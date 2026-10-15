@@ -10,9 +10,7 @@ import type {
 import type { PreloadWindow } from "@vortex/shared/preload";
 import type { PersistedHive } from "@vortex/shared/state";
 import { contextBridge, ipcRenderer } from "electron";
-// NOTE(erri120): Welcome to the preload script. This is the correct and safe place to expose data and methods to the renderer. Here are some rules and tips to make your life easier:
-// 1) Never expose anything electron related to the renderer. This is what the preload script is for.
-// 2) Use betterIpcRenderer defined below instead of raw ipcRenderer.
+// Expose narrow APIs instead of Electron objects.
 
 import { rendererCallback, rendererInvoke, rendererOff, rendererOn, rendererSend } from "./ipc";
 
@@ -50,9 +48,7 @@ try {
     persist: {
       sendDiff: (hive, operations) => betterIpcRenderer.send("persist:diff", hive, operations),
 
-      // Synchronous variant used only on quit (beforeunload): blocks until main
-      // has queued the ops so the final batch is persisted before teardown.
-      // Raw ipcRenderer because betterIpcRenderer has no sendSync helper.
+      // Queue final state synchronously before renderer teardown.
       sendDiffSync: (hive, operations) => {
         ipcRenderer.sendSync("persist:diff-sync", hive, operations);
       },
@@ -228,10 +224,7 @@ try {
       getState: (downloadId) => betterIpcRenderer.invoke("download:getState", downloadId),
       getStates: (downloadIds) => betterIpcRenderer.invoke("download:getStates", downloadIds),
       configure: (options) => betterIpcRenderer.invoke("download:configure", options),
-      // A rejection here propagates back to main so download:start rejects
-      // immediately with the real reason instead of waiting out the callback
-      // timeout. Cancellation rejects too, but the install manager drops
-      // aborted downloads, so it won't be reported as a failure.
+      // Propagate failures immediately instead of waiting for the callback timeout.
       onResolve: (handler) => betterIpcRenderer.callback("download:resolve", handler),
     },
 
@@ -267,7 +260,7 @@ try {
 
     featureFlags: {
       onSynchronize: (callback) => {
-        // Fetch current flags on register (async, but return cleanup function synchronously)
+        // Fetch initial flags without delaying registration or cleanup.
         betterIpcRenderer
           .invoke("flags:get-current")
           .then((currentFlags) => setTimeout(() => callback(currentFlags)))
@@ -275,7 +268,6 @@ try {
             /* ignored */
           });
 
-        // Listen for future updates
         const listener = (_: Electron.IpcRendererEvent, flags: Parameters<typeof callback>[0]) =>
           callback(flags);
         ipcRenderer.on("flags:synchronize", listener);
@@ -324,13 +316,9 @@ try {
   console.error("failed to run preload code", err);
 }
 
-/** Fixed pull size for directory enumeration: amortizes one invoke across
- *  this many entries. */
 const ENUMERATE_BATCH_SIZE = 512;
 
-/** Fixed pull size for read streams. Chunk replies are granular to the
- *  underlying stream's chunk size, so this only bounds the reply, and a
- *  reply may exceed it by up to one underlying chunk. */
+// Read replies may exceed this target by one backend chunk.
 const STREAM_READ_CHUNK_SIZE = 4 * 1024 * 1024;
 
 function createStream(
@@ -374,8 +362,7 @@ async function openReadStream(
   const close = () => {
     if (closed) return;
     closed = true;
-    // Fire-and-forget: main evicts handles on done, so an unknown handle
-    // here is normal exhaustion, not an error worth surfacing.
+    // Main may already have evicted this exhausted handle.
     betterIpcRenderer.invoke("fs:stream-close", handle).catch(() => undefined);
   };
 
@@ -412,9 +399,7 @@ async function openWriteStream(
 
   let closed = false;
 
-  // One invoke per write chunk (no renderer-side batching): round-trip
-  // overhead is noise for realistic chunk sizes, and per-write rejection
-  // keeps ENOSPC-class errors surfaced at the right await point.
+  // Await each write so errors reach the responsible caller.
   return new WritableStream<Uint8Array>({
     async write(chunk) {
       await betterIpcRenderer.invoke("fs:stream-write", handle, chunk);
@@ -485,8 +470,7 @@ async function openEnumeration(
   const close = () => {
     if (closed) return;
     closed = true;
-    // Fire-and-forget: main evicts handles on done, so an unknown handle
-    // here is normal exhaustion, not an error worth surfacing.
+    // Main may already have evicted this exhausted handle.
     betterIpcRenderer.invoke("fs:enumerate-close", handle).catch(() => undefined);
   };
 
@@ -508,10 +492,8 @@ async function openEnumeration(
           buffer = reply.entries;
         }
 
-        // A done reply may still carry the tail of the listing. Only
-        // `exhausted` stops further pulls; `closed` stays reserved for
-        // explicit return()/throw() so the tail is always drained before
-        // iteration reports done.
+        // Drain the final batch before reporting done.
+        // Reserve closed for explicit return or throw.
         if (reply.done) {
           exhausted = true;
         }
@@ -575,9 +557,7 @@ function expose<K extends keyof PreloadWindow>(key: K, value: PreloadWindow[K]) 
   if (process.contextIsolated) {
     contextBridge.exposeInMainWorld(key, value);
   } else {
-    // NOTE(erri120): This looks bad but sadly is correct.
-    // When context isolation is disabled, contextBridge becomes unusable
-    // so we have to manually set values on the window directly.
+    // contextBridge is unavailable when context isolation is disabled.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion
     (window as unknown as PreloadWindow)[key] = value;
   }

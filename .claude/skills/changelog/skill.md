@@ -1,11 +1,11 @@
 ---
 name: changelog
-description: Generate a new Vortex `CHANGELOG.md` entry from merged PRs since a given starting tag. Use this skill whenever the user invokes `/changelog`, asks to draft release notes, or wants to summarise PRs merged on a Vortex release branch (v2.0, v2.1, v2.2, etc.) into Added / Changed / Fixed bullets following Keep-a-Changelog 1.1.0. The skill auto-detects the source branch, fetches PR titles/bodies via `gh`, dedupes against the existing CHANGELOG, applies the project's exclusion rules (internal CI/infra, telemetry/OTel/Mixpanel, docs-only, low-impact dependency bumps), produces a draft for the user to review, and only writes after the user gives the go-ahead.
+description: Generate a new Vortex `docs/changelog.md` entry from merged PRs since a given starting tag. Use this skill whenever the user invokes `/changelog`, asks to draft release notes, or wants to summarise PRs merged on a Vortex release branch (v2.0, v2.1, v2.2, etc.) into Added / Changed / Fixed bullets following Keep-a-Changelog 1.1.0. The skill auto-detects the source branch, fetches PR titles/bodies via `gh`, dedupes against the existing CHANGELOG, applies the project's exclusion rules (internal CI/infra, telemetry/OTel/Mixpanel, docs-only, low-impact dependency bumps), produces a draft for the user to review, and only writes after the user gives the go-ahead.
 ---
 
 # Vortex `/changelog`
 
-A skill that drafts the next entry of `./CHANGELOG.md` from merge commits on the current release branch and presents the result for review before editing the file.
+A skill that drafts the next entry of `./docs/changelog.md` from merge commits on the current release branch and presents the result for review before editing the file.
 
 ## When to use
 
@@ -50,7 +50,7 @@ If the user invoked `/changelog 2.0.0-beta.4 2026-05-20`, treat the first arg as
 
 ### 1. Read style exemplars
 
-Read the topmost three entries of `./CHANGELOG.md` (e.g. `2.0.0`, `2.0.0-beta.2`, `2.0.0-beta.1`) to internalise:
+Read the topmost three entries of `./docs/changelog.md` (e.g. `2.0.0`, `2.0.0-beta.2`, `2.0.0-beta.1`) to internalise:
 
 - The heading format: `## [VERSION] - YYYY-MM-DD`
 - Section order: `### Added` → `### Changed` → `### Fixed`
@@ -87,12 +87,12 @@ This means a cherry-pick PR that lands in the v2.1 range is _not_ new 2.1 work �
 
 Run three passes against every merge PR in range — anything that matches drops out of the draft and into the corresponding summary section.
 
-**Pass A — direct PR-number match against `CHANGELOG.md`.** For each merge PR `#X`, search `CHANGELOG.md` for `#X`. If found, classify as **Dedup-skipped** (already documented). Move on.
+**Pass A — direct PR-number match against `docs/changelog.md`.** For each merge PR `#X`, search `docs/changelog.md` for `#X`. If found, classify as **Dedup-skipped** (already documented). Move on.
 
 **Pass B — cherry-pick wrapper detection.** When a merge commit's branch matches `cherry-pick/pr-NNNNN-to-*` (or any `cherry-pick/*` variant that contains a PR number), the merge PR is just a forward-port wrapper. The _user-facing_ PR is `#NNNNN`. **Always exclude the cherry-pick from the draft**, even if the origin is not yet documented:
 
-- If `#NNNNN` is already in `CHANGELOG.md` → classify as **Dedup-skipped** (shipped and documented in earlier entry).
-- If `#NNNNN` is **not** in `CHANGELOG.md` → classify as **Cross-branch — pending source-branch release** (will be documented when the source branch cuts its next release, e.g. `2.0.2`). Flag this group prominently in the summary so the user can confirm none of them were meant to land in this draft.
+- If `#NNNNN` is already in `docs/changelog.md` → classify as **Dedup-skipped** (shipped and documented in earlier entry).
+- If `#NNNNN` is **not** in `docs/changelog.md` → classify as **Cross-branch — pending source-branch release** (will be documented when the source branch cuts its next release, e.g. `2.0.2`). Flag this group prominently in the summary so the user can confirm none of them were meant to land in this draft.
 
 The exclusion is unconditional because the wrapper PR's branch name is a hard signal that the work originated elsewhere. Do not try to second-guess this with content analysis. If the user explicitly wants to advertise a cross-branch fix in the v2.1 entry as well (rare), they will say so during review and we add it back manually.
 
@@ -106,7 +106,7 @@ This pass typically catches a large chunk of merges on a long-running release br
 - `"companion to #NNNNN"`
 - `"previous implementation was fine"` followed by an internal-only rework of an already-shipped behaviour
 
-For each referenced PR number, check if it's already in `CHANGELOG.md`. If yes, classify the current PR as **Dedup-skipped (content-duplicate)**. For phrases like "previous implementation was fine" with no PR ref, the PR is a refactor of an existing behaviour — it has no user-visible delta and should be classified as **Auto-excluded — internal refactor**.
+For each referenced PR number, check if it's already in `docs/changelog.md`. If yes, classify the current PR as **Dedup-skipped (content-duplicate)**. For phrases like "previous implementation was fine" with no PR ref, the PR is a refactor of an existing behaviour — it has no user-visible delta and should be classified as **Auto-excluded — internal refactor**.
 
 After all three passes, the survivors are genuine new v2.1 work and proceed to step 4.
 
@@ -195,7 +195,7 @@ Each bullet ends with the PR link in this exact format:
 If **both** of these are true, prepend an italic intro paragraph between the heading and the first section:
 
 1. `version` matches `X.Y.0-beta.1` or `X.Y.0-alpha.1`
-2. The existing `CHANGELOG.md` has no entries for that `X.Y` series
+2. The existing `docs/changelog.md` has no entries for that `X.Y` series
 
 Use the established phrasing pattern:
 
@@ -219,13 +219,13 @@ Print **everything** in chat as markdown, in this order:
     - **Cross-branch PRs (belong to next source-branch release)** — cherry-pick wrappers whose origin is not yet documented anywhere. Prefix this list with a one-sentence reminder that the user should confirm none of these were intended for the current draft, and that they will need to land in the source-branch's next patch release (e.g. `2.0.2`). If empty, render an empty sub-list with the note `_(none)_` — do not omit the section.
     - **Per-PR categorisation table** — every included PR with its section, so the user can spot mis-categorised items at a glance
 
-Then ask the user to confirm in plain chat: "Ready to write to CHANGELOG.md, or want changes first?" Do not use AskUserQuestion for this confirmation — a freeform reply is faster.
+Then ask the user to confirm in plain chat: "Ready to write to docs/changelog.md, or want changes first?" Do not use AskUserQuestion for this confirmation — a freeform reply is faster.
 
 ### 10. Write the file
 
 After the user confirms:
 
-1. Insert the new entry **directly above** the topmost existing version heading in `./CHANGELOG.md`. Preserve the blank lines around the headings as seen in existing entries.
+1. Insert the new entry **directly above** the topmost existing version heading in `./docs/changelog.md`. Preserve the blank lines around the headings as seen in existing entries.
 2. Add a matching reference-style link to the bottom-of-file link list:
 
     ```
@@ -267,5 +267,5 @@ These are taken from existing entries and illustrate the target style:
 
 ## Style anchors (read if uncertain)
 
-- The current `CHANGELOG.md` is the canonical style reference. When in doubt, mimic the most recent 2-3 entries.
+- The current `docs/changelog.md` is the canonical style reference. When in doubt, mimic the most recent 2-3 entries.
 - Keep a Changelog 1.1.0: <https://keepachangelog.com/en/1.1.0/>
