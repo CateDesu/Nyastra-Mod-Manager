@@ -5,6 +5,7 @@ An independent, experimental Linux-only fork of
 The program runs natively on Linux and supports modding Windows games through
 Steam and Proton. Windows desktop builds and host integrations are removed.
 
+[Releases](https://github.com/CateDesu/Nyastra-Mod-Manager/releases) ·
 [Build and install](docs/packaging/linux.md) ·
 [Linux extension setup](docs/packaging/linux-extensions.md) ·
 [Report a problem](https://github.com/CateDesu/Nyastra-Mod-Manager/issues)

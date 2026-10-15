@@ -4,10 +4,16 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+  actions: write
+
+concurrency:
+  group: package-linux-release
+  cancel-in-progress: false
 
 jobs:
   package:
+    if: github.repository == 'CateDesu/Nyastra-Mod-Manager' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -21,9 +27,9 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y build-essential python3-setuptools cmake liblz4-dev libfontconfig1-dev patchelf xdg-utils desktop-file-utils psmisc xvfb
       - uses: ./.github/actions/setup-pnpm
       - run: pnpm install --frozen-lockfile
-        env:
-          VORTEX_ELECTRON_REBUILD: defer
       - run: pnpm run verify
+        env:
+          NX_STREAM_OUTPUT: "true"
       - name: Prepare Linux runtime
         run: pnpm nx run @vortex/main:publish
         env:
@@ -44,3 +50,38 @@ jobs:
           name: nyastra-linux-preview
           path: dist/release/
           if-no-files-found: error
+      - name: Publish Linux preview release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          version=$(node -p 'require("./src/main/package.json").version')
+          tag="v$version"
+          source="https://github.com/$GH_REPO/tree/$tag"
+          grep -Fxq "$source" dist/release/notes.md
+          grep -Fxq "Source: $source" dist/release/README.txt
+          for extension in zip AppImage deb; do
+            test -s "dist/release/assets/nyastra-$version-linux-x64.$extension"
+          done
+          if git ls-remote --exit-code origin "refs/tags/$tag" >/dev/null; then
+            test "$(gh api "repos/$GH_REPO/commits/$tag" --jq .sha)" = "$GITHUB_SHA"
+          else
+            gh api --method POST "repos/$GH_REPO/git/refs" \
+              -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA" >/dev/null
+          fi
+          if draft=$(gh release view "$tag" --json isDraft --jq .isDraft); then
+            if [ "$draft" != true ]; then
+              echo "::error::This version is already published. Increment src/main/package.json."
+              exit 1
+            fi
+          else
+            gh release create "$tag" --verify-tag --draft --prerelease \
+              --title "Nyastra's Mod Manager $version" --notes-file dist/release/notes.md
+          fi
+          gh release upload "$tag" dist/release/assets/* --clobber
+          gh release edit "$tag" --draft=false --prerelease
+      - name: Clean superseded builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow run cleanup-builds.yml --ref main

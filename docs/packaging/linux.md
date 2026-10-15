@@ -25,6 +25,16 @@ ZIP, AppImage and Debian artifacts in dist/. Staging collects them under
 dist/release/assets with release notes and the matching source tag. Publish the
 source tag before distributing a binary. Preserve GPL and dependency notices.
 
+The **Package Linux preview** GitHub workflow builds and verifies `main`, checks
+packaged startup on its runner, then publishes a preview Release containing the
+ZIP, AppImage and Debian package. Increment the version and update the source
+links in `scripts/linux-README.txt` and `docs/packaging/linux-release.md` before a
+new release. Publication checks that both links match the package version.
+The workflow creates the matching source tag at the exact built commit. Uploads
+finish in a draft before publication, and retries can resume that draft. An
+already published version is never overwritten. Successful publication also
+dispatches build cleanup.
+
 After a successful package build, older versioned Linux packages and their
 blockmaps in `dist/` are removed for the architecture being built. All three new
 formats must exist and be nonempty first. Failed or incomplete builds preserve

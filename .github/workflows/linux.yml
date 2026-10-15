@@ -29,5 +29,7 @@ jobs:
       - uses: ./.github/actions/setup-pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run verify
+        env:
+          NX_STREAM_OUTPUT: "true"
       - name: Test Linux installation and profile import
         run: node --test scripts/install-linux.test.mjs scripts/import-linux-profile.test.mjs

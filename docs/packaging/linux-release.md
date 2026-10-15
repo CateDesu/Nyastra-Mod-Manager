@@ -1,9 +1,9 @@
 # Nyastra's Mod Manager Linux testing preview
 
-Version 2.9.0-beta.2+linux.2. This is an independent Linux-only Vortex fork.
+Version 2.9.0-beta.2+linux.3. This is an independent Linux-only Vortex fork.
 
 Source for these binaries:
-https://github.com/CateDesu/Nyastra-Mod-Manager/tree/v2.9.0-beta.2+linux.2
+https://github.com/CateDesu/Nyastra-Mod-Manager/tree/v2.9.0-beta.2+linux.3
 
 Download the ZIP, extract it and run `./install.sh`. The user installer copies the
 runtime to `~/.local/share/nyastra-mod-manager/app` and registers the menu entry
