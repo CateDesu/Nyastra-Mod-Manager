@@ -13,9 +13,16 @@ instructions. The Windows installer updater and Nexus update feed are removed.
 
 Packages check [Nyastra releases](https://github.com/CateDesu/Nyastra-Mod-Manager/releases)
 for uploaded Linux assets matching the current architecture. Stable versions use
-stable releases. Preview versions also include prereleases. Linux build numbers
-such as `+linux.10` are compared so successive builds of one preview are detected.
+stable releases. Preview versions also include prereleases. Release numbers
+increase from `v1.00` through `v1.999`, comparing `v1.100` after `v1.99`.
+Earlier Linux build numbers such as `+linux.10` remain comparable.
 If no compatible release is published, the settings page says so.
+
+Release checks were introduced in `2.9.0-beta.2+linux.3`. Users of `linux.2`
+need to install the current package to receive update notifications. Existing
+`linux.3` checks can find `v1.00` through its compatibility source tag and ZIP
+filename. The program retains a compatible internal version to preserve profiles
+and extension requirements while displaying the new release number.
 
 Close the program before installing an update. Keep using the same package format:
 

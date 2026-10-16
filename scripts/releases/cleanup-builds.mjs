@@ -4,6 +4,11 @@ import { pathToFileURL } from "node:url";
 
 import semver from "semver";
 
+import {
+  formatProgramVersion,
+  packageVersionFromRelease,
+} from "../../src/shared/src/programVersion.ts";
+
 const repository = "CateDesu/Nyastra-Mod-Manager";
 const extensions = ["zip", "AppImage", "deb"];
 
@@ -11,8 +16,13 @@ function buildFile(name) {
   const match = /^nyastra-(.+)-linux-(x64|arm64|armv7l)\.(zip|AppImage|deb)(\.blockmap)?$/.exec(
     name,
   );
-  if (!match || !semver.valid(match[1])) return undefined;
-  return { version: match[1], arch: match[2], extension: match[3], blockmap: !!match[4] };
+  if (!match || !semver.valid(packageVersionFromRelease(match[1]))) return undefined;
+  return {
+    version: packageVersionFromRelease(match[1]),
+    arch: match[2],
+    extension: match[3],
+    blockmap: !!match[4],
+  };
 }
 
 export async function pruneLocalBuilds(directory, version, arch) {
@@ -20,7 +30,7 @@ export async function pruneLocalBuilds(directory, version, arch) {
   for (const extension of extensions) {
     try {
       const info = await lstat(
-        path.join(directory, `nyastra-${version}-linux-${arch}.${extension}`),
+        path.join(directory, `nyastra-${formatProgramVersion(version)}-linux-${arch}.${extension}`),
       );
       if (!info.isFile() || info.size === 0) return 0;
     } catch (error) {
@@ -84,9 +94,9 @@ async function releasePlan(request, releaseId) {
     positiveId(release.id);
     if (typeof release.draft !== "boolean" || typeof release.prerelease !== "boolean")
       throw new Error("Invalid release state");
-    if (release.draft || !semver.valid(release.tag_name)) continue;
-    const channel =
-      release.prerelease || semver.prerelease(release.tag_name) ? "preview" : "stable";
+    const version = packageVersionFromRelease(release.tag_name);
+    if (release.draft || !semver.valid(version)) continue;
+    const channel = release.prerelease || semver.prerelease(version) ? "preview" : "stable";
     const assets = await pages(request, `/releases/${release.id}/assets`);
     const builds = [];
     for (const asset of assets) {
@@ -94,10 +104,10 @@ async function releasePlan(request, releaseId) {
       if (typeof asset.name !== "string" || !Number.isSafeInteger(asset.size) || asset.size < 0)
         throw new Error("Invalid release asset");
       const build = buildFile(asset.name);
-      if (build && semver.compareBuild(build.version, release.tag_name) === 0)
+      if (build && semver.compareBuild(build.version, version) === 0)
         builds.push({ ...build, asset });
     }
-    candidates.push({ release, channel, builds });
+    candidates.push({ release, version, channel, builds });
   }
   const retained = new Map();
   for (const candidate of candidates) {
@@ -115,10 +125,7 @@ async function releasePlan(request, releaseId) {
       if (!complete) continue;
       const key = `${candidate.channel}/${arch}`;
       const previous = retained.get(key);
-      if (
-        !previous ||
-        semver.compareBuild(candidate.release.tag_name, previous.release.tag_name) > 0
-      )
+      if (!previous || semver.compareBuild(candidate.version, previous.version) > 0)
         retained.set(key, candidate);
     }
   }
@@ -148,10 +155,7 @@ async function releasePlan(request, releaseId) {
     candidate.builds
       .filter((build) => {
         const replacement = retained.get(`${candidate.channel}/${build.arch}`);
-        return (
-          replacement &&
-          semver.compareBuild(candidate.release.tag_name, replacement.release.tag_name) < 0
-        );
+        return replacement && semver.compareBuild(candidate.version, replacement.version) < 0;
       })
       .map((build) => `/releases/assets/${build.asset.id}`),
   );

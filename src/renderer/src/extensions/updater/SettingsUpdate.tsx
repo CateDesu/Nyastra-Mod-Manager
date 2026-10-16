@@ -1,4 +1,4 @@
-import { REPOSITORY_URL } from "@vortex/shared";
+import { formatProgramVersion, REPOSITORY_URL } from "@vortex/shared";
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { useSelector } from "react-redux";
@@ -41,7 +41,9 @@ export default function SettingsUpdate(): React.JSX.Element {
     <div className="flex flex-col gap-4">
       <h3>{t("Linux updates")}</h3>
       <p>
-        {t("Installed version: {{version}}", { replace: { version: getApplication().version } })}
+        {t("Installed version: {{version}}", {
+          replace: { version: `v${formatProgramVersion(getApplication().version)}` },
+        })}
       </p>
       <CheckboxField
         checked={automatic}

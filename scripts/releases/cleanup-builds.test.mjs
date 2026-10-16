@@ -101,6 +101,25 @@ test("release cleanup retains the highest complete stable and preview builds", a
   );
 });
 
+test("short filenames and compatibility ZIPs follow numeric release ordering", async (t) => {
+  const f = await github(t, {
+    "/releases?per_page=100&page=1": [release(1, "2.9.99"), release(2, "2.9.100")],
+    "/releases/1/assets?per_page=100&page=1": [
+      ...assets("1.99", 10),
+      { ...assets("2.9.99", 13)[0] },
+    ],
+    "/releases/2/assets?per_page=100&page=1": [
+      ...assets("1.100", 20),
+      { ...assets("2.9.100", 23)[0] },
+    ],
+  });
+  assert.equal((await cleanupGithubBuilds(f.request, { releaseId: 2 })).releaseAssets, 4);
+  assert.deepEqual(
+    f.deleted(),
+    [10, 11, 12, 13].map((id) => `/releases/assets/${id}`),
+  );
+});
+
 test("build metadata ordering and architecture retention match package updates", async (t) => {
   const f = await github(t, {
     "/releases?per_page=100&page=1": [release(1, "3.0.0-beta.2+linux.2"), release(2, version)],
@@ -273,6 +292,17 @@ test("local cleanup removes only older matching builds after all replacement for
   );
 });
 
+test("local cleanup orders short filenames after earlier previews and release numbers", async (t) => {
+  const f = await local(t);
+  await f.put([
+    ...buildNames("2.9.0-beta.2+linux.3"),
+    ...buildNames("1.99"),
+    ...buildNames("1.100"),
+  ]);
+  assert.equal(await pruneLocalBuilds(f.directory, "2.9.100", "x64"), 6);
+  assert.deepEqual((await readdir(f.directory)).sort(), buildNames("1.100").sort());
+});
+
 test("missing and empty replacement outputs preserve all previous builds", async (t) => {
   const f = await local(t);
   const previous = buildNames("2.0.0");
@@ -313,6 +343,11 @@ test(
       await readFile(new URL("../../src/main/package-linux.mjs", import.meta.url), "utf8"),
     );
     await put("src/main/package.json", JSON.stringify({ version }));
+    await put("src/shared/package.json", '{"type":"module"}');
+    await put(
+      "src/shared/src/programVersion.ts",
+      await readFile(new URL("../../src/shared/src/programVersion.ts", import.meta.url), "utf8"),
+    );
     await put(
       "scripts/releases/cleanup-builds.mjs",
       await readFile(new URL("./cleanup-builds.mjs", import.meta.url), "utf8"),

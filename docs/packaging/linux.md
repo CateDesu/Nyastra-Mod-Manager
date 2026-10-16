@@ -28,15 +28,27 @@ source tag before distributing a binary. Preserve GPL and dependency notices.
 The **Package Linux preview** GitHub workflow builds and verifies `main`, checks
 packaged startup on its runner, then publishes a Release containing the ZIP,
 AppImage and Debian package. It marks the release as Latest so the repository
-sidebar shows the downloads. The beta version and release notes still identify
-testing previews, and update checks use the version to keep preview and stable
-channels separate. Increment the version and update the source
+sidebar shows the downloads. The release notes identify testing previews.
+Increment the package version and update the source
 links in `scripts/linux-README.txt` and `docs/packaging/linux-release.md` before a
 new release. Publication checks that both links match the package version.
 The workflow creates the matching source tag at the exact built commit. Uploads
 finish in a draft before publication, and retries can resume that draft. An
 already published version is never overwritten. Successful publication also
 dispatches build cleanup.
+
+The program, release titles and binary filenames count from `v1.00` through
+`v1.999`, including `v1.99` to `v1.100`. The compatibility package version
+`2.9.0` maps to `v1.00`, `2.9.1` to `v1.01`, and `2.9.999` to `v1.999`.
+Increment its patch number for each release. The shared version mapping keeps
+display, publishing, update ordering and cleanup consistent. Publication stops
+outside this sequence. Compatibility versions keep existing profiles and
+extensions from treating the new numbering as a downgrade.
+
+Source tags keep the compatibility version. Staging also copies the ZIP under
+that version so existing `linux.3` update checkers recognize the release. Both
+ZIPs contain the same program. New checkers recognize the short package names
+and display the short version. Retain the compatibility ZIP in future releases.
 
 After a successful package build, older versioned Linux packages and their
 blockmaps in `dist/` are removed for the architecture being built. All three new

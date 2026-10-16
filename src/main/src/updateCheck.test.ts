@@ -81,6 +81,40 @@ async function cloneFixture() {
 }
 
 describe("packaged update checks over HTTP", () => {
+  it("updates a legacy preview to v1.00 with the compatibility tag", async () => {
+    payload = () => [
+      release("2.9.0", {
+        assets: [{ name: "nyastra-1.00-linux-x64.zip", state: "uploaded" }],
+      }),
+    ];
+    expect(await createUpdateChecker(() => installation(), request)()).toMatchObject({
+      status: "available",
+      latest: "v1.00",
+      url: "https://github.com/CateDesu/Nyastra-Mod-Manager/releases/tag/v2.9.0",
+    });
+  });
+
+  it("keeps v1.00 current without offering the older preview", async () => {
+    payload = () => [release("2.9.0-beta.2+linux.3"), release("2.9.0")];
+    expect(await createUpdateChecker(() => installation(true, "2.9.0"), request)()).toMatchObject({
+      status: "current",
+      current: "1.00",
+      latest: "v1.00",
+    });
+  });
+
+  it("compares v1.99 to v1.100 numerically with short release tags and filenames", async () => {
+    payload = () => [
+      release("1.99", { prerelease: false }),
+      release("1.100", { prerelease: false }),
+    ];
+    expect(await createUpdateChecker(() => installation(true, "2.9.99"), request)()).toMatchObject({
+      status: "available",
+      current: "1.99",
+      latest: "v1.100",
+    });
+  });
+
   it("finds a newer Linux build even when only SemVer build metadata changes", async () => {
     payload = () => [release("2.9.0-beta.2+linux.2"), release("2.9.0-beta.2+linux.10")];
     const result = await createUpdateChecker(() => installation(), request)();

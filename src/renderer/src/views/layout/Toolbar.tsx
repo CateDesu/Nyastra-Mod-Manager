@@ -1,3 +1,4 @@
+import { formatProgramVersion } from "@vortex/shared";
 import React, { type FC, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useSelector } from "react-redux";
@@ -64,7 +65,7 @@ export const Toolbar: FC<React.PropsWithChildren<unknown>> = () => {
           <div className={updateChannelClassName}>
             {prerelease !== "stable" ? <Icon name="highlight-lab" /> : null}
 
-            <div className="toolbar-version-text">{version}</div>
+            <div className="toolbar-version-text">v{formatProgramVersion(version)}</div>
           </div>
         </div>
 

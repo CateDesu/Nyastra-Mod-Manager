@@ -1,4 +1,5 @@
 import { ComponentEx, Dashlet, util } from "@nexusmods/vortex-api";
+import { formatProgramVersion } from "@vortex/shared";
 import * as React from "react";
 import { Pager } from "react-bootstrap";
 import { withTranslation } from "react-i18next";
@@ -90,7 +91,9 @@ class ChangelogDashlet extends ComponentEx<IProps, IIssueListState> {
         ) : (
           filteredChangelogs.slice(0, 10).map((changelog) => (
             <div className="changelog-entry" key={changelog.version}>
-              <h4 className="changelog-title">Version {changelog.version}</h4>
+              <h4 className="changelog-title">
+                Version v{formatProgramVersion(changelog.version)}
+              </h4>
               <ReactMarkdown className="changelog-text">{t(changelog.text)}</ReactMarkdown>
             </div>
           ))

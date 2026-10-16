@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { pruneLocalBuilds } from "../../scripts/releases/cleanup-builds.mjs";
+import { formatProgramVersion } from "../shared/src/programVersion.ts";
 
 if (process.platform !== "linux" || process.arch !== "x64") {
   throw new Error("The Linux preview currently packages x64 only");
@@ -16,6 +17,7 @@ const require = createRequire(import.meta.url);
 const builderRequire = createRequire(require.resolve("electron-builder/package.json"));
 const utilityRequire = createRequire(builderRequire.resolve("builder-util/package.json"));
 const pkg = JSON.parse(await readFile(new URL("./package.json", import.meta.url), "utf8"));
+const version = formatProgramVersion(pkg.version);
 const temporary = await mkdtemp(path.join(tmpdir(), "nyastra-builder-"));
 let status;
 try {
@@ -24,7 +26,7 @@ try {
   await copyFile(utilityRequire("app-builder-bin").appBuilderPath, helper);
   await chmod(helper, 0o755);
   for (const extension of ["zip", "AppImage", "deb"]) {
-    await rm(path.join(directory, "../../dist", `nyastra-${pkg.version}-linux-x64.${extension}`), {
+    await rm(path.join(directory, "../../dist", `nyastra-${version}-linux-x64.${extension}`), {
       force: true,
     });
   }
@@ -38,7 +40,7 @@ try {
       path.join(directory, "dist"),
       "--config",
       path.join(directory, "dist/electron-builder.config.json"),
-      `--config.linux.artifactName=nyastra-${pkg.version}-linux-x64.\${ext}`,
+      `--config.linux.artifactName=nyastra-${version}-linux-x64.\${ext}`,
       `--config.buildNumber=${pkg.version.split("+")[1] ?? "0"}`,
       "--publish",
       "never",

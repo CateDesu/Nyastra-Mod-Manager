@@ -1,3 +1,4 @@
+import { formatProgramVersion } from "@vortex/shared";
 import React, { type FC } from "react";
 
 import { Typography } from "../../../ui/components/typography/Typography";
@@ -5,7 +6,7 @@ import { getApplication } from "../../../util/application";
 
 export const VersionIndicator: FC<React.PropsWithChildren<unknown>> = () => {
   const version = getApplication().version;
-  const formattedVersion = `v${version}`;
+  const formattedVersion = `v${formatProgramVersion(version)}`;
 
   return (
     <Typography

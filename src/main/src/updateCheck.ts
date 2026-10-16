@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import { REPOSITORY_URL } from "@vortex/shared";
+import { formatProgramVersion, packageVersionFromRelease, REPOSITORY_URL } from "@vortex/shared";
 import type { LinuxUpdateCheck } from "@vortex/shared/ipc";
 import got, { HTTPError } from "got";
 import semver from "semver";
@@ -61,7 +61,7 @@ async function check(
   const result: LinuxUpdateCheck = {
     kind: installation.packaged ? "package" : "source",
     status: "current",
-    current: installation.version,
+    current: formatProgramVersion(installation.version),
     checkedAt: Date.now(),
     url: installation.packaged
       ? `${REPOSITORY_URL}/releases`
@@ -79,7 +79,7 @@ async function check(
       const preview = semver.prerelease(installation.version) !== null;
       const candidates = releases
         .filter((release) => {
-          const parsed = semver.parse(release.tag_name);
+          const parsed = semver.parse(packageVersionFromRelease(release.tag_name));
           if (
             !parsed ||
             release.draft ||
@@ -90,19 +90,28 @@ async function check(
           return release.assets.some(
             (asset) =>
               asset.state === "uploaded" &&
-              ["zip", "AppImage", "deb"].some(
-                (ext) => asset.name === `nyastra-${version}-linux-${installation.arch}.${ext}`,
+              [version, formatProgramVersion(version)].some((name) =>
+                ["zip", "AppImage", "deb"].some(
+                  (ext) => asset.name === `nyastra-${name}-linux-${installation.arch}.${ext}`,
+                ),
               ),
           );
         })
-        .sort((left, right) => semver.compareBuild(right.tag_name, left.tag_name));
+        .sort((left, right) =>
+          semver.compareBuild(
+            packageVersionFromRelease(right.tag_name),
+            packageVersionFromRelease(left.tag_name),
+          ),
+        );
       const latest = candidates[0];
       if (!latest) return { ...result, status: "unavailable", reason: "no-release" };
       return {
         ...result,
         status:
-          semver.compareBuild(latest.tag_name, installation.version) > 0 ? "available" : "current",
-        latest: latest.tag_name,
+          semver.compareBuild(packageVersionFromRelease(latest.tag_name), installation.version) > 0
+            ? "available"
+            : "current",
+        latest: `v${formatProgramVersion(packageVersionFromRelease(latest.tag_name).replace(/^v/, ""))}`,
         url: `${REPOSITORY_URL}/releases/tag/${encodeURIComponent(latest.tag_name)}`,
       };
     }

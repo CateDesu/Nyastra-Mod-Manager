@@ -56,27 +56,31 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           version=$(node -p 'require("./src/main/package.json").version')
+          title=$(node scripts/releases/release-title.mjs "$version")
+          release_version="${title#v}"
           tag="v$version"
           source="https://github.com/$GH_REPO/tree/$tag"
           grep -Fxq "$source" dist/release/notes.md
           grep -Fxq "Source: $source" dist/release/README.txt
           for extension in zip AppImage deb; do
-            test -s "dist/release/assets/nyastra-$version-linux-x64.$extension"
+            test -s "dist/release/assets/nyastra-$release_version-linux-x64.$extension"
           done
+          test -s "dist/release/assets/nyastra-$version-linux-x64.zip"
+          if draft=$(gh release view "$tag" --json isDraft --jq .isDraft); then
+            if [ "$draft" != true ]; then
+              echo "::error::This version is already published. Increment src/main/package.json."
+              exit 1
+            fi
+          fi
           if git ls-remote --exit-code origin "refs/tags/$tag" >/dev/null; then
             test "$(gh api "repos/$GH_REPO/commits/$tag" --jq .sha)" = "$GITHUB_SHA"
           else
             gh api --method POST "repos/$GH_REPO/git/refs" \
               -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA" >/dev/null
           fi
-          if draft=$(gh release view "$tag" --json isDraft --jq .isDraft); then
-            if [ "$draft" != true ]; then
-              echo "::error::This version is already published. Increment src/main/package.json."
-              exit 1
-            fi
-          else
+          if [ "$draft" != true ]; then
             gh release create "$tag" --verify-tag --draft \
-              --title "Nyastra's Mod Manager $version" --notes-file dist/release/notes.md
+              --title "$title" --notes-file dist/release/notes.md
           fi
           gh release upload "$tag" dist/release/assets/* --clobber
           gh release edit "$tag" --draft=false --prerelease=false --latest

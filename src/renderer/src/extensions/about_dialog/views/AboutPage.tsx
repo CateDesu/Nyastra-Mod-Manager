@@ -6,7 +6,7 @@ type BOMLicense = NonNullable<BOMComponent["licenses"]>[number];
 import * as fs from "fs";
 import * as path from "path";
 
-import { getErrorMessageOrDefault, PROGRAM_NAME } from "@vortex/shared";
+import { formatProgramVersion, getErrorMessageOrDefault, PROGRAM_NAME } from "@vortex/shared";
 import I18next from "i18next";
 import * as React from "react";
 import { Image, Media, Panel } from "react-bootstrap";
@@ -168,7 +168,7 @@ class AboutPage extends ComponentEx<IProps, IComponentState> {
               </Media.Left>
               <Media.Body>
                 <h2 className="media-heading">
-                  {PROGRAM_NAME} {this.mVersion}{" "}
+                  {PROGRAM_NAME} v{formatProgramVersion(this.mVersion)}{" "}
                   {releaseDate !== undefined
                     ? `(${releaseDate.toLocaleDateString(I18next.language)})`
                     : ""}

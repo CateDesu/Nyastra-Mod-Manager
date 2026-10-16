@@ -16,6 +16,7 @@
     "extensionName": "Dashlet: Changelog"
   },
   "devDependencies": {
+    "@vortex/shared": "workspace:*",
     "@types/bluebird": "catalog:",
     "@types/react": "catalog:",
     "@types/react-bootstrap": "catalog:",
