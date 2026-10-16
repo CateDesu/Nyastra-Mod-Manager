@@ -75,11 +75,11 @@ jobs:
               exit 1
             fi
           else
-            gh release create "$tag" --verify-tag --draft --prerelease \
+            gh release create "$tag" --verify-tag --draft \
               --title "Nyastra's Mod Manager $version" --notes-file dist/release/notes.md
           fi
           gh release upload "$tag" dist/release/assets/* --clobber
-          gh release edit "$tag" --draft=false --prerelease
+          gh release edit "$tag" --draft=false --prerelease=false --latest
       - name: Clean superseded builds
         env:
           GH_TOKEN: ${{ github.token }}

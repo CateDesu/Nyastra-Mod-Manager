@@ -26,8 +26,11 @@ dist/release/assets with release notes and the matching source tag. Publish the
 source tag before distributing a binary. Preserve GPL and dependency notices.
 
 The **Package Linux preview** GitHub workflow builds and verifies `main`, checks
-packaged startup on its runner, then publishes a preview Release containing the
-ZIP, AppImage and Debian package. Increment the version and update the source
+packaged startup on its runner, then publishes a Release containing the ZIP,
+AppImage and Debian package. It marks the release as Latest so the repository
+sidebar shows the downloads. The beta version and release notes still identify
+testing previews, and update checks use the version to keep preview and stable
+channels separate. Increment the version and update the source
 links in `scripts/linux-README.txt` and `docs/packaging/linux-release.md` before a
 new release. Publication checks that both links match the package version.
 The workflow creates the matching source tag at the exact built commit. Uploads
