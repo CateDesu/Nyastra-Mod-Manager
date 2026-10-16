@@ -37,7 +37,7 @@ export function escapeDesktopFilePath(input: string): string {
  *  and backslash character (\) by preceding it with an additional backslash
  *  character."
  *
- * If escaping changes the input, the argument is wrapped in quotes.
+ * Arguments with reserved characters are wrapped in quotes.
  *
  * ref: https://github.com/Nexus-Mods/NexusMods.App/blob/main/src/NexusMods.Backend/OS/LinuxInterop.Protocol.cs#L164-L233
  * spec: https://specifications.freedesktop.org/desktop-entry-spec/latest/exec-variables.html
@@ -65,7 +65,7 @@ export function escapeDesktopExecFilePath(input: string): string {
     .replace(/\$/g, "\\$"); // dollar sign ("$")                         $ -> \$
 
   // First apply the base rules from `string` and `localstring`.
-  const escapedString = escapeDesktopFilePath(escapedExec);
+  const escapedString = escapeDesktopFilePath(escapedExec).replace(/%/g, "%%");
 
   // Note(sewer): Quoting the spec
   //
@@ -99,7 +99,7 @@ export function escapeDesktopExecFilePath(input: string): string {
   // > hash mark ("#"), parenthesis ("(") and (")") and backtick character ("`").
   //
   // In this case, we will quote if our path has changed, else we'll leave it unquoted.
-  if (escapedString === originalPath) {
+  if (escapedString === originalPath && !/['><~|&;*?#()]/.test(originalPath)) {
     return originalPath; // No need to quote if the path hasn't changed
   } else {
     return `"${escapedString}"`; // Enclose the entire path in double quotes

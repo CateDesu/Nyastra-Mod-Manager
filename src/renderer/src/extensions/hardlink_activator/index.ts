@@ -334,7 +334,11 @@ class DeploymentMethod extends LinkingDeployment {
     sourceStatsIn: fs.Stats,
   ): PromiseBB<boolean> {
     if (linkStatsIn !== undefined && sourceStatsIn !== undefined) {
-      return PromiseBB.resolve(linkStatsIn.nlink > 1 && linkStatsIn.ino === sourceStatsIn.ino);
+      return PromiseBB.resolve(
+        linkStatsIn.nlink > 1 &&
+          linkStatsIn.dev === sourceStatsIn.dev &&
+          linkStatsIn.ino === sourceStatsIn.ino,
+      );
     }
 
     return fs
@@ -342,7 +346,12 @@ class DeploymentMethod extends LinkingDeployment {
       .then((linkStats) =>
         linkStats.nlink === 1
           ? PromiseBB.resolve(false)
-          : fs.lstatAsync(sourcePath).then((sourceStats) => linkStats.ino === sourceStats.ino),
+          : fs
+              .lstatAsync(sourcePath)
+              .then(
+                (sourceStats) =>
+                  linkStats.dev === sourceStats.dev && linkStats.ino === sourceStats.ino,
+              ),
       )
       .catch((err) =>
         getErrorCode(err) === "ENOENT"

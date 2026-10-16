@@ -24,6 +24,10 @@ Tests are colocated with the code they cover, as `src/**/*.test.ts` (or
 `*.test.tsx` for components). Component tests use `vitest` with
 `@testing-library/react` v16.
 
+Linux protocol registration tests launch desktop entries through `gio`. Install
+`libglib2.0-bin` on Debian or Ubuntu before running them. The Linux CI job
+installs it explicitly so these checks cannot silently skip.
+
 ## Finding elements in component tests
 
 Pick the most specific selector that is unambiguous:

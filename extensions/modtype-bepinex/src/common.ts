@@ -51,7 +51,9 @@ export const resolveBixPackage = (gameConf: IBepInExGameConfig): IBIXPackageReso
   const { architecture, bepinexVersion, bepinexCoercedVersion, unityBuild } = gameConf;
   const arch = architecture !== undefined ? architecture : "x64";
   const version = bepinexCoercedVersion !== undefined ? bepinexCoercedVersion : DEFAULT_VERSION;
-  const platform = semver.gte(version.replace(/-.*$/gim, ""), "5.4.23") ? "linux_" : "";
+  const executable = util.getGame(gameConf.gameId)?.executable?.();
+  const targetPlatform = /\.(exe|bat|cmd)$/i.test(executable ?? "") ? "win_" : "linux_";
+  const platform = semver.gte(version.replace(/-.*$/gim, ""), "5.4.23") ? targetPlatform : "";
   const unity =
     unityBuild !== undefined
       ? semver.gte(version, NEW_FILE_FORMAT_VERSION)

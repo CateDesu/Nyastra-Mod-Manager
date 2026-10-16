@@ -112,7 +112,7 @@ async function moveDownload(
       .statAsync(oldPath)
       .catch((err) => (err.code === "ENOENT" ? Promise.resolve(undefined) : Promise.reject(err)));
     const nStat = await fs.statAsync(newPath);
-    if (!!oStat && oStat.ino === nStat.ino) {
+    if (!!oStat && oStat.dev === nStat.dev && oStat.ino === nStat.ino) {
       const err = new ProcessCanceled("source same as destination");
       err["oldPath"] = oldPath;
       err["newPath"] = newPath;

@@ -485,7 +485,7 @@ function selfCopyCheck(src: string, dest: string) {
       getErrorCode(err) === "ENOENT" ? Promise.resolve({}) : Promise.reject(err),
     ),
   ]).then((stats: fs.BigIntStats[]) =>
-    stats[0].ino === stats[1].ino
+    stats[0].dev === stats[1].dev && stats[0].ino === stats[1].ino
       ? PromiseBB.reject(new SelfCopyCheckError(src, dest, stats[0].ino))
       : PromiseBB.resolve(),
   );
