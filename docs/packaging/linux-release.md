@@ -1,16 +1,19 @@
 # Nyastra's Mod Manager Linux testing preview
 
-Version v1.00. This is an independent Linux-only Vortex fork.
+Version v1.01. This is an independent Linux-only Vortex fork.
+
+The cat icon uses a pale lilac body, brighter violet tail and stronger eye
+contrast so it remains visible against dark program and desktop backgrounds.
 
 Source for these binaries:
-https://github.com/CateDesu/Nyastra-Mod-Manager/tree/v2.9.0
+https://github.com/CateDesu/Nyastra-Mod-Manager/tree/v2.9.1
 
 Download the ZIP, extract it and run `./install.sh`. The user installer copies the
 runtime to `~/.local/share/nyastra-mod-manager/app` and registers the menu entry
 and Nexus Mods `nxm:` download links. No separate Node installation is needed.
 AppImage and Debian packages are also provided as testing artifacts.
 
-Both ZIP downloads contain the same v1.00 program. The ZIP named `2.9.0` keeps
+Both ZIP downloads contain the same v1.01 program. The ZIP named `2.9.1` keeps
 update checks working in earlier `linux.3` installations. Earlier `linux.2`
 installations need to install this release to receive update notifications.
 
