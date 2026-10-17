@@ -1,3 +1,5 @@
+import { rm } from "node:fs/promises";
+
 import type { DownloadState, ResolvedEndpoint, ResolvedResource } from "@vortex/shared/download";
 import { staticChunker } from "@vortex/shared/download";
 import { toWireError } from "@vortex/shared/errors";
@@ -29,11 +31,6 @@ function wireToResolvedResource(wire: WireResolvedResource): ResolvedResource {
   };
 }
 
-function resourceToUrl(resource: ResolvedResource): string {
-  if ("url" in resource) return resource.url.toString();
-  return resource.probeEndpoint.url.toString();
-}
-
 export function init(manager: DownloadManager): void {
   // Our network timeouts are 30 seconds, which means that we will fail
   // with the callback before the network could. Give it a bit of extra time to avoid spurious failures.
@@ -53,9 +50,8 @@ export function init(manager: DownloadManager): void {
       0,
       collationId,
     );
-    const resource = wireToResolvedResource(wireResource);
-    const resolver = () => Promise.resolve(resource);
-    const handle = manager.download(resource, dest, resolver, undefined, undefined, downloadId);
+    const resolver = () => Promise.resolve(wireToResolvedResource(wireResource));
+    const handle = manager.download(wireResource, dest, resolver, undefined, undefined, downloadId);
     webContentsByDownloadId.set(handle.downloadId, webContents);
     handle.promise.catch((err) =>
       log("error", "download failed", { downloadId: handle.downloadId, err }),
@@ -63,8 +59,13 @@ export function init(manager: DownloadManager): void {
     return { downloadId: handle.downloadId };
   });
 
-  betterIpcMain.handle("download:cancel", (_event, downloadId) => {
-    manager.cancel(downloadId);
+  betterIpcMain.handle("download:cancel", async (_event, downloadId) => {
+    const handle = manager.get(downloadId);
+    const state = manager.cancel(downloadId);
+    if (handle === undefined) return;
+    await handle.waitForWrites();
+    if (state.status !== "canceled") return;
+    await rm(handle.dest, { force: true });
   });
 
   betterIpcMain.handle("download:pause", async (_event, downloadId) => {
@@ -73,10 +74,11 @@ export function init(manager: DownloadManager): void {
       throw new Error(`Download ${downloadId} is not paused: status is ${result.status}`);
     }
     const { checkpoint } = result;
-    const resource = resourceToUrl(checkpoint.resource as ResolvedResource);
+    const resource = checkpoint.resource as WireResolvedResource;
     const wire: WireDownloadCheckpoint = {
       downloadId: checkpoint.downloadId,
-      resource,
+      resource: resource.probeEndpoint.url,
+      resolvedResource: resource,
       dest: checkpoint.dest,
       completedRanges: checkpoint.completedRanges,
       etag: checkpoint.etag,
@@ -86,14 +88,14 @@ export function init(manager: DownloadManager): void {
 
   betterIpcMain.handle("download:resume", (event, wireCheckpoint) => {
     const webContents = event.sender;
-    const resource = wireToResolvedResource({
+    const resource = wireCheckpoint.resolvedResource ?? {
       probeEndpoint: { url: wireCheckpoint.resource },
-    });
+    };
     const checkpoint = {
       ...wireCheckpoint,
       resource,
     };
-    const resolver = () => Promise.resolve(resource);
+    const resolver = () => Promise.resolve(wireToResolvedResource(resource));
     const handle = manager.resume(checkpoint, resolver, staticChunker());
     webContentsByDownloadId.set(wireCheckpoint.downloadId, webContents);
     handle.promise.catch((err) =>

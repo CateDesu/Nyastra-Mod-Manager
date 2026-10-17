@@ -216,6 +216,7 @@ export interface ILootHarness extends IGamebryoHarness {
 // What a download-adapter test arranges: the single seeded download's fields, an optional stored
 // checkpoint, and whether the automation-install setting is on.
 export interface IDownloadAdapterOpts {
+  downloadDirectory?: string;
   download?: Partial<IDownload>;
   checkpoint?: WireDownloadCheckpoint;
   automationInstall?: boolean;

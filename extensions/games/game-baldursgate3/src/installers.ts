@@ -236,16 +236,16 @@ export function testReplacer(files: string[], gameId: string): Promise<types.ISu
 }
 
 export async function installReplacer(files: string[]): Promise<types.IInstallResult> {
-  const directories = Array.from(new Set(files.map((file) => path.dirname(file).toUpperCase())));
+  const directories = Array.from(new Set(files.map((file) => path.dirname(file))));
   let dataPath = undefined;
   const genOrPublic = directories.find((dir) =>
-    ["PUBLIC", "GENERATED"].includes(path.basename(dir)),
+    ["PUBLIC", "GENERATED"].includes(path.basename(dir).toUpperCase()),
   );
   if (genOrPublic !== undefined) {
     dataPath = path.dirname(genOrPublic);
   }
   if (dataPath === undefined) {
-    dataPath = directories.find((dir) => path.basename(dir) === "DATA");
+    dataPath = directories.find((dir) => path.basename(dir).toUpperCase() === "DATA");
   }
 
   const instructions: types.IInstruction[] =
@@ -255,7 +255,11 @@ export async function installReplacer(files: string[]): Promise<types.IInstallRe
             return prev;
           }
           const relPath = path.relative(dataPath, filePath);
-          if (!relPath.startsWith("..")) {
+          if (
+            relPath !== ".." &&
+            !relPath.startsWith(`..${path.sep}`) &&
+            !path.isAbsolute(relPath)
+          ) {
             prev.push({
               type: "copy",
               source: filePath,

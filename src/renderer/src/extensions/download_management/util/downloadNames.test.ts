@@ -1,14 +1,14 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 
-import { afterEach, beforeEach, describe, it, expect } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 
 import { makeFileInfo } from "../../../test-utils/builders";
 import type { IDownload } from "../types/IDownload";
 import {
   TEMP_DOWNLOAD_PREFIX,
-  freeDownloadName,
+  moveDownloadToFreeName,
   friendlyDownloadName,
   isTempDownloadName,
   nameFromUrl,
@@ -144,7 +144,7 @@ describe("friendlyDownloadName", () => {
   });
 });
 
-describe("freeDownloadName", () => {
+describe("moveDownloadToFreeName", () => {
   let dir: string;
 
   beforeEach(async () => {
@@ -152,23 +152,82 @@ describe("freeDownloadName", () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await rm(dir, { recursive: true, force: true });
   });
 
   it("returns the name unchanged when nothing collides", async () => {
-    expect(await freeDownloadName(dir, "Mod.7z")).toBe("Mod.7z");
+    const source = path.join(dir, "temporary");
+    await writeFile(source, "new");
+    expect(await moveDownloadToFreeName(source, dir, "Mod.7z")).toBe("Mod.7z");
+    expect(await readFile(path.join(dir, "Mod.7z"), "utf8")).toBe("new");
+    await expect(access(source)).rejects.toThrow();
   });
 
   it("inserts a timestamp before the extension when the name is taken", async () => {
     await writeFile(path.join(dir, "Mod.7z"), "x");
-    const name = await freeDownloadName(dir, "Mod.7z");
+    const source = path.join(dir, "temporary");
+    await writeFile(source, "new");
+    const name = await moveDownloadToFreeName(source, dir, "Mod.7z");
     expect(name).not.toBe("Mod.7z");
     expect(name).toMatch(/^Mod\.\d+\.7z$/);
+    expect(await readFile(path.join(dir, "Mod.7z"), "utf8")).toBe("x");
+    expect(await readFile(path.join(dir, name), "utf8")).toBe("new");
   });
 
   it("appends the timestamp when a name has no extension", async () => {
     await writeFile(path.join(dir, "README"), "x");
-    const name = await freeDownloadName(dir, "README");
+    const source = path.join(dir, "temporary");
+    await writeFile(source, "new");
+    const name = await moveDownloadToFreeName(source, dir, "README");
     expect(name).toMatch(/^README\.\d+$/);
+  });
+
+  it("keeps every concurrent archive even when all name attempts share a timestamp", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(42);
+    const bodies = ["first", "second", "third", "fourth"];
+    const sources = bodies.map((_, index) => path.join(dir, `temp-${index}`));
+    await Promise.all(sources.map((source, index) => writeFile(source, bodies[index])));
+    const names = await Promise.all(
+      sources.map((source) => moveDownloadToFreeName(source, dir, "Mod.7z")),
+    );
+    expect(new Set(names).size).toBe(bodies.length);
+    expect(
+      (await Promise.all(names.map((name) => readFile(path.join(dir, name), "utf8")))).toSorted(),
+    ).toEqual(bodies.toSorted());
+  });
+
+  it("preserves dangling symlinks and directories that occupy candidate names", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(42);
+    const source = path.join(dir, "temporary");
+    await writeFile(source, "new");
+    await symlink("missing", path.join(dir, "Mod.7z"));
+    await mkdir(path.join(dir, "Mod.42.7z"));
+    const name = await moveDownloadToFreeName(source, dir, "Mod.7z");
+    expect(name).toBe("Mod.42.2.7z");
+    expect(await readFile(path.join(dir, name), "utf8")).toBe("new");
+  });
+
+  it("copies between actual Linux filesystems without replacing an existing archive", async () => {
+    const other = await mkdtemp(path.join("/dev/shm", "nyastra-dl-"));
+    try {
+      expect((await stat(other)).dev).not.toBe((await stat(dir)).dev);
+      const source = path.join(other, "temporary");
+      await writeFile(source, "new");
+      await writeFile(path.join(dir, "Mod.7z"), "old");
+      const name = await moveDownloadToFreeName(source, dir, "Mod.7z");
+      expect(await readFile(path.join(dir, "Mod.7z"), "utf8")).toBe("old");
+      expect(await readFile(path.join(dir, name), "utf8")).toBe("new");
+      await expect(access(source)).rejects.toThrow();
+    } finally {
+      await rm(other, { recursive: true, force: true });
+    }
+  });
+
+  it("does not create an archive when the source is missing", async () => {
+    await expect(
+      moveDownloadToFreeName(path.join(dir, "missing"), dir, "Mod.7z"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(access(path.join(dir, "Mod.7z"))).rejects.toThrow();
   });
 });

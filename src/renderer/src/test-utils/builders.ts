@@ -1500,6 +1500,9 @@ export function makeDownloadAdapterHarness(
     };
     state.session.gameMode = { known: [] };
     state.settings.automation = { install: opts.automationInstall ?? false };
+    if (opts.downloadDirectory !== undefined) {
+      draft.settings.downloads.path = opts.downloadDirectory;
+    }
     state.persistent.downloads.checkpoints =
       opts.checkpoint !== undefined ? { [downloadId]: { ...opts.checkpoint, downloadId } } : {};
   });

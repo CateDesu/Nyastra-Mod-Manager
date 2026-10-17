@@ -188,8 +188,13 @@ class DeploymendMethod extends LinkingDeployment {
       return fs
         .readlinkAsync(iterPath)
         .then((symlinkPath) => {
-          const relPath = path.relative(installPath, symlinkPath);
-          if (!relPath.startsWith("..") && !path.isAbsolute(relPath)) {
+          const target = path.resolve(path.dirname(iterPath), symlinkPath);
+          const relPath = path.relative(installPath, target);
+          if (
+            relPath !== ".." &&
+            !relPath.startsWith(`..${path.sep}`) &&
+            !path.isAbsolute(relPath)
+          ) {
             return fs.unlinkAsync(iterPath, { showDialogCallback });
           }
         })

@@ -26,6 +26,25 @@ describe("blob adoption", () => {
     await rm(paths.root, { recursive: true, force: true });
   });
 
+  test("uses only the browser filename's basename in both temporary and download folders", async ({
+    makeDownloadAdapter,
+  }) => {
+    await writeFile(path.join(paths.root, "Cool Mod.7z.tmp"), "the mod bytes");
+    const h = makeDownloadAdapter();
+    const result = await new Promise<{ err: Error | null; id?: string }>((resolve) => {
+      h.events.emit(
+        "start-download",
+        [BLOB.replace("|Cool Mod", "|../Cool Mod")],
+        { game: "skyrimse" },
+        undefined,
+        (err, id) => resolve({ err, id }),
+      );
+    });
+    expect(result.err).toBeNull();
+    expect(h.getState().persistent.downloads.files[result.id!].localPath).toBe("Cool Mod.7z");
+    await expect(access(path.join(paths.root, "Cool Mod.7z.tmp"))).rejects.toThrow();
+  });
+
   test("adopts a browser blob (already saved to temp) as a finished download on disk", async ({
     makeDownloadAdapter,
   }) => {

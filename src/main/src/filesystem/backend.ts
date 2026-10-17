@@ -374,40 +374,52 @@ export class NodeFileSystemBackendImpl implements NodeFileSystemBackend {
     const types = options?.types;
 
     const dir = await opendir(path, { recursive });
-
+    let closed = false;
+    const close = async () => {
+      if (closed) return;
+      closed = true;
+      try {
+        await dir.close();
+      } catch {
+        // The directory may have already closed after an error.
+      }
+    };
     const iterator: AsyncIterableIterator<ResolvedPath | [ResolvedPath, Status], undefined> = {
       [Symbol.asyncIterator]() {
         return iterator;
       },
       next: async () => {
-        while (true) {
-          const entry = await dir.read();
-          if (entry === null) return { done: true, value: undefined };
+        if (closed) return { done: true, value: undefined };
+        try {
+          while (true) {
+            const entry = await dir.read();
+            if (entry === null) {
+              await close();
+              return { done: true, value: undefined };
+            }
+            if (types === "files" && !entry.isFile()) continue;
+            if (types === "directories" && !entry.isDirectory()) continue;
 
-          if (types === "files" && !entry.isFile()) continue;
-          if (types === "directories" && !entry.isDirectory()) continue;
+            const resolvedPath: ResolvedPath = join(entry.parentPath, entry.name);
+            if (include && !matches(resolvedPath, include)) continue;
+            if (exclude && matches(resolvedPath, exclude)) continue;
 
-          const resolvedPath: ResolvedPath = join(entry.parentPath, entry.name);
-          if (include && !matches(resolvedPath, include)) continue;
-          if (exclude && matches(resolvedPath, exclude)) continue;
+            if (!includeStatus) return { done: false, value: resolvedPath };
 
-          if (!includeStatus) return { done: false, value: resolvedPath };
+            const status = await this.stat(resolvedPath, {
+              parseSymLink: parseSymLinks,
+            });
 
-          const status = await this.stat(resolvedPath, {
-            parseSymLink: parseSymLinks,
-          });
-
-          if (!status.exists) continue;
-          return { done: false, value: [resolvedPath, status] };
+            if (!status.exists) continue;
+            return { done: false, value: [resolvedPath, status] };
+          }
+        } catch (err) {
+          await close();
+          throw err;
         }
       },
       return: async () => {
-        try {
-          await dir.close();
-        } catch {
-          // ignored
-        }
-
+        await close();
         return { done: true, value: undefined };
       },
     };

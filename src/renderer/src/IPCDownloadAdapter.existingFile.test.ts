@@ -9,9 +9,7 @@ import { test } from "./test-utils/downloadAdapterTest";
 import type { IDownloadAdapterHarness } from "./test-utils/harnessTypes";
 
 // These tests exercise the "file already on disk" probe in #handleStartDownload, so the
-// caller-named file is written to the real download folder (test-setup roots getVortexPath in
-// the OS temp dir). File names are unique to this suite because that folder is shared across
-// suites.
+// caller-named file is written to the fixture's isolated download folder.
 const TRACKED = "gh23885-tracked.7z";
 const ORPHAN = "gh23885-orphan.7z";
 const FILE_BYTES = "archive bytes";
@@ -44,6 +42,61 @@ const startDownload = (h: IDownloadAdapterHarness, fileName: string) =>
   });
 
 describe("start-download for a file already on disk (GH #23885)", () => {
+  test("adopts the current game's archive when another game tracks the same filename", async ({
+    makeDownloadAdapter,
+  }) => {
+    const h = makeDownloadAdapter({ download: { localPath: TRACKED, game: ["fallout4"] } });
+    const target = path.join(path.dirname(path.dirname(h.dest)), "skyrimse", TRACKED);
+    await putOnDisk(h.dest);
+    await putOnDisk(target);
+
+    const result = await startDownload(h, TRACKED);
+
+    expect(result.err).toBeInstanceOf(AlreadyDownloaded);
+    const adoptedId = (result.err as AlreadyDownloaded).downloadId;
+    expect(adoptedId).not.toBe(h.downloadId);
+    expect(h.getState().persistent.downloads.files[adoptedId!].game).toContain("skyrimse");
+    expect(h.dispatched).toContainEqual(
+      addLocalDownload(adoptedId!, "skyrimse", TRACKED, FILE_BYTES.length),
+    );
+    expect(h.start).not.toHaveBeenCalled();
+  });
+
+  test("finds the current game's tracked archive after another game's matching filename", async ({
+    makeDownloadAdapter,
+  }) => {
+    const h = makeDownloadAdapter({ download: { localPath: TRACKED, game: ["fallout4"] } });
+    h.setState((state) => {
+      state.persistent.downloads.files.current = {
+        ...state.persistent.downloads.files[h.downloadId],
+        id: "current",
+        game: ["skyrimse"],
+      };
+    });
+    await putOnDisk(path.join(path.dirname(path.dirname(h.dest)), "skyrimse", TRACKED));
+    const result = await startDownload(h, TRACKED);
+    expect((result.err as AlreadyDownloaded).downloadId).toBe("current");
+    expect(h.start).not.toHaveBeenCalled();
+  });
+
+  test("discards directory components from a caller's filename before checking existing files", async ({
+    makeDownloadAdapter,
+  }) => {
+    const h = makeDownloadAdapter();
+    const directory = path.dirname(h.dest);
+    await putOnDisk(path.join(directory, ORPHAN));
+
+    const pending = startDownload(h, `../${ORPHAN}`);
+    await Promise.race([pending, h.started.promise]);
+    expect(h.start).not.toHaveBeenCalled();
+    const result = await pending;
+
+    expect(result.err).toBeInstanceOf(AlreadyDownloaded);
+    const adoptedId = (result.err as AlreadyDownloaded).downloadId;
+    expect(h.getState().persistent.downloads.files[adoptedId!].localPath).toBe(ORPHAN);
+    expect(h.start).not.toHaveBeenCalled();
+  });
+
   test("resolves AlreadyDownloaded with the id of the record tracking the file", async ({
     makeDownloadAdapter,
   }) => {

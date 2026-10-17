@@ -1,3 +1,6 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import * as path from "node:path";
+
 import type { WireDownloadCheckpoint } from "@vortex/shared/ipc";
 import { describe, expect, it, vi } from "vitest";
 
@@ -206,6 +209,8 @@ describe("runtime restore", () => {
     h.events.emit("resume-download", h.downloadId, () => undefined, { allowInstall: false });
     await h.started.promise;
 
+    await mkdir(path.dirname(h.dest), { recursive: true });
+    await writeFile(h.dest, Buffer.alloc(100));
     h.getStates.mockResolvedValue({ [h.downloadId]: wireState("completed", 100) });
     await vi.advanceTimersByTimeAsync(250);
     await finished;
@@ -224,6 +229,8 @@ describe("runtime restore", () => {
     h.events.emit("resume-download", h.downloadId, () => undefined);
     await h.started.promise;
 
+    await mkdir(path.dirname(h.dest), { recursive: true });
+    await writeFile(h.dest, Buffer.alloc(100));
     h.getStates.mockResolvedValue({ [h.downloadId]: wireState("completed", 100) });
     await vi.advanceTimersByTimeAsync(250);
 

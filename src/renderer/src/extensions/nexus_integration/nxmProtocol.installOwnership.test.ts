@@ -1,3 +1,5 @@
+import { writeFile } from "node:fs/promises";
+
 import type NexusT from "@nexusmods/nexus-api";
 import { describe, expect, vi } from "vitest";
 
@@ -64,6 +66,7 @@ describe("NXM download installation ownership", () => {
         await vi.advanceTimersByTimeAsync(0);
         expect(installed).not.toHaveBeenCalled();
 
+        await writeFile(harness.start.mock.calls[0][0] as string, Buffer.alloc(100));
         const downloadId = "new-0";
         harness.getStates.mockResolvedValue({
           [downloadId]: {

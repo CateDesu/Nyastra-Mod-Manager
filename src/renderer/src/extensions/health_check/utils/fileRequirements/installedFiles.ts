@@ -330,7 +330,10 @@ export function makeInstalledFileHydrator(
   const gameId = activeProfile(state)?.gameId;
   const mods = gameId ? (state.persistent.mods[gameId] ?? {}) : {};
   const downloads = state.persistent.downloads?.files ?? {};
-  const refByUID = new Map(refs.map((ref): [string, IInstalledFileRef] => [ref.fileUID, ref]));
+  const refByUID = new Map<string, IInstalledFileRef>();
+  for (const ref of refs) {
+    if (ref.enabled || !refByUID.get(ref.fileUID)?.enabled) refByUID.set(ref.fileUID, ref);
+  }
 
   return (fileUID) => {
     // A ref miss is a normal negative lookup; callers try installed before downloaded.

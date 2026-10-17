@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { access, copyFile, mkdir, rename, rm, stat } from "node:fs/promises";
+import { access, mkdir, rename, rm, stat } from "node:fs/promises";
 import * as path from "node:path";
 
 import { unknownToError } from "@vortex/shared";
@@ -31,6 +31,7 @@ import { makeModAnalyticsIdentity } from "./extensions/analytics/mixpanel/modAna
 import {
   addLocalDownload,
   downloadProgress,
+  finalizingDownload,
   finishDownload,
   initDownload,
   pauseDownload,
@@ -47,7 +48,8 @@ import {
 import { downloadPathForGame } from "./extensions/download_management/selectors";
 import type { IDownload } from "./extensions/download_management/types/IDownload";
 import {
-  freeDownloadName,
+  moveDownloadToFreeName,
+  normalizeDownloadFileName,
   TEMP_DOWNLOAD_PREFIX,
 } from "./extensions/download_management/util/downloadNames";
 import { knownGames } from "./extensions/gamemode_management/selectors";
@@ -143,11 +145,24 @@ type StoredDownloadInfo = {
 type ActiveDownload = {
   callback?: (err: Error | null, id?: string) => void;
   fileNameHint?: string;
+  replaceExistingName?: string;
   allowInstall?: boolean;
   lastBytesReceived: number;
   lastProgressDispatch: number;
   startedEventEmitted: boolean;
+  canceledEventEmitted?: boolean;
+  cancelRequested?: boolean;
 };
+
+function settleDownloadCallback(
+  activeDownload: ActiveDownload | undefined,
+  error: Error | null,
+  downloadId: string,
+): void {
+  const callback = activeDownload?.callback;
+  if (activeDownload !== undefined) activeDownload.callback = undefined;
+  callback?.(error, downloadId);
+}
 
 export class IPCDownloadAdapter {
   readonly #api: IExtensionApi;
@@ -159,10 +174,17 @@ export class IPCDownloadAdapter {
   // nexus IDs (modId/fileId or collectionId/revisionId) here.
   readonly #resolvedMeta = new Map<number, unknown>();
   readonly #activeDownloads = new Map<string, ActiveDownload>();
-  // Ids with a restore in flight. A restore un-pauses the record and clears its checkpoint before
-  // awaiting the fresh start, so without this guard a second resume-download for the same id would
-  // re-enter and issue a duplicate rm + start racing the first.
-  readonly #restoring = new Set<string>();
+  readonly #finalizing = new Map<
+    string,
+    { activeDownload: ActiveDownload; promise: Promise<void> }
+  >();
+  // A checkpointless restart shares its outcome with every resume caller.
+  readonly #restoring = new Map<
+    string,
+    { activeDownload: ActiveDownload; promise: Promise<void>; cancel: () => void }
+  >();
+  readonly #resuming = new Map<string, Promise<void>>();
+  readonly #removing = new Map<string, Promise<void>>();
   #speedAccumBytes = 0;
   #lastSpeedDispatch: number | null = null;
   #nextCollationId = 0;
@@ -442,6 +464,19 @@ export class IPCDownloadAdapter {
     }
   }
 
+  #finalizeDownload(
+    downloadId: string,
+    wireState: WireDownloadState,
+    activeDownload: ActiveDownload,
+  ): Promise<void> {
+    const promise = Promise.resolve()
+      .then(() => this.#completeDownload(downloadId, wireState, activeDownload))
+      .finally(() => this.#finalizing.delete(downloadId));
+    this.#finalizing.set(downloadId, { activeDownload, promise });
+    this.#api.store.dispatch(finalizingDownload(downloadId));
+    return promise;
+  }
+
   async #completeDownload(
     downloadId: string,
     wireState: WireDownloadState,
@@ -457,21 +492,37 @@ export class IPCDownloadAdapter {
 
       // Determine the final filename: server Content-Disposition > caller hint > temp name.
       const hint = activeDownload?.fileNameHint;
-      const finalName = wireState.fileName ?? hint ?? download.localPath;
-      const finalPath = path.join(dlPath, finalName);
+      const requestedName = wireState.fileName ?? hint ?? download.localPath;
+      let finalPath = tempPath;
 
-      if (finalPath !== tempPath) {
-        try {
-          await rename(tempPath, finalPath);
-          this.#api.store.dispatch(setDownloadFilePath(downloadId, finalName));
-        } catch (err) {
-          log("warn", "failed to rename download to final name", {
-            downloadId,
-            tempPath,
-            finalPath,
-            err,
-          });
+      try {
+        let finalName = normalizeDownloadFileName(requestedName);
+        if (!(await stat(tempPath)).isFile()) {
+          throw new Error("Downloaded archive is not a file");
         }
+        if (path.join(dlPath, finalName) !== tempPath) {
+          if (finalName === activeDownload?.replaceExistingName) {
+            await rename(tempPath, path.join(dlPath, finalName));
+          } else {
+            finalName = await moveDownloadToFreeName(tempPath, dlPath, finalName);
+          }
+          finalPath = path.join(dlPath, finalName);
+          this.#api.store.dispatch(setDownloadFilePath(downloadId, finalName));
+        }
+      } catch (err) {
+        if (activeDownload?.cancelRequested) return;
+        const error = unknownToError(err);
+        log("error", "failed to finalize download file", {
+          downloadId,
+          tempPath,
+          requestedName,
+          err,
+        });
+        this.#emitAnalytics(downloadId, "failed", error);
+        this.#api.store.dispatch(finishDownload(downloadId, "failed", error));
+        this.#api.events.emit("did-finish-download", downloadId, "failed");
+        settleDownloadCallback(activeDownload, error, downloadId);
+        return;
       }
 
       try {
@@ -485,6 +536,8 @@ export class IPCDownloadAdapter {
       }
     }
 
+    if (activeDownload?.cancelRequested) return;
+    this.#emitAnalytics(downloadId, "completed");
     // Mark record as finished. nexus_integration reads finished records
     // for attribute extraction during mod installation.
     this.#api.store.dispatch(finishDownload(downloadId, "finished", null));
@@ -494,7 +547,8 @@ export class IPCDownloadAdapter {
     // Fire the start-download callback now that the file is on disk. Callers
     // (e.g. nexus_integration collection download) rely on the callback firing
     // after completion to trigger installation, matching DownloadObserver behaviour.
-    activeDownload?.callback?.(null, downloadId);
+    settleDownloadCallback(activeDownload, null, downloadId);
+    if (activeDownload?.cancelRequested) return;
 
     const allowInstall = activeDownload?.allowInstall;
 
@@ -530,9 +584,11 @@ export class IPCDownloadAdapter {
       return;
     }
 
+    if (fileName !== undefined) fileName = normalizeDownloadFileName(fileName);
     const encodedUrl = parseEncodedUrl(rawUrl.toString());
 
     const { state, dlPath, gameIds } = await this.#resolveDownloadTarget(modInfo);
+    let replaceExisting = redownload === "replace";
 
     // Check for an existing file using the caller-supplied name before queuing.
     // We can only do this when a name is provided; temp-named downloads are always new.
@@ -552,11 +608,17 @@ export class IPCDownloadAdapter {
             [{ label: "Use existing" }, { label: "Re-download" }],
           );
           useExisting = result?.action !== "Re-download";
+          replaceExisting = !useExisting;
         }
         if (useExisting) {
           const downloads = state.persistent.downloads.files;
           let existingId = Object.keys(downloads).find(
-            (id) => downloads[id].localPath === fileName,
+            (id) =>
+              downloads[id].localPath === fileName &&
+              downloadPathForGame(
+                state,
+                toInternalGameId(this.#api, downloads[id].game?.[0] ?? activeGameId(state)),
+              ) === dlPath,
           );
           const gameId = gameIds[0];
           if (existingId === undefined && gameId !== undefined) {
@@ -595,8 +657,7 @@ export class IPCDownloadAdapter {
       // Use a temporary filename so the main process can start writing immediately.
       // #completeDownload renames to the final name derived from Content-Disposition.
       // The real filename is passed as a hint; the server name takes priority.
-      const collationStr = collationId.toString().padStart(8, "0");
-      const tempName = `${TEMP_DOWNLOAD_PREFIX}${collationStr}`;
+      const tempName = `${TEMP_DOWNLOAD_PREFIX}${randomUUID()}`;
       const dest = path.join(dlPath, tempName);
 
       log("debug", "starting download", {
@@ -612,6 +673,7 @@ export class IPCDownloadAdapter {
       this.#activeDownloads.set(downloadId, {
         callback,
         fileNameHint: fileName,
+        replaceExistingName: replaceExisting ? fileName : undefined,
         allowInstall,
         lastBytesReceived: 0,
         lastProgressDispatch: 0,
@@ -684,21 +746,18 @@ export class IPCDownloadAdapter {
     try {
       const [urlPart] = rawUrls[0].toString().split("<");
       const [, encodedName] = urlPart.split("|");
-      const fileName = encodedName !== undefined && encodedName !== "" ? encodedName : fileNameHint;
-      if (fileName === undefined || fileName === "") {
+      const rawName = encodedName !== undefined && encodedName !== "" ? encodedName : fileNameHint;
+      if (rawName === undefined || rawName === "") {
         throw new Error("browser download has no file name to adopt");
       }
+      const fileName = normalizeDownloadFileName(rawName);
 
       const { dlPath, gameIds } = await this.#resolveDownloadTarget(modInfo);
 
       const blobPath = path.join(getVortexPath("temp"), `${fileName}.tmp`);
-      const finalName = await freeDownloadName(dlPath, fileName);
+      const finalName = await moveDownloadToFreeName(blobPath, dlPath, fileName);
       const finalPath = path.join(dlPath, finalName);
-      await copyFile(blobPath, finalPath);
       const { size } = await stat(finalPath);
-      // The file is already safely in the download folder; a failed temp cleanup must not fail the
-      // adoption (a lingering temp file is harmless).
-      await rm(blobPath, { force: true }).catch(() => undefined);
 
       // Register the record already at its final name, so #completeDownload skips the rename and
       // just hashes, marks it finished, fires the callback, and triggers install. A blob url isn't
@@ -717,7 +776,7 @@ export class IPCDownloadAdapter {
         fileName: finalName,
         isChunked: false,
       };
-      await this.#completeDownload(id, wireState, {
+      await this.#finalizeDownload(id, wireState, {
         callback,
         fileNameHint,
         allowInstall: normalizeAllowInstall(options?.allowInstall),
@@ -735,33 +794,84 @@ export class IPCDownloadAdapter {
     callback?: (err: Error | null) => void,
   ): Promise<void> {
     try {
+      await this.#trackRemoval(downloadId, () => this.#removeDownload(downloadId));
+      callback?.(null);
+    } catch (err) {
+      callback?.(unknownToError(err));
+    }
+  }
+
+  #trackRemoval(downloadId: string, remove: () => Promise<void>): Promise<void> {
+    const pending = this.#removing.get(downloadId);
+    if (pending !== undefined) return pending;
+    const removal = remove().finally(() => this.#removing.delete(downloadId));
+    this.#removing.set(downloadId, removal);
+    return removal;
+  }
+
+  async #removeDownload(downloadId: string): Promise<void> {
+    const finalizing = this.#finalizing.get(downloadId);
+    const restoring = this.#restoring.get(downloadId);
+    const activeDownload =
+      finalizing?.activeDownload ??
+      restoring?.activeDownload ??
+      this.#activeDownloads.get(downloadId);
+    if (restoring !== undefined) {
+      restoring.activeDownload.cancelRequested = true;
+      restoring.cancel();
+    }
+    if (finalizing !== undefined) {
+      finalizing.activeDownload.cancelRequested = true;
+      await finalizing.promise;
+    }
+    const state = this.#api.getState();
+    const download = state.persistent.downloads.files?.[downloadId];
+    const isRunning = download !== undefined && ["init", "started"].includes(download.state);
+
+    if (this.#activeDownloads.has(downloadId) && isRunning) {
+      log("debug", "cancelling download", { downloadId });
+      activeDownload!.cancelRequested = true;
+      try {
+        await window.api.downloader.cancel(downloadId);
+      } catch (err) {
+        activeDownload!.cancelRequested = false;
+        throw err;
+      }
+    }
+
+    // Cancellation waits for writes even if the transfer finished before this request.
+    this.#activeDownloads.delete(downloadId);
+    await this.#removeStoppedDownload(downloadId, activeDownload);
+  }
+
+  async #removeStoppedDownload(downloadId: string, activeDownload?: ActiveDownload): Promise<void> {
+    try {
       const state = this.#api.getState();
       const download = state.persistent.downloads.files?.[downloadId];
-      const isRunning = download !== undefined && ["init", "started"].includes(download.state);
-
-      if (this.#activeDownloads.has(downloadId) && isRunning) {
-        // Still actively downloading: cancel it and let the poll loop's terminal
-        // "canceled" handling remove the record and fire the UserCanceled callback.
-        log("debug", "cancelling download", { downloadId });
-        await window.api.downloader.cancel(downloadId);
-        callback?.(null);
-        return;
-      }
-
-      // Non-running downloads: the main-process cancel is a no-op (Manager cancel()
-      // only acts while running), so the poll loop never removes the record. Delete
-      // the temp file and Redux record directly.
-      this.#activeDownloads.delete(downloadId);
       if (download?.localPath) {
         const gameId = toInternalGameId(this.#api, download.game?.[0] ?? activeGameId(state));
         const dlPath = downloadPathForGame(state, gameId);
         await rm(path.join(dlPath, download.localPath), { force: true });
       }
+      if (
+        download?.state !== "finished" &&
+        activeDownload !== undefined &&
+        !activeDownload.canceledEventEmitted
+      ) {
+        activeDownload.canceledEventEmitted = true;
+        this.#emitAnalytics(downloadId, "canceled");
+      }
       this.#api.store.dispatch(clearDownloadCheckpoint(downloadId));
       this.#api.store.dispatch(removeDownload(downloadId));
-      callback?.(null);
+      settleDownloadCallback(activeDownload, new UserCanceled(), downloadId);
     } catch (err) {
-      callback?.(unknownToError(err));
+      const error = unknownToError(err);
+      if (this.#api.getState().persistent.downloads.files[downloadId] !== undefined) {
+        this.#api.store.dispatch(finishDownload(downloadId, "failed", error));
+        this.#api.events.emit("did-finish-download", downloadId, "failed");
+      }
+      settleDownloadCallback(activeDownload, error, downloadId);
+      throw err;
     }
   }
 
@@ -798,26 +908,89 @@ export class IPCDownloadAdapter {
     options?: { allowInstall?: boolean | "force" },
   ): Promise<void> {
     try {
+      if (this.#removing.has(downloadId)) throw new UserCanceled();
       const state = this.#api.getState();
+      const download = state.persistent.downloads.files?.[downloadId];
+      if (download === undefined) {
+        throw new Error(`Cannot resume download ${downloadId}: no record`);
+      }
+      if (this.#finalizing.has(downloadId) || ["finished", "finalizing"].includes(download.state)) {
+        callback?.(null, downloadId);
+        return;
+      }
+      const restoring = this.#restoring.get(downloadId);
+      if (restoring !== undefined) {
+        await restoring.promise;
+        callback?.(null, downloadId);
+        return;
+      }
+      if (this.#activeDownloads.has(downloadId) && ["init", "started"].includes(download.state)) {
+        callback?.(null, downloadId);
+        return;
+      }
       const checkpoint = state.persistent.downloads.checkpoints[downloadId];
       if (!isResumableCheckpoint(checkpoint)) {
         // Interrupted rather than cleanly paused, or paused before any range completed: there is
         // nothing to resume from, so restart the download from scratch under the same id.
-        const download = state.persistent.downloads.files?.[downloadId];
-        if (download === undefined) {
-          throw new Error(`Cannot restore download ${downloadId}: no record`);
-        }
-        await this.#restoreDownload(
-          downloadId,
-          download,
-          callback,
-          normalizeAllowInstall(options?.allowInstall),
-        );
+        const activeDownload = this.#activeDownloads.get(downloadId) ?? {
+          lastBytesReceived: 0,
+          lastProgressDispatch: 0,
+          startedEventEmitted: false,
+        };
+        const cancellation = Promise.withResolvers<never>();
+        // Keep ownership until resolver cleanup finishes, while callers can cancel immediately.
+        const work = Promise.resolve()
+          .then(() =>
+            this.#restoreDownload(
+              downloadId,
+              download,
+              activeDownload,
+              normalizeAllowInstall(options?.allowInstall),
+            ),
+          )
+          .finally(() => this.#restoring.delete(downloadId));
+        const pending = Promise.race([work, cancellation.promise]);
+        this.#restoring.set(downloadId, {
+          activeDownload,
+          promise: pending,
+          cancel: () => cancellation.reject(new UserCanceled()),
+        });
+        await pending;
+        callback?.(null, downloadId);
         return;
       }
 
       log("debug", "resuming download", { downloadId });
-      await window.api.downloader.resume(checkpoint);
+      let pending = this.#resuming.get(downloadId);
+      if (pending === undefined) {
+        pending = Promise.resolve()
+          .then(() => window.api.downloader.resume(checkpoint))
+          .then(async () => {
+            if (
+              this.#removing.has(downloadId) ||
+              this.#api.getState().persistent.downloads.files[downloadId] === undefined
+            ) {
+              await window.api.downloader.cancel(downloadId);
+              throw new UserCanceled();
+            }
+            const allowInstall = normalizeAllowInstall(options?.allowInstall);
+            const active = this.#activeDownloads.get(downloadId);
+            if (active === undefined) {
+              this.#activeDownloads.set(downloadId, {
+                allowInstall,
+                lastBytesReceived: download.received ?? 0,
+                lastProgressDispatch: 0,
+                startedEventEmitted: false,
+              });
+            } else if (allowInstall !== undefined) {
+              active.allowInstall = allowInstall;
+            }
+            this.#api.store.dispatch(pauseDownload(downloadId, false));
+          })
+          .finally(() => this.#resuming.delete(downloadId));
+        this.#resuming.set(downloadId, pending);
+      }
+      await pending;
       callback?.(null, downloadId);
     } catch (err) {
       callback?.(unknownToError(err));
@@ -832,12 +1005,10 @@ export class IPCDownloadAdapter {
   async #restoreDownload(
     downloadId: string,
     download: IDownload,
-    callback?: (err: Error | null, id?: string) => void,
+    activeDownload: ActiveDownload,
     allowInstall?: boolean,
   ): Promise<void> {
-    // A concurrent resume-download for the same id would re-enter and issue a duplicate rm + start.
-    if (this.#restoring.has(downloadId)) return;
-
+    if (activeDownload.cancelRequested) throw new UserCanceled();
     const state = this.#api.getState();
     // Treat an empty-string url as absent so a wiped record falls back to reconstruction.
     const storedUrl = download.urls?.[0] || undefined;
@@ -853,7 +1024,7 @@ export class IPCDownloadAdapter {
     const dlPath = downloadPathForGame(state, gameId);
     const dest = path.join(dlPath, download.localPath);
 
-    this.#restoring.add(downloadId);
+    this.#activeDownloads.delete(downloadId);
     try {
       log("debug", "restoring download without usable checkpoint", { downloadId });
       // Reset progress to zero and return the record to its active state so the UI and any
@@ -869,40 +1040,56 @@ export class IPCDownloadAdapter {
       );
       this.#api.store.dispatch(pauseDownload(downloadId, false));
 
-      const collationId = this.#nextCollationId++;
-      this.#pending.set(collationId, { encodedUrl });
-
       // Drop the unusable partial and stale checkpoint so the transfer starts over from zero.
       await rm(dest, { force: true });
+      if (activeDownload.cancelRequested) throw new UserCanceled();
       this.#api.store.dispatch(clearDownloadCheckpoint(downloadId));
 
+      const collationId = this.#nextCollationId++;
+      this.#pending.set(collationId, { encodedUrl });
       try {
         // Passing the existing downloadId makes main replace the previous attempt and start the
         // transfer from scratch under the same id.
         await window.api.downloader.start(dest, collationId, downloadId);
-      } catch (err) {
-        // The partial and checkpoint are already gone, so mark the record failed rather than
-        // leaving it stuck in an active state the poll loop never tracks.
-        this.#api.store.dispatch(finishDownload(downloadId, "failed", unknownToError(err)));
-        throw err;
       } finally {
         this.#pending.delete(collationId);
         this.#resolvedMeta.delete(collationId);
+      }
+
+      if (
+        activeDownload.cancelRequested ||
+        this.#removing.has(downloadId) ||
+        this.#api.getState().persistent.downloads.files[downloadId] === undefined
+      ) {
+        await window.api.downloader.cancel(downloadId);
+        throw new UserCanceled();
       }
 
       // Register the poll entry after start resolves (as #handleStartDownload does) so the poll
       // never acts on the previous attempt's terminal handle. allowInstall is threaded from the
       // resume caller: the collection installer and mod-update flow pass false because they own the
       // install, while a manual resume leaves it undefined and defers to the automation setting.
-      this.#activeDownloads.set(downloadId, {
-        callback,
-        allowInstall,
+      Object.assign(activeDownload, {
+        allowInstall: allowInstall ?? activeDownload.allowInstall,
         lastBytesReceived: 0,
         lastProgressDispatch: 0,
         startedEventEmitted: false,
       });
-    } finally {
-      this.#restoring.delete(downloadId);
+      this.#activeDownloads.set(downloadId, activeDownload);
+    } catch (err) {
+      const error = unknownToError(err);
+      if (
+        !activeDownload.cancelRequested &&
+        !this.#removing.has(downloadId) &&
+        this.#api.getState().persistent.downloads.files[downloadId] !== undefined
+      ) {
+        this.#api.store.dispatch(finishDownload(downloadId, "failed", error));
+        this.#api.events.emit("did-finish-download", downloadId, "failed");
+      }
+      if (!activeDownload.cancelRequested) {
+        settleDownloadCallback(activeDownload, error, downloadId);
+      }
+      throw err;
     }
   }
 
@@ -933,7 +1120,7 @@ export class IPCDownloadAdapter {
     const progressActions: Array<ReturnType<typeof downloadProgress>> = [];
     for (const [downloadId, state] of Object.entries(states)) {
       const activeDownload = this.#activeDownloads.get(downloadId);
-      if (activeDownload === undefined) continue;
+      if (activeDownload === undefined || activeDownload.cancelRequested) continue;
 
       const delta = Math.max(0, state.bytesReceived - activeDownload.lastBytesReceived);
       totalDeltaBytes += delta;
@@ -980,21 +1167,21 @@ export class IPCDownloadAdapter {
       this.#api.store.dispatch(clearDownloadCheckpoint(downloadId));
 
       if (state.status === "completed") {
-        this.#emitAnalytics(downloadId, "completed");
-        this.#completeDownload(downloadId, state, activeDownload).catch((err) => {
+        this.#finalizeDownload(downloadId, state, activeDownload).catch((err) => {
           log("error", "failed to finalize download", { downloadId, err });
         });
       } else if (state.status === "canceled") {
-        this.#emitAnalytics(downloadId, "canceled");
-        // User canceled - remove the record entirely, no file to keep.
-        this.#api.store.dispatch(removeDownload(downloadId));
-        activeDownload.callback?.(new UserCanceled(), downloadId);
+        this.#trackRemoval(downloadId, () =>
+          this.#removeStoppedDownload(downloadId, activeDownload),
+        ).catch((err) => {
+          log("error", "failed to remove canceled download", { downloadId, err });
+        });
       } else {
         this.#emitAnalytics(downloadId, "failed", err ?? undefined);
         // Mark record as failed so the UI can show an error state.
         this.#api.store.dispatch(finishDownload(downloadId, "failed", err));
         this.#api.events.emit("did-finish-download", downloadId, "failed");
-        activeDownload.callback?.(err ?? new Error("download failed"), downloadId);
+        settleDownloadCallback(activeDownload, err ?? new Error("download failed"), downloadId);
       }
     }
 

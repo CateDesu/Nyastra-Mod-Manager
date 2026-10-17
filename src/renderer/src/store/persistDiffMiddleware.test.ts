@@ -155,6 +155,19 @@ describe("diff coalescing (GH#23904 renderer OOM)", () => {
     expect(ops.indexOf(attrOps[0])).toBeGreaterThan(removeIdx);
   });
 
+  it("clears obsolete leaves before a coalesced container replacement", () => {
+    const [ops] = writeTicks(1, (tick) => ({
+      attribute: tick === 0 ? { obsolete: true } : ["current"],
+    }));
+    const removeIdx = ops.findIndex(
+      (op) => op.type === "remove" && samePath(op, ["attribute", "obsolete"]),
+    );
+    const setIdx = ops.findIndex((op) => op.type === "set" && samePath(op, ["attribute"]));
+    expect(removeIdx).toBeGreaterThanOrEqual(0);
+    expect(setIdx).toBeGreaterThan(removeIdx);
+    expect(ops[setIdx].value).toEqual(["current"]);
+  });
+
   it("distinguishes paths that a separator-joined key would merge", () => {
     // mod ids containing dots are common, so ["mods", g, "m1", "attributes", "state"] and
     // ["mods", g, "m1.attributes", "state"] are distinct paths that dot-join to the same

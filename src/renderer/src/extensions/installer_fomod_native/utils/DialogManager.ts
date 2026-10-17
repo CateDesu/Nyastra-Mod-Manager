@@ -271,10 +271,8 @@ export class DialogManager implements IDialogManager {
     try {
       this.mCancelCB?.();
 
-      this.mApi.store.dispatch(endDialog(this.mInstanceId));
-
-      const dialogQueue = DialogQueue.getInstance(this.mApi);
-      dialogQueue.onDialogEnd(this.mInstanceId);
+      this.endDialog();
+      this.dispose();
     } catch (err) {
       log("error", "Failed to process FOMOD dialog cancellation", {
         instanceId: this.mInstanceId,

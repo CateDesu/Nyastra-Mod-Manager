@@ -166,6 +166,36 @@ describe("makeInstalledFileHydrator", () => {
     emitRequirements: true,
   };
 
+  test.each([true, false])("hydrates the enabled copy when enabledFirst=%s", (enabledFirst) => {
+    const enabled = { ...INSTALLED_REF, modId: "enabled", enabled: true };
+    const disabled = { ...INSTALLED_REF, modId: "disabled", enabled: false };
+    const refs = enabledFirst ? [enabled, disabled] : [disabled, enabled];
+    const mods = Object.fromEntries(
+      refs.map((ref) => [
+        ref.modId,
+        {
+          id: ref.modId,
+          state: "installed",
+          attributes: { source: "nexus", modId: 42, fileId: 7, downloadGame: "1704" },
+        },
+      ]),
+    );
+    const api = {
+      getState: () => ({
+        settings: { profiles: { activeProfileId: "p1" } },
+        persistent: {
+          profiles: { p1: { id: "p1", gameId: "skyrimse" } },
+          mods: { skyrimse: mods },
+          downloads: { files: {} },
+        },
+      }),
+    } as unknown as IExtensionApi;
+    expect(makeInstalledFileHydrator(api, refs, new Map())("file-a")).toMatchObject({
+      modId: "enabled",
+      enabled: true,
+    });
+  });
+
   /** Hydrate one installed mod whose archive stores `adultInDownload`, if given. */
   function hydrateInstalled(adultInDownload?: boolean, details?: IModDetails) {
     const api = {

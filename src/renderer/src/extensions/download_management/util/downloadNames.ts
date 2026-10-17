@@ -1,4 +1,5 @@
-import { access } from "node:fs/promises";
+import { constants } from "node:fs";
+import { copyFile, link, rm } from "node:fs/promises";
 import * as path from "path";
 
 import type { IDownload } from "../types/IDownload";
@@ -6,6 +7,15 @@ import type { IDownload } from "../types/IDownload";
 // Placeholder filename a download uses on disk while in progress, renamed to the
 // real name on completion. The UI shows friendlyDownloadName in its place.
 export const TEMP_DOWNLOAD_PREFIX = "__vortex_tmp_";
+
+/** Download names can contain path hints from either server platform. */
+export function normalizeDownloadFileName(fileName: string): string {
+  const name = fileName.split(/[\\/]/).at(-1) ?? "";
+  if (name === "" || name === "." || name === ".." || name.includes("\0")) {
+    throw new Error("Invalid download filename");
+  }
+  return name;
+}
 
 export function isTempDownloadName(name: string | undefined): boolean {
   return name !== undefined && name.startsWith(TEMP_DOWNLOAD_PREFIX);
@@ -50,18 +60,37 @@ export function friendlyDownloadName(download: IDownload): string | undefined {
 }
 
 /**
- * Returns fileName if it is free in dlPath, otherwise a timestamped variant ("name.<ms>.ext"), so an
- * existing download is never overwritten.
+ * Move a finished download under an available name without replacing another archive.
  */
-export async function freeDownloadName(dlPath: string, fileName: string): Promise<string> {
-  const taken = await access(path.join(dlPath, fileName)).then(
-    () => true,
-    () => false,
-  );
-  if (!taken) {
-    return fileName;
-  }
+export async function moveDownloadToFreeName(
+  source: string,
+  dlPath: string,
+  fileName: string,
+): Promise<string> {
+  fileName = normalizeDownloadFileName(fileName);
   const ext = path.extname(fileName);
-  const base = path.basename(fileName, ext);
-  return `${base}.${Date.now()}${ext}`;
+  const base = fileName.slice(0, fileName.length - ext.length);
+  const stamp = Date.now();
+  let candidate = fileName;
+  let collisions = 0;
+  for (;;) {
+    try {
+      const destination = path.join(dlPath, candidate);
+      try {
+        await link(source, destination);
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (!["EXDEV", "EPERM", "ENOSYS", "ENOTSUP", "EOPNOTSUPP"].includes(code)) throw err;
+        await copyFile(source, destination, constants.COPYFILE_EXCL);
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      collisions += 1;
+      candidate = `${base}.${stamp}${collisions === 1 ? "" : `.${collisions}`}${ext}`;
+      continue;
+    }
+    // The destination is complete. Leftover temporary files can be cleaned up later.
+    await rm(source, { force: true }).catch(() => undefined);
+    return candidate;
+  }
 }
