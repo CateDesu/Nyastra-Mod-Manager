@@ -46,7 +46,7 @@ import { hashFile } from "./hash/host";
 import { betterIpcMain } from "./ipc";
 import { openUrl, openFile, showItemInFolder } from "./open";
 import { createUpdateChecker } from "./updateCheck";
-import { extraWebViews } from "./webview";
+import { closeView, extraWebViews, registerView } from "./webview";
 
 export interface GlobalWithRedux {
   getReduxState?: () => object;
@@ -232,9 +232,7 @@ export function init(fs: FileSystem) {
       const window = BrowserWindow.fromWebContents(event.sender);
       const contentsId = event.sender.id;
 
-      if (extraWebViews[contentsId] === undefined) {
-        extraWebViews[contentsId] = {};
-      }
+      if (!window || window.isDestroyed()) throw new Error("Browser window is closed");
 
       const view = new WebContentsView({
         webPreferences: {
@@ -247,13 +245,18 @@ export function init(fs: FileSystem) {
       });
       view.setBackgroundColor("#00000000");
 
-      const viewId = `${contentsId}_${Object.keys(extraWebViews[contentsId]).length}`;
-      extraWebViews[contentsId][viewId] = view;
-
-      await view.webContents.loadURL(src);
-      window?.contentView.addChildView(view);
-
-      return viewId;
+      const viewId = registerView(window, view);
+      try {
+        await view.webContents.loadURL(src);
+        if (window.isDestroyed() || !view.webContents || view.webContents.isDestroyed()) {
+          throw new Error("Browser window is closed");
+        }
+        window.contentView.addChildView(view);
+        return viewId;
+      } catch (err) {
+        closeView(contentsId, viewId, window);
+        throw err;
+      }
     },
   );
 
@@ -268,9 +271,7 @@ export function init(fs: FileSystem) {
       const window = BrowserWindow.fromWebContents(event.sender);
       const contentsId = event.sender.id;
 
-      if (extraWebViews[contentsId] === undefined) {
-        extraWebViews[contentsId] = {};
-      }
+      if (!window || window.isDestroyed()) throw new Error("Browser window is closed");
 
       const typedOptions = options ?? {};
       const viewOptions: Electron.WebContentsViewConstructorOptions = {
@@ -287,9 +288,6 @@ export function init(fs: FileSystem) {
       const view = new WebContentsView(viewOptions);
       view.setBackgroundColor("#00000000");
 
-      const viewId = `${contentsId}_${Object.keys(extraWebViews[contentsId]).length}`;
-      extraWebViews[contentsId][viewId] = view;
-
       const updateBounds = () => {
         if (window && !window.isDestroyed()) {
           const bounds = window.getContentBounds();
@@ -302,31 +300,35 @@ export function init(fs: FileSystem) {
         }
       };
       window?.on("resize", updateBounds);
-
-      window?.contentView.addChildView(view);
-      await view.webContents.loadURL(src);
+      const viewId = registerView(window, view, () => window.off("resize", updateBounds));
 
       forwardEvents.forEach((eventId) => {
         view.webContents.on(
           eventId as Parameters<typeof view.webContents.on>[0],
           (evt, ...args) => {
             event.sender.send(`view-${viewId}-${eventId}`, JSON.stringify(args));
-            evt.preventDefault();
+            evt?.preventDefault?.();
           },
         );
       });
 
-      return viewId;
+      try {
+        window.contentView.addChildView(view);
+        await view.webContents.loadURL(src);
+        if (window.isDestroyed() || !view.webContents || view.webContents.isDestroyed()) {
+          throw new Error("Browser window is closed");
+        }
+        return viewId;
+      } catch (err) {
+        closeView(contentsId, viewId, window);
+        throw err;
+      }
     },
   );
 
   betterIpcMain.handle("browserView:close", (event: IpcMainInvokeEvent, viewId: string) => {
     const contentsId = event.sender.id;
-    if (extraWebViews[contentsId]?.[viewId] !== undefined) {
-      const window = BrowserWindow.fromWebContents(event.sender);
-      window?.contentView.removeChildView(extraWebViews[contentsId][viewId]);
-      delete extraWebViews[contentsId][viewId];
-    }
+    closeView(contentsId, viewId, BrowserWindow.fromWebContents(event.sender) ?? undefined);
   });
 
   betterIpcMain.handle(
@@ -341,7 +343,7 @@ export function init(fs: FileSystem) {
     "browserView:updateURL",
     (event: IpcMainInvokeEvent, viewId: string, newURL: string) => {
       const contentsId = event.sender.id;
-      void extraWebViews[contentsId]?.[viewId]?.webContents.loadURL(newURL);
+      return extraWebViews[contentsId]?.[viewId]?.webContents.loadURL(newURL);
     },
   );
 
@@ -664,14 +666,19 @@ export function init(fs: FileSystem) {
 
     const entries: EnumerateEntryWire[] = [];
     let done = false;
-    for (let pulled = 0; pulled < max; pulled++) {
-      const step = await session.iterator.next();
-      if (step.done === true) {
-        done = true;
-        break;
-      }
+    try {
+      for (let pulled = 0; pulled < max; pulled++) {
+        const step = await session.iterator.next();
+        if (step.done === true) {
+          done = true;
+          break;
+        }
 
-      entries.push(enumerationEntryToWire(step.value));
+        entries.push(enumerationEntryToWire(step.value));
+      }
+    } catch (err) {
+      evictEnumeration(handle);
+      throw err;
     }
 
     if (done) {

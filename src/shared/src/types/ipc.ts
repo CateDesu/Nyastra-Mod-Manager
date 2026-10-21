@@ -165,7 +165,9 @@ export type WireDownloadState = DownloadProgress & {
   error: Serializable | null;
 };
 
-export type WireDownloadCheckpoint = DownloadCheckpoint<string>;
+export type WireDownloadCheckpoint = DownloadCheckpoint<string> & {
+  resolvedResource?: WireResolvedResource;
+};
 
 /**
  * The part layout an S3 multipart upload session was created with: one

@@ -73,7 +73,8 @@ function ensureLocalEntry(
       error: error instanceof Error ? error.message : "Icon copy failed",
     });
   }
-  const desktop = `[Desktop Entry]\nType=Application\nName=Nyastra's Mod Manager${development ? " (development)" : ""}\nNoDisplay=true\nExec=${escapeDesktopExecFilePath(wrapper)} %u\nTryExec=${escapeDesktopFilePath(wrapper)}\nIcon=${icon}\nTerminal=false\nCategories=Game;\nMimeType=x-scheme-handler/nxm;\nStartupWMClass=NyastraModManager\n`;
+  // Desktop launchers cannot resolve percent escapes in the executable name.
+  const desktop = `[Desktop Entry]\nType=Application\nName=Nyastra's Mod Manager${development ? " (development)" : ""}\nNoDisplay=true\nExec=/bin/sh ${escapeDesktopExecFilePath(wrapper)} %u\nTryExec=${escapeDesktopFilePath(wrapper)}\nIcon=${icon}\nTerminal=false\nCategories=Game;\nMimeType=x-scheme-handler/nxm;\nStartupWMClass=NyastraModManager\n`;
   return writeText(path.join(directory, desktopId), desktop, 0o644) || wrapperChanged;
 }
 

@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -86,6 +86,20 @@ it("checks package metadata through the actual preload and main update handler",
     current: "2.9.0-beta.2+linux.2",
     url: "https://github.com/CateDesu/Nyastra-Mod-Manager/releases",
   });
+});
+
+it("releases an enumeration session when the real filesystem iterator fails", async () => {
+  await symlink("loop", path.join(directory, "loop"));
+  const iterator = await api.fs.enumerateDirectory(QualifiedPath.fromNative(directory), {
+    includeStatus: true,
+  });
+  try {
+    expect(sender.listenerCount("destroyed")).toBe(1);
+    await expect(iterator.next()).rejects.toThrow();
+    expect(sender.listenerCount("destroyed")).toBe(0);
+  } finally {
+    await iterator.return?.(undefined);
+  }
 });
 
 describe("filesystem streams through preload and main handlers", () => {

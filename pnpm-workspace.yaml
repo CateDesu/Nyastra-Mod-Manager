@@ -327,3 +327,4 @@ allowBuilds:
 
 patchedDependencies:
   "@nexusmods/fomod-installer-native@0.13.4": patches/@nexusmods__fomod-installer-native@0.13.4.patch
+  turbowalk@3.1.1: patches/turbowalk@3.1.1.patch

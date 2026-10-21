@@ -3,6 +3,32 @@ import { describe, it, expect } from "vitest";
 import { computeStateDiff } from "./stateDiff";
 
 describe("computeStateDiff", () => {
+  it.each([
+    [{ obsolete: true }, "replaced"],
+    [{ obsolete: true }, ["replaced"]],
+    ["previous", { current: true }],
+    [["previous"], { current: true }],
+  ])("clears the old representation when a value changes shape from %j to %j", (before, after) => {
+    const ops = computeStateDiff<unknown>({ attribute: before }, { attribute: after });
+    expect(ops[0]).toEqual({ type: "remove", path: ["attribute"] });
+    expect(ops.some((op) => op.type === "set")).toBe(true);
+  });
+
+  it.each(["__proto__", "constructor", "toString"])(
+    "persists additions and removals of an own property named %s",
+    (key) => {
+      const value = { id: key };
+      const populated = Object.fromEntries([[key, value]]);
+      expect(computeStateDiff({}, populated)).toEqual([
+        { type: "set", path: [key, "id"], value: key },
+      ]);
+      const removals = computeStateDiff(populated, {});
+      expect(removals).toContainEqual({ type: "remove", path: [key] });
+      expect(removals).toContainEqual({ type: "remove", path: [key, "id"] });
+      expect(Object.hasOwn(Object.prototype, "id")).toBe(false);
+    },
+  );
+
   it("generates set operation for a Date value", () => {
     const oldState = { mods: {} };
     const newState = {

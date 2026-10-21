@@ -35,10 +35,10 @@ export const install = async (
   const invokeInstall = async (validate: boolean) => {
     // When override instructions file is present, use only the universal stop patterns and null pluginPath
     // to prevent any automatic path manipulation (both FindPathPrefix and pluginPath stripping)
-    const stopPatterns = details.hasInstructionsOverrideFile
+    const stopPatterns = details?.hasInstructionsOverrideFile
       ? uniPatterns
       : getStopPatterns(gameId, getGame(gameId));
-    const pluginPath = details.hasInstructionsOverrideFile ? null : getPluginPath(gameId);
+    const pluginPath = details?.hasInstructionsOverrideFile ? null : getPluginPath(gameId);
 
     // Skip Redux dialog-state dispatches when we have a preset and are running
     // unattended (collection install). The C# fomod still calls uiUpdateState
@@ -54,46 +54,49 @@ export const install = async (
 
     const modInstaller = await VortexModInstaller.create(api, instanceId, gameId, isUnattended);
 
-    const result = await modInstaller.installAsync(
-      files,
-      stopPatterns,
-      pluginPath,
-      scriptPath,
-      fomodChoices,
-      preselect,
-      validate,
-    );
+    try {
+      const result = await modInstaller.installAsync(
+        files,
+        stopPatterns,
+        pluginPath,
+        scriptPath,
+        fomodChoices,
+        preselect,
+        validate,
+      );
 
-    if (!result) {
-      throw new UserCanceled();
+      if (!result) {
+        throw new UserCanceled();
+      }
+
+      const choices = getChoicesFromState(api, instanceId);
+
+      const transformedResult: IInstallResult = {
+        instructions: result.instructions.reduce<IInstruction[]>((map, current) => {
+          const currentWithoutType = (({ type, data, ...props }) => props)(current);
+          const type = current.type as InstructionType;
+          const data = current.data ? Buffer.from(current.data) : undefined;
+          map.push({
+            type: type,
+            data: data,
+            ...currentWithoutType,
+          });
+          return map;
+        }, []),
+      };
+
+      transformedResult.instructions.push({
+        type: "attribute",
+        key: "installerChoices",
+        value: {
+          type: "fomod",
+          options: choices ?? fomodChoices,
+        },
+      });
+      return transformedResult;
+    } finally {
+      modInstaller.dispose();
     }
-
-    const choices = getChoicesFromState(api, instanceId);
-
-    const transformedResult: IInstallResult = {
-      instructions: result.instructions.reduce<IInstruction[]>((map, current) => {
-        const currentWithoutType = (({ type, data, ...props }) => props)(current);
-        const type = current.type as InstructionType;
-        const data = current.data ? Buffer.from(current.data) : undefined;
-        map.push({
-          type: type,
-          data: data,
-          ...currentWithoutType,
-        });
-        return map;
-      }, []),
-    };
-
-    transformedResult.instructions.push({
-      type: "attribute",
-      key: "installerChoices",
-      value: {
-        type: "fomod",
-        options: choices ?? fomodChoices,
-      },
-    });
-    modInstaller.dispose();
-    return transformedResult;
   };
 
   try {

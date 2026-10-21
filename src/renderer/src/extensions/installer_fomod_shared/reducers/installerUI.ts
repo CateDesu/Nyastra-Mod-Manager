@@ -37,7 +37,9 @@ createReducer(
     const existingInstance = state.instances?.[instanceId];
 
     return update(state, {
-      activeInstanceId: { $set: null },
+      activeInstanceId: {
+        $set: state.activeInstanceId === instanceId ? null : state.activeInstanceId,
+      },
       instances: existingInstance
         ? {
             [instanceId]: {

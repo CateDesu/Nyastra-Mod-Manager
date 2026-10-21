@@ -430,7 +430,7 @@ class Settings extends ComponentEx<IProps, IComponentState> {
     try {
       const statNew = fs.statSync(newPath, { bigint: true });
       const statOld = fs.statSync(oldPath, { bigint: true });
-      if (statNew.ino === statOld.ino) {
+      if (statNew.dev === statOld.dev && statNew.ino === statOld.ino) {
         return onShowDialog(
           "error",
           "Invalid path selected",

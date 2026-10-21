@@ -12,6 +12,7 @@ import type { DirectoryCleaningMode, IGame } from "../../types/IGame";
 import type { IState } from "../../types/IState";
 import { getGame, UserCanceled } from "../../util/api";
 import * as fs from "../../util/fs";
+import { moveFileNoReplace } from "../../util/fsAtomic";
 import type { Normalize } from "../../util/getNormalizeFunc";
 import { resolvePathCase } from "../../util/resolvePathCase";
 import { activeGameId } from "../../util/selectors";
@@ -381,7 +382,7 @@ abstract class LinkingActivator implements IDeploymentMethod {
                   }
                 });
             },
-            { skipHidden: false },
+            { skipHidden: false, skipInaccessible: false },
           ),
         )
         .catch((err: unknown) => {
@@ -414,7 +415,7 @@ abstract class LinkingActivator implements IDeploymentMethod {
           }
         });
       },
-      { skipHidden: false },
+      { skipHidden: false, skipInaccessible: false },
     );
   }
 
@@ -772,7 +773,7 @@ abstract class LinkingActivator implements IDeploymentMethod {
       )
       .then(() =>
         restoreBackup
-          ? fs.renameAsync(outputPath + BACKUP_TAG, outputPath).catch((err: unknown) => {
+          ? moveFileNoReplace(outputPath + BACKUP_TAG, outputPath).catch((err: unknown) => {
               if (getErrorCode(err) !== "ENOENT") throw err;
             })
           : Promise.resolve(),
@@ -822,7 +823,7 @@ abstract class LinkingActivator implements IDeploymentMethod {
           .then((link) =>
             link
               ? Promise.resolve(undefined) // don't re-create link that's already correct
-              : fs.renameAsync(fullOutputPath, fullOutputPath + BACKUP_TAG),
+              : moveFileNoReplace(fullOutputPath, fullOutputPath + BACKUP_TAG),
           )
           .catch((err: unknown) =>
             getErrorCode(err) === "ENOENT"
@@ -884,7 +885,7 @@ abstract class LinkingActivator implements IDeploymentMethod {
         (entries) => {
           allEntries = allEntries.concat(entries);
         },
-        { recurse: false, skipHidden: false, skipLinks: false },
+        { recurse: false, skipHidden: false, skipInaccessible: false, skipLinks: false },
       ),
     )
       .then(() => {
@@ -975,8 +976,7 @@ abstract class LinkingActivator implements IDeploymentMethod {
   private restoreBackup(backupPath: string): Promise<void> {
     const targetPath = backupPath.substr(0, backupPath.length - BACKUP_TAG.length);
     return Promise.resolve(
-      fs
-        .renameAsync(backupPath, targetPath)
+      moveFileNoReplace(backupPath, targetPath)
         // where has it gone? Oh well, doesn't matter. We wouldn't even be trying to restore
         // it if it had been removed a bit earlier
         .catch((err: unknown) => {

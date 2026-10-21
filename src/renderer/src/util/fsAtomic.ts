@@ -1,5 +1,6 @@
 import { createHash } from "crypto";
-import { copyFile, rename } from "node:fs/promises";
+import { constants } from "node:fs";
+import { copyFile, link, lstat, readlink, rename, symlink, unlink, utimes } from "node:fs/promises";
 
 import { unknownToError } from "@vortex/shared";
 import PromiseBB from "bluebird";
@@ -8,6 +9,24 @@ import { file } from "tmp";
 import { checksum } from "./checksum";
 import * as fs from "./fs";
 import { log } from "./log";
+
+/** Move a file or symlink without replacing an occupied destination. */
+export async function moveFileNoReplace(source: string, destination: string): Promise<void> {
+  try {
+    await link(source, destination);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (!["EXDEV", "EPERM", "ENOSYS", "ENOTSUP", "EOPNOTSUPP"].includes(code)) throw err;
+    const stats = await lstat(source);
+    if (stats.isSymbolicLink()) {
+      await symlink(await readlink(source), destination);
+    } else {
+      await copyFile(source, destination, constants.COPYFILE_EXCL);
+      await utimes(destination, stats.atime, stats.mtime);
+    }
+  }
+  await unlink(source);
+}
 
 export function writeFileAtomic(filePath: string, input: string | Buffer) {
   return writeFileAtomicImpl(filePath, input, 3);

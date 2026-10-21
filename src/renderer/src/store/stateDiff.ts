@@ -47,7 +47,7 @@ export function computeStateDiff<T>(
     for (const key of oldKeys) {
       const currentPath = [...path, key];
 
-      if (newState[key] === undefined) {
+      if (!Object.hasOwn(newState, key) || newState[key] === undefined) {
         // Key was removed. Emit a remove at the container path first - the
         // persistence layer treats removes as subtree removals (key + any
         // descendants), so this single op handles the case where the value
@@ -72,13 +72,28 @@ export function computeStateDiff<T>(
 
     // Process keys that only exist in newState (additions)
     for (const key of newKeys) {
-      if (oldState[key] === undefined && newState[key] !== undefined) {
+      if (
+        (!Object.hasOwn(oldState, key) || oldState[key] === undefined) &&
+        newState[key] !== undefined
+      ) {
         const currentPath = [...path, key];
         // Key was added - collect all set operations for this subtree
         collectSetOperations(currentPath, newState[key], operations);
       }
     }
   } else {
+    if (
+      oldState !== undefined &&
+      newState !== undefined &&
+      isObject(oldState) !== isObject(newState)
+    ) {
+      // Clear the old storage shape before writing the replacement.
+      operations.push({ type: "remove", path });
+      if (isObject(oldState)) {
+        // Leaf removes survive coalescing when a set replaces the container remove.
+        collectRemoveOperations(path, oldState, operations);
+      }
+    }
     // At least one is not an object (leaf node change)
     if (newState !== undefined) {
       // Value changed or added

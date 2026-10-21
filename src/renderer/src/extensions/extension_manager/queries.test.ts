@@ -122,11 +122,33 @@ describe("findInstalled by path", () => {
     expect(result).toEqual({ key: "abc123", extension: ext });
   });
 
-  it("matches paths case-insensitively", () => {
+  it("keeps case-distinct Linux paths separate", () => {
     const ext = makeExtensionState({ path: "/Plugins/Real-Ext" });
     const installed = { abc123: ext };
     const result = findInstalled(installed, { path: "/plugins/real-ext" });
-    expect(result).toEqual({ key: "abc123", extension: ext });
+    expect(result).toBeUndefined();
+  });
+
+  it("finds the scanned directory's own enabled state among case-distinct paths", () => {
+    const upper = makeExtensionState({ path: "/plugins/Fixture", enabled: false });
+    const lower = makeExtensionState({ path: "/plugins/fixture", enabled: true });
+    const installed = { upper, lower };
+    expect(findInstalled(installed, { path: "/plugins/fixture" })).toEqual({
+      key: "lower",
+      extension: lower,
+    });
+    expect(findInstalled(installed, { path: "/plugins/Fixture" })).toEqual({
+      key: "upper",
+      extension: upper,
+    });
+  });
+
+  it("normalizes equivalent paths without changing case", () => {
+    const ext = makeExtensionState({ path: "/plugins/Fixture/../Fixture" });
+    expect(findInstalled({ abc123: ext }, { path: "/plugins/./Fixture" })).toEqual({
+      key: "abc123",
+      extension: ext,
+    });
   });
 
   it("does not match entries installed under a queried parent directory", () => {

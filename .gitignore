@@ -62,11 +62,8 @@ changelog_*.txt
 eslint.log
 log.txt
 
-# Claude piping into nul file on windows
+# Temporary null-device files
 nul
-
-# Claude Code directory
-.claude/settings.local.json
 
 # direnv
 .direnv/

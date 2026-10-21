@@ -103,12 +103,12 @@ function readManifest(data: string | Buffer): IDeploymentManifest {
 export function purgeDeployedFiles(basePath: string, files: IDeployedFile[]): Promise<void> {
   return Promise.all(
     files.map((file) => {
-      const fullPath = path.join(basePath, file.relPath);
+      const fullPath = path.join(basePath, file.target || "", file.relPath);
       return fs
         .statAsync(fullPath)
         .then((stats) => {
           // the timestamp from stat has ms precision but the one from the manifest doesn't
-          return stats.mtime.getTime() - file.time < 1000
+          return Math.abs(stats.mtime.getTime() - file.time) < 1000
             ? fs.unlinkAsync(fullPath)
             : Promise.resolve();
         })
@@ -280,7 +280,7 @@ export function fallbackPurgeType(
   const tagFileName = `vortex.deployment.${typeTag}json`;
   const tagFilePath = path.join(deployPath, tagFileName);
   const tagBackupPath = path.join(stagingPath, tagFileName);
-  const tagBackup2Path = path.join(stagingPath, `vortex.deployment.backup.${typeTag}msgpack`);
+  const tagBackup2Path = path.join(stagingPath, `vortex.deployment.${typeTag}msgpack`);
   const instanceId = state.app.instanceId;
 
   return getManifestImpl(api, instanceId, tagFilePath, tagBackupPath, tagBackup2Path)
@@ -294,7 +294,11 @@ export function fallbackPurgeType(
             safe = false;
           }
         }
-        result = purgeDeployedFiles(deployPath, tagObject.files)
+        result = (
+          safe
+            ? purgeDeployedFiles(deployPath, tagObject.files)
+            : queryPurge(api, deployPath, tagObject.files, false)
+        )
           .then(() =>
             saveActivation(
               gameId,

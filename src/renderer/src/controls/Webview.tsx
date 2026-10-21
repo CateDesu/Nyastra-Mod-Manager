@@ -57,13 +57,19 @@ interface IBrowserViewProps {
   events: { [name: string]: (...args: any[]) => void };
 }
 
+function reportViewError(error: unknown) {
+  log("warn", "embedded browser operation failed", { error });
+}
+
 function BrowserView(props: IBrowserViewProps) {
   const viewId = React.useRef<string>();
   const container = React.useRef<HTMLDivElement>();
   const bounds = React.useRef<Electron.Rectangle>();
+  const latestProps = React.useRef(props);
+  latestProps.current = props;
 
   const updateViewBounds = React.useCallback(() => {
-    if (truthy(container.current)) {
+    if (truthy(container.current) && viewId.current !== undefined) {
       const rect = container.current.getBoundingClientRect();
 
       bounds.current = {
@@ -73,14 +79,14 @@ function BrowserView(props: IBrowserViewProps) {
         height: Math.round(rect.height),
       };
 
-      positionBrowserView(viewId.current, bounds.current);
+      positionBrowserView(viewId.current, bounds.current).catch(reportViewError);
     }
   }, []);
 
   React.useEffect(() => {
     let wasVisible: boolean = true;
     const overlapTest = setInterval(() => {
-      if (truthy(bounds.current)) {
+      if (truthy(bounds.current) && viewId.current !== undefined) {
         // janky way of estimating a position that would be overlapped
         const x = bounds.current.x + bounds.current.width / 2;
         const y1 = bounds.current.y + bounds.current.height * 0.33;
@@ -92,7 +98,7 @@ function BrowserView(props: IBrowserViewProps) {
           positionBrowserView(
             viewId.current,
             isVisible ? bounds.current : { x: 0, y: 0, width: 0, height: 0 },
-          );
+          ).catch(reportViewError);
           wasVisible = isVisible;
         }
       }
@@ -103,12 +109,16 @@ function BrowserView(props: IBrowserViewProps) {
   }, []);
 
   React.useEffect(() => {
-    updateViewURL(viewId.current, props.src);
+    if (viewId.current !== undefined) {
+      updateViewURL(viewId.current, props.src).catch(reportViewError);
+    }
   }, [props.src]);
 
   React.useEffect(() => {
+    let active = true;
+    const listeners = new Map<string, (_event: Electron.IpcRendererEvent, args: string) => void>();
     const impl = async () => {
-      viewId.current = await makeBrowserView(props.src, Object.keys(props.events), {
+      const id = await makeBrowserView(props.src, Object.keys(props.events), {
         webPreferences: {
           // Use separate partition to isolate cookies from main window
           // This prevents external site cookies (e.g., moddb.com) from being
@@ -116,30 +126,43 @@ function BrowserView(props: IBrowserViewProps) {
           partition: "persist:webview",
         },
       });
+      if (!active) {
+        await closeBrowserView(id);
+        return;
+      }
+      viewId.current = id;
 
       RESIZE_EVENTS.forEach((evtId) => {
         window.addEventListener(evtId, updateViewBounds);
       });
 
       Object.keys(props.events).forEach((evtId) => {
-        ipcRenderer.on(`view-${viewId.current}-${evtId}`, (evt, argsJSON) => {
-          props.events[evtId](...JSON.parse(argsJSON));
-        });
+        const channel = `view-${id}-${evtId}`;
+        const listener = (_evt: Electron.IpcRendererEvent, argsJSON: string) => {
+          latestProps.current.events[evtId]?.(...JSON.parse(argsJSON));
+        };
+        listeners.set(channel, listener);
+        ipcRenderer.on(channel, listener);
       });
       updateViewBounds();
+      if (latestProps.current.src !== props.src) {
+        await updateViewURL(id, latestProps.current.src);
+      }
     };
 
-    impl();
+    impl().catch(reportViewError);
 
     return () => {
-      closeBrowserView(viewId.current);
+      active = false;
+      if (viewId.current !== undefined) {
+        closeBrowserView(viewId.current).catch(reportViewError);
+        viewId.current = undefined;
+      }
       RESIZE_EVENTS.forEach((evtId) => {
         window.removeEventListener(evtId, updateViewBounds);
       });
 
-      Object.keys(props.events).forEach((evtId) => {
-        ipcRenderer.removeAllListeners(`view-${viewId.current}-${evtId}`);
-      });
+      listeners.forEach((listener, channel) => ipcRenderer.removeListener(channel, listener));
     };
   }, []);
 
@@ -239,25 +262,28 @@ export class WebviewOverlay extends React.Component<IWebviewProps & IWebView, { 
 
 export class WebviewEmbed extends React.Component<IWebviewProps & IWebView, {}> {
   private mNode: HTMLWebViewElement;
+  private mContentsId: number | undefined;
+
+  private domReady = () => {
+    this.mContentsId = this.mNode["getWebContentsId"]();
+    ipcRenderer.send("webview-dom-ready", this.mContentsId);
+  };
+
+  private openUrl = (
+    _event: Electron.IpcRendererEvent,
+    id: number,
+    url: string,
+    disposition: string,
+  ) => {
+    if (id === this.mContentsId) this.props.onNewWindow?.(url, disposition);
+  };
 
   public componentDidMount() {
     this.mNode = ReactDOM.findDOMNode(this) as HTMLWebViewElement;
     this.mNode.addEventListener("did-start-loading", this.startLoad);
     this.mNode.addEventListener("did-stop-loading", this.stopLoad);
-    this.mNode.addEventListener("dom-ready", () => {
-      const id = this.mNode["getWebContentsId"]();
-      ipcRenderer.send("webview-dom-ready", id);
-      ipcRenderer.on("webview-open-url", (_, idInner, url, disposition) => {
-        if (id === idInner) {
-          this.props.onNewWindow?.(url, disposition);
-        }
-      });
-      /*
-      (this.mNode as any).insertCSS(
-        'body.mediawiki, #content, #mw-pages > table { background-color: #4c4c4c !important }');
-      */
-      // (this.mNode as any).openDevTools();
-    });
+    this.mNode.addEventListener("dom-ready", this.domReady);
+    ipcRenderer.on("webview-open-url", this.openUrl);
     this.mNode.addEventListener("console-message", this.logMessage);
     // this.mNode.addEventListener('new-window', this.newWindow);
     this.mNode.addEventListener("enter-html-full-screen", this.enterFullscreen);
@@ -265,6 +291,9 @@ export class WebviewEmbed extends React.Component<IWebviewProps & IWebView, {}> 
   }
 
   public componentWillUnmount() {
+    this.mNode.removeEventListener("dom-ready", this.domReady);
+    ipcRenderer.removeListener("webview-open-url", this.openUrl);
+    this.mContentsId = undefined;
     this.mNode.removeEventListener("did-start-loading", this.startLoad);
     this.mNode.removeEventListener("did-stop-loading", this.stopLoad);
     this.mNode.removeEventListener("console-message", this.logMessage);

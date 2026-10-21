@@ -242,7 +242,7 @@ function toQualifiedEntry(
 ): QualifiedPath {
   const rel = relative(rootResolved, entry);
   if (rel === "") return rootQP;
-  if (rel.startsWith("..") || isAbsolute(rel)) {
+  if (rel === ".." || rel.startsWith(`..${pathSep}`) || isAbsolute(rel)) {
     throw new VortexError(`Directory entry '${entry}' is not under root '${rootResolved}'`, {
       kind: "argument-invalid",
       argument: entry,

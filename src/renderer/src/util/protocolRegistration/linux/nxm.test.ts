@@ -40,6 +40,41 @@ afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 describe("Linux package download-link registration", () => {
+  it.runIf(process.platform === "linux").each(["Astra's", "100%cat", "100% cat's%u"])(
+    "launches a generated desktop entry through GIO in %s",
+    async (directory) => {
+      state.directory = path.join(root, directory);
+      fs.mkdirSync(state.directory);
+      vi.stubEnv("APPIMAGE", executable);
+      registerLinuxNxmProtocolHandler({ setAsDefault: false, executablePath: executable, appPath });
+      const record = path.join(root, "record.json");
+      const url = "nxm://re9/mods/1/files/2?key=AbC%2BDef&expires=42";
+
+      const run = spawnSync(
+        "gio",
+        ["launch", path.join(state.directory, "io.github.CateDesu.NyastraModManager.desktop"), url],
+        {
+          encoding: "utf8",
+          timeout: 10000,
+          env: {
+            ...process.env,
+            XDG_CONFIG_HOME: path.join(root, "config"),
+            XDG_DATA_HOME: path.join(root, "data"),
+            XDG_CACHE_HOME: path.join(root, "cache"),
+            XDG_STATE_HOME: path.join(root, "state"),
+            NYASTRA_LAUNCH_RECORD: record,
+          },
+        },
+      );
+
+      expect(run.status, run.stderr).toBe(0);
+      await vi.waitFor(() => {
+        expect(JSON.parse(fs.readFileSync(record, "utf8"))).toEqual(["--install", url]);
+      });
+      expect(state.setDefault).not.toHaveBeenCalled();
+    },
+  );
+
   it("uses a stable AppImage path and preserves URL bytes through its shell wrapper", () => {
     vi.stubEnv("APPIMAGE", executable);
     expect(

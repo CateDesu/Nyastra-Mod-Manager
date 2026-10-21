@@ -5,21 +5,15 @@ you are writing it yourself or asking a model to write it.
 
 ## Where docs go
 
-All project and coding documentation goes in `docs/`. That includes
+All program and coding documentation goes in `docs/`. That includes
 architecture, subsystem deep dives, conventions, workflows and runbooks,
 regardless of whether a human or an agent is the expected reader. The two
 audiences want the same things: what this is, how it works, where the code is.
 
-Do not put project or coding documentation in `AGENTS.md` or `CLAUDE.md`.
-`AGENTS.md` covers only how to operate as an agent in this repo: tool
-preferences, MCP servers, skills, and which doc to load for a task. If you find
-yourself writing "the renderer is structured as..." into `AGENTS.md`, it belongs
-in `docs/`.
-
 One home, one audience-neutral voice, and the docs get maintained.
 
-Keep the introduction, license notices and agent entry points at the repository
-root. Community documents live in `.github/`, where GitHub discovers them.
+Keep the introduction and license notices at the repository root.
+Community documents live in `.github/`, where GitHub discovers them.
 Code style, changelog and release support documents live in `docs/`.
 
 ## Add it to the index
@@ -59,8 +53,8 @@ a doc nobody reads.
 Write for someone who knows the codebase but not this corner of it.
 
 Keep it audience-neutral. No "you are an agent", no "read this file when working
-on X" preambles: routing is the job of `AGENTS.md` and the index, and a doc that
-opens by addressing one reader reads wrong to the other.
+on X" preambles: routing is the job of the documentation index, and a doc
+that opens by addressing one reader reads wrong to the other.
 
 State the reasoning behind non-obvious rules. The _why_ is what stops a rule
 being quietly undone in six months, and it's usually the part that can't be

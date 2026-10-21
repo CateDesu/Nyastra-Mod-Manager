@@ -255,6 +255,69 @@ describe("download", () => {
     },
   );
 
+  it.each([
+    { chunked: false, total: SMALL_FILE.length },
+    { chunked: true, total: SMALL_FILE.length },
+    { chunked: false, total: SMALL_FILE.length * 2 },
+    { chunked: true, total: SMALL_FILE.length * 2 },
+    { chunked: false, total: SMALL_FILE.length - 1 },
+    { chunked: true, total: SMALL_FILE.length - 1 },
+    { chunked: false, total: "*" },
+    { chunked: true, total: "*" },
+  ])(
+    "validates range response totals with chunked=$chunked and total=$total",
+    async ({ chunked, total }) => {
+      using route = server.route(({ req, res }) => {
+        if (req.method === "HEAD") {
+          res.writeHead(200, { "content-length": SMALL_FILE.length, "accept-ranges": "bytes" });
+          res.end();
+        } else {
+          const range = /^bytes=(\d+)-(\d+)$/.exec(req.headers.range!);
+          const start = Number(range![1]);
+          const end = Number(range![2]);
+          const body = SMALL_FILE.subarray(start, end + 1);
+          res.writeHead(206, {
+            "content-length": body.length,
+            "content-range": `bytes ${start}-${end}/${total}`,
+          });
+          res.end(body);
+        }
+        return Promise.resolve();
+      });
+      await using tmp = await makeTmpDir();
+      const destination = path.join(tmp.dir, "output");
+      if (!chunked) await writeFile(destination, SMALL_FILE.subarray(0, 200));
+      const transfer = download(
+        route.url,
+        destination,
+        {
+          resolver: urlResolver,
+          chunker: () =>
+            chunked
+              ? [
+                  { index: 0, range: { start: 0, end: 511 } },
+                  { index: 1, range: { start: 512, end: 1023 } },
+                ]
+              : [],
+        },
+        chunked
+          ? undefined
+          : { checkpoint: { etag: undefined, completedRanges: [{ start: 0, end: 199 }] } },
+      );
+      if (total === "*" || total === SMALL_FILE.length) {
+        await transfer;
+        expect(await readFile(destination)).toEqual(SMALL_FILE);
+      } else {
+        await expect(transfer).rejects.toMatchObject({ data: { kind: "http:protocol-violation" } });
+        if (!chunked) {
+          expect((await readFile(destination)).subarray(0, 200)).toEqual(
+            SMALL_FILE.subarray(0, 200),
+          );
+        }
+      }
+    },
+  );
+
   describe("non-chunked resume", () => {
     it("restarts a partial file when the server does not support ranges", async () => {
       using route = server.route(serveFile({ body: SMALL_FILE, acceptRanges: false }));

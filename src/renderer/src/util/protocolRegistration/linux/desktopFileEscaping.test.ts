@@ -88,17 +88,16 @@ describe("desktopFileEscaping", () => {
       // -> \r                  (string escape, [carriage return] -> \r )
       // -> "\r"                (added double quotes)
 
+      ["'", '"\'"'],
+      ["100%complete", '"100%%complete"'],
+      ["cat space%u", '"cat\\sspace%%u"'],
+
       ["thispathdoesnotneedescapequotes", "thispathdoesnotneedescapequotes"],
       // no " wrapping, because the string has not changed.
     ])("escapes %j to %j", (input: string, expected: string) => {
       expect(escapeDesktopExecFilePath(input)).toBe(expected);
     });
 
-    // % is not tested because spec says:
-    //
-    // > Field codes must not be used inside a quoted argument, the result of
-    // > field code expansion inside a quoted argument is undefined
-    //
-    // All of the arguments we generate are quoted, so % does not need escaping.
+    // Literal percent signs must survive desktop field-code expansion.
   });
 });

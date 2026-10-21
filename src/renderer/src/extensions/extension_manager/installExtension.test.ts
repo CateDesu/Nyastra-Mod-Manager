@@ -38,9 +38,9 @@ vi.mock("node:fs/promises", () => {
 
 // Regression test for #23295: previously cleared every `remove: true` flag
 // after install, which orphaned old-version folders. Verify path matching
-// handles key/folder-name divergence and case-insensitive comparison.
+// handles key/folder-name divergence and Linux path identity.
 describe("clearStaleRemovalFlags", () => {
-  const extensionsPath = path.join("C:", "ProgramData", "vortex", "plugins");
+  const extensionsPath = path.join("/profile", "plugins");
 
   const makeApi = (
     entries: Record<string, { path: string }>,
@@ -137,7 +137,7 @@ describe("clearStaleRemovalFlags", () => {
     expect(dispatch).toHaveBeenCalledWith(forgetExtension("crimson-desert-id"));
   });
 
-  it("treats path comparison as case-insensitive (Windows filesystem semantics)", () => {
+  it("preserves removal of a case-distinct Linux directory", () => {
     const destPath = path.join(extensionsPath, "ext-name");
     const { api, dispatch } = makeApi({
       "ext-name": { path: destPath.toUpperCase() },
@@ -145,7 +145,7 @@ describe("clearStaleRemovalFlags", () => {
 
     clearStaleRemovalFlags(api, ["ext-name"], destPath);
 
-    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(dispatch).not.toHaveBeenCalled();
   });
 
   it("does nothing when there are no matching installed entries", () => {

@@ -37,6 +37,8 @@ export class DialogManager implements IDialogManager {
   private mModuleName: string;
   private mImage: IHeaderImage;
   private mScriptPath: string;
+  private mEnded = false;
+  private mDisposed = false;
 
   public get instanceId(): string {
     return this.mInstanceId;
@@ -57,6 +59,9 @@ export class DialogManager implements IDialogManager {
   }
 
   public dispose = () => {
+    if (this.mDisposed) return;
+    this.mDisposed = true;
+    this.endDialog();
     this.mApi.store?.dispatch(clearDialog(this.mInstanceId));
   };
 
@@ -71,6 +76,7 @@ export class DialogManager implements IDialogManager {
     contCallback: fomodT.types.ContinueCallback,
     cancelCallback: fomodT.types.CancelCallback,
   ): void => {
+    if (this.mDisposed) return;
     log("debug", "Queuing FOMOD dialog", {
       instanceId: this.mInstanceId,
       moduleName,
@@ -105,6 +111,7 @@ export class DialogManager implements IDialogManager {
     installSteps: fomodT.types.IInstallStep[],
     currentStep: number,
   ): void => {
+    if (this.mEnded || this.mDisposed) return;
     log("debug", "Updating FOMOD dialog state", {
       instanceId: this.mInstanceId,
       currentStep,
@@ -139,6 +146,8 @@ export class DialogManager implements IDialogManager {
    * This is the callback passed to the native ModInstaller
    */
   public endDialog = (): void => {
+    if (this.mEnded) return;
+    this.mEnded = true;
     log("debug", "Ending FOMOD dialog", { instanceId: this.mInstanceId });
 
     try {
@@ -271,10 +280,8 @@ export class DialogManager implements IDialogManager {
     try {
       this.mCancelCB?.();
 
-      this.mApi.store.dispatch(endDialog(this.mInstanceId));
-
-      const dialogQueue = DialogQueue.getInstance(this.mApi);
-      dialogQueue.onDialogEnd(this.mInstanceId);
+      this.endDialog();
+      this.dispose();
     } catch (err) {
       log("error", "Failed to process FOMOD dialog cancellation", {
         instanceId: this.mInstanceId,

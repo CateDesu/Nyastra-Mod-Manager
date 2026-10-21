@@ -56,7 +56,7 @@ export async function checkFileLevelRequirements(
   const installedByChain = new Map<string, InstalledFile[]>();
 
   for (const f of installedFiles) {
-    enabledByUid.set(f.fileVersionUid, f.enabled);
+    enabledByUid.set(f.fileVersionUid, f.enabled || enabledByUid.get(f.fileVersionUid) === true);
 
     const chain = chainOf.get(f.fileVersionUid)?.modFileId;
     if (chain === undefined) continue;

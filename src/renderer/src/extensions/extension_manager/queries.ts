@@ -21,13 +21,11 @@ export function findInstalled(
   installedExtensions: Record<string, IExtensionState>,
   query: InstalledQuery,
 ): { key: string; extension: IExtensionState } | undefined {
-  const queryPath = "path" in query ? path.normalize(query.path).toLowerCase() : undefined;
+  const queryPath = "path" in query ? path.normalize(query.path) : undefined;
 
   const result = Object.entries(installedExtensions).find(([_, extension]) => {
     if (queryPath !== undefined)
-      return (
-        extension.path !== undefined && path.normalize(extension.path).toLowerCase() === queryPath
-      );
+      return extension.path !== undefined && path.normalize(extension.path) === queryPath;
     return matchesQuery(query as CatalogQuery, extension);
   });
 

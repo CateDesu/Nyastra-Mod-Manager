@@ -24,9 +24,13 @@ import { ProgressReporter } from "./progress";
 export type DownloadHandle<T = unknown> = {
   /** Globally unique identifier for this download. */
   readonly downloadId: string;
+  readonly dest: string;
 
   /** The promise resolves when the download completes. */
   readonly promise: Promise<void>;
+
+  /** Waits for an existing writer to close, without waiting for a queued transfer. */
+  waitForWrites: () => Promise<void>;
 
   /** Returns a snapshot of the current download state. */
   getState: () => DownloadState;
@@ -220,7 +224,9 @@ export class DownloadManager {
 
     log("debug", "queuing download", { downloadId, dest });
 
+    let hasStarted = false;
     const rawPromise = this.#downloadQueue.add(() => {
+      hasStarted = true;
       if (abortController.signal.aborted) {
         throw new VortexError("Download cancelled", { kind: "user-canceled", skipped: false });
       }
@@ -344,7 +350,9 @@ export class DownloadManager {
 
     const handle: DownloadHandle<T> = {
       downloadId,
+      dest,
       promise,
+      waitForWrites: () => (hasStarted ? settled : Promise.resolve()),
       getState,
       cancel,
       pause,

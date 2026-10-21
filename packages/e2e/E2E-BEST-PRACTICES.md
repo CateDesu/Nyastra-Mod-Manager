@@ -52,10 +52,6 @@ Start the isolated dev environment to get started:
 pnpm nx run @vortex/e2e:dev:isolated
 ```
 
-### Skills
-
-Skills and MCP servers are already configured for Claude Code to help write E2E tests. Use `/e2e-test <linear id | text>`.
-
 ### Fixtures
 
 Tests import from `../fixtures/vortex-app`, **not** `@playwright/test`:

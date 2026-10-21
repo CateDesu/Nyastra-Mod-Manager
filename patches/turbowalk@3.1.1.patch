@@ -1,0 +1,60 @@
+diff --git a/walk.js b/walk.js
+index b693db6889d07153b14f2256641d2759c244681e..04280039c704787e89c198332b4a9fa9c6f39378 100644
+--- a/walk.js
++++ b/walk.js	
+@@ -9,14 +9,25 @@ function walk(target,
+   let allFileNames;
+ 
+   return fs.readdir(target)
+-    .catch(err => (err.code === 'ENOENT')
++    .catch(err => (err.code === 'ENOENT' ||
++      (opt.skipInaccessible !== false && ['EACCES', 'EPERM'].includes(err.code)))
+       ? Promise.resolve([])
+       : Promise.reject(err))
+     .then((fileNames) => {
++      fileNames = opt.skipHidden === false ? fileNames : fileNames.filter(name => !name.startsWith('.'));
+       allFileNames = fileNames;
+       return Promise.map(fileNames, (statPath) =>
+-                         Promise.resolve(fs.lstat(path.join(target, statPath))).reflect(), { concurrency: 50 });
++                         Promise.resolve(fs.lstat(path.join(target, statPath), { bigint: opt.details === true })).reflect(), { concurrency: 50 });
+     }).then((res) => {
++      res.forEach(stat => {
++        if (stat.isRejected()) {
++          const err = stat.reason();
++          if (err.code !== 'ENOENT' &&
++              !(opt.skipInaccessible !== false && ['EACCES', 'EPERM'].includes(err.code))) {
++            throw err;
++          }
++        }
++      });
+       // use the stats results to generate a list of paths of the directories
+       // in the searched directory
+       const subDirs = res
+@@ -25,12 +36,23 @@ function walk(target,
+       callback(res.map((stat, idx) => stat.isFulfilled() ? {
+ 	filePath: path.join(target, allFileNames[idx]),
+ 	isDirectory: stat.value().isDirectory(),
+-	size: stat.value().size,
+-	mtime: stat.value().mtime,
++	isReparsePoint: stat.value().isSymbolicLink(),
++	size: Number(stat.value().size),
++	mtime: stat.value().mtime.getTime() / 1000,
++        ...(opt.details ? {
++          id: Number(stat.value().ino),
++          idStr: `${stat.value().dev}:${stat.value().ino}`,
++          linkCount: Number(stat.value().nlink),
++        } : {}),
+       } : undefined).filter(iter => iter !== undefined));
++      if (opt.recurse === false) return;
+       return Promise.mapSeries(subDirs, (subDir) =>
+-        walk(subDir, callback, options))
+-        .then(() => undefined);
++        walk(subDir, callback, options));
++    }).then(() => {
++      if (opt.terminators) {
++        callback([{ filePath: target, isDirectory: true, isReparsePoint: false,
++          isTerminator: true, size: 0, mtime: 0 }]);
++      }
+     });
+ }
+ 

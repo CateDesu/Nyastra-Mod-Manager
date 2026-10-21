@@ -275,6 +275,7 @@ export async function download<T>(
             etag: probe.etag ?? undefined,
             chunk: rangeChunk ?? undefined,
             expectedRemainingBytes,
+            expectedTotalBytes: probe.size,
           });
         },
         strategy.retry,
@@ -388,6 +389,7 @@ async function downloadStream(
     etag?: string;
     chunk?: Chunk;
     expectedRemainingBytes?: number;
+    expectedTotalBytes?: number;
   },
 ): Promise<void> {
   const { progress } = options;
@@ -401,12 +403,15 @@ async function downloadStream(
     // Wait for got to finish cookie processing before pulling bytes or validating headers.
     const [response] = (await once(stream, "response")) as [IncomingMessage];
     if (options.chunk) {
-      const range = /^bytes (\d+)-(\d+)\/(?:\d+|\*)$/.exec(response.headers["content-range"] ?? "");
+      const range = /^bytes (\d+)-(\d+)\/(\d+|\*)$/.exec(response.headers["content-range"] ?? "");
       if (
         response.statusCode !== 206 ||
         range === null ||
         Number(range[1]) !== options.chunk.range.start ||
-        Number(range[2]) !== options.chunk.range.end
+        Number(range[2]) !== options.chunk.range.end ||
+        (range[3] !== "*" &&
+          options.expectedTotalBytes !== undefined &&
+          Number(range[3]) !== options.expectedTotalBytes)
       ) {
         throw new VortexError("Server returned a different byte range", {
           kind: "http:protocol-violation",
@@ -490,6 +495,7 @@ async function downloadChunk(
   await downloadStream(got, endpoint, handle, chunk.range.start, {
     chunk,
     expectedRemainingBytes,
+    expectedTotalBytes: probe.size,
     etag: probe.etag,
     progress: options.progress,
     rateLimiter: options.rateLimiter,

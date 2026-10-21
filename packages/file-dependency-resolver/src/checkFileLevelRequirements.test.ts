@@ -133,6 +133,30 @@ const ports: ResolverPorts = {
 };
 
 describe("checkFileLevelRequirements", () => {
+  it.each([
+    [true, false],
+    [false, true],
+  ])(
+    "accepts an enabled copy of a file version regardless of duplicate order %j",
+    async (first, second) => {
+      const report = await checkFileLevelRequirements({
+        ports,
+        uninstalledFileVersionUids: new Set(),
+        installedFiles: [
+          { fileVersionUid: "1001", enabled: true },
+          { fileVersionUid: "2001", enabled: first },
+          { fileVersionUid: "2001", enabled: second },
+        ],
+      });
+      const branch = report.sources[0]!.dependencies.find(
+        (dependency) => dependency.definitionId === "3001",
+      )!.branches[0]!;
+      expect(branch.satisfyingEnabled).toEqual(["2001"]);
+      expect(branch.satisfyingDisabled).toEqual([]);
+      expect(branch.recommended).toBeUndefined();
+    },
+  );
+
   it("classifies satisfied / disabled / wrong-version / missing and recommends only when unowned", async () => {
     const report = await checkFileLevelRequirements({
       ports,

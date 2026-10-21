@@ -1,3 +1,5 @@
+import { writeFile } from "node:fs/promises";
+
 import { describe, expect, vi } from "vitest";
 
 import { makeProfile } from "../../../test-utils/builders";
@@ -25,6 +27,10 @@ describe("HTTP download installation", () => {
           await vi.advanceTimersByTimeAsync(0);
           expect(installed).not.toHaveBeenCalled();
 
+          await writeFile(h.start.mock.calls[0][0] as string, Buffer.alloc(100));
+          const finished = new Promise<void>((resolve) =>
+            h.events.once("did-finish-download", () => resolve()),
+          );
           const downloadId = "new-0";
           h.getStates.mockResolvedValue({
             [downloadId]: {
@@ -37,6 +43,7 @@ describe("HTTP download installation", () => {
             },
           });
           await vi.advanceTimersByTimeAsync(250);
+          await finished;
 
           expect(h.getState().persistent.downloads.files[downloadId].state).toBe("finished");
           expect(installed).toHaveBeenCalledTimes(install || automationInstall ? 1 : 0);

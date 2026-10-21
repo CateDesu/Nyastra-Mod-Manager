@@ -29,6 +29,18 @@ describe("startDialog", () => {
 });
 
 describe("endDialog", () => {
+  it("keeps another installer's dialog active when a queued or finished instance ends", () => {
+    const input = {
+      activeInstanceId: "active",
+      instances: { active: { info: { moduleName: "Active" } }, queued: {} },
+    };
+    for (const instanceId of ["queued", "finished"]) {
+      const result = installerUIReducer.reducers.END_FOMOD_DIALOG(input, { instanceId });
+      expect(result.activeInstanceId).toBe("active");
+      expect(result.instances.active).toEqual(input.instances.active);
+    }
+  });
+
   it("ends the installer dialog", () => {
     const instanceId = "testInstance";
     const input = {

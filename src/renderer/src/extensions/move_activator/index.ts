@@ -181,15 +181,11 @@ class DeploymentMethod extends LinkingDeployment {
     progressCB?: (files: number, total: number) => void,
   ): PromiseLike<IDeployedFile[]> {
     const deployment: IDeployment = this.context.newDeployment;
-    const lnkExtUpper = LNK_EXT.toUpperCase();
     const extLen = LNK_EXT.length;
     this.context.newDeployment = Object.keys(deployment).reduce(
       (prev: IDeployment, relPath: string) => {
-        if (path.extname(relPath) === lnkExtUpper) {
-          deployment[relPath].relPath = deployment[relPath].relPath.substr(
-            0,
-            relPath.length - extLen,
-          );
+        if (path.extname(relPath).toLowerCase() === LNK_EXT) {
+          deployment[relPath].relPath = deployment[relPath].relPath.slice(0, -extLen);
           prev[relPath.substr(0, relPath.length - extLen)] = deployment[relPath];
         } else {
           prev[relPath] = deployment[relPath];
@@ -203,26 +199,30 @@ class DeploymentMethod extends LinkingDeployment {
   }
 
   public deactivate(sourcePath: string, dataPath: string, sourceName: string): PromiseBB<void> {
-    return turbowalk(sourcePath, (entries) => {
-      if (this.context === undefined) {
-        return;
-      }
-      entries.forEach((entry) => {
-        if (!entry.isDirectory && path.extname(entry.filePath) === LNK_EXT) {
-          const relPath: string = path.relative(
-            sourcePath,
-            entry.filePath.substring(0, entry.filePath.length - LNK_EXT.length),
-          );
-          const normPath = this.normalize(relPath);
-          if (
-            this.context.newDeployment[normPath] !== undefined &&
-            this.context.newDeployment[normPath].source === sourceName
-          ) {
-            delete this.context.newDeployment[normPath];
-          }
+    return turbowalk(
+      sourcePath,
+      (entries) => {
+        if (this.context === undefined) {
+          return;
         }
-      });
-    });
+        entries.forEach((entry) => {
+          if (!entry.isDirectory && path.extname(entry.filePath) === LNK_EXT) {
+            const relPath: string = path.relative(
+              sourcePath,
+              entry.filePath.substring(0, entry.filePath.length - LNK_EXT.length),
+            );
+            const normPath = this.normalize(path.join(dataPath, relPath));
+            if (
+              this.context.newDeployment[normPath] !== undefined &&
+              this.context.newDeployment[normPath].source === sourceName
+            ) {
+              delete this.context.newDeployment[normPath];
+            }
+          }
+        });
+      },
+      { skipHidden: false, skipInaccessible: false },
+    );
   }
 
   public getDeployedPath(input: string): string {
@@ -243,6 +243,8 @@ class DeploymentMethod extends LinkingDeployment {
       },
       {
         details: true,
+        skipHidden: false,
+        skipInaccessible: false,
       },
     ).then(() => PromiseBB.map(links, (entry) => this.restoreLink(entry.filePath)));
   }

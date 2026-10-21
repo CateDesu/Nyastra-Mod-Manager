@@ -131,8 +131,6 @@ function forceLogoutForOauth_1_9(store: Redux.Store<IState>): PromiseBB<void> {
   const loggedIn = apiKey !== undefined || oauthCred !== undefined;
 
   log("info", "forceLogoutForOauth_1_9() migration function for pre-oauth (1.9) versions", {
-    apiKey: apiKey,
-    oauthCred: oauthCred,
     loggedIn: loggedIn,
   });
 
@@ -481,6 +479,8 @@ function migrate(store: Redux.Store<IState>, oldVersion?: string): PromiseBB<voi
   // by `applyAppMetadata` before any migration code gets to run, which would
   // make the semver filter below trivially false.
   const effectiveOldVersion = oldVersion ?? state.app.appVersion ?? "0.0.0";
+  // Fresh profiles have no historical data to migrate.
+  if (effectiveOldVersion === "") return PromiseBB.resolve();
   const alreadyApplied = state.app.migrations ?? [];
 
   const neccessaryMigrations = migrations

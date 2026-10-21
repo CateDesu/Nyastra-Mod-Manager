@@ -76,6 +76,8 @@ function isCaseSensitive(testPath: string): PromiseBB<boolean> {
       if (
         stats[1].isFulfilled() &&
         stats[2].isFulfilled() &&
+        stats[0].value().dev === stats[1].value().dev &&
+        stats[0].value().dev === stats[2].value().dev &&
         stats[0].value().ino === stats[1].value().ino &&
         stats[0].value().ino === stats[2].value().ino
       ) {

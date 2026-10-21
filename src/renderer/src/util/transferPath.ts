@@ -60,7 +60,7 @@ export function testPathTransfer(source: string, destination: string): PromiseBB
         const files = entries.filter((entry) => !entry.isDirectory);
         total += files.reduce((lhs, rhs) => lhs + rhs.size, 0);
       },
-      { skipHidden: false },
+      { skipHidden: false, skipInaccessible: false },
     ).then(() => PromiseBB.resolve(total));
   };
 
@@ -252,7 +252,7 @@ export function transferPath(
                     }),
                 );
         },
-        { details: false, skipHidden: false },
+        { details: false, skipHidden: false, skipInaccessible: false },
       ),
     )
     .then(() =>
@@ -300,7 +300,7 @@ export function cleanFailedTransfer(dirPath: string): PromiseBB<void> {
     (entries) => {
       files = files.concat(entries);
     },
-    { skipHidden: false, skipLinks: false, recurse: true },
+    { skipHidden: false, skipInaccessible: false, skipLinks: false, recurse: true },
   )
     .catch((err) => {
       const code = getErrorCode(err);

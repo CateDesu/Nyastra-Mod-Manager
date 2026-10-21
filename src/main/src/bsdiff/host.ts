@@ -47,9 +47,11 @@ function getWorker(): Worker {
       entry.resolve();
     }
   });
-  spawned.on("error", failAll);
+  spawned.on("error", (err: Error) => {
+    if (worker === spawned) failAll(err);
+  });
   spawned.on("exit", (code) => {
-    if (code !== 0) {
+    if (code !== 0 && worker === spawned) {
       failAll(new Error(`bsdiff worker stopped unexpectedly (exit code ${code})`));
     }
   });
@@ -86,8 +88,8 @@ export function patchFiles(oldPath: string, outputPath: string, patchPath: strin
 /** Terminate the worker if one is running. Call during app shutdown. */
 export async function shutdownBsdiffWorker(): Promise<void> {
   const running = worker;
-  worker = undefined;
   if (running !== undefined) {
+    failAll(new Error("bsdiff worker shut down"));
     await running.terminate();
   }
 }

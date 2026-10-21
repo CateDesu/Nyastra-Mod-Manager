@@ -1,3 +1,7 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import * as path from "node:path";
+
 import { vi } from "vitest";
 
 import { IPCDownloadAdapter } from "../IPCDownloadAdapter";
@@ -21,13 +25,18 @@ export interface IDownloadAdapterFixtures {
  * pay that cost.
  */
 export const test = harnessTest.extend<IDownloadAdapterFixtures>({
-  makeDownloadAdapter: async ({ task: _task }, use) => {
+  makeDownloadAdapter: async ({ task: _task }, provide) => {
     const savedApi = window.api;
+    const downloadDirectory = await mkdtemp(path.join(tmpdir(), "nyastra-download-test-"));
     vi.useFakeTimers();
-    await use((opts?: IDownloadAdapterOpts) =>
-      makeDownloadAdapterHarness(IPCDownloadAdapter, opts),
-    );
-    vi.useRealTimers();
-    window.api = savedApi;
+    try {
+      await provide((opts?: IDownloadAdapterOpts) =>
+        makeDownloadAdapterHarness(IPCDownloadAdapter, { downloadDirectory, ...opts }),
+      );
+    } finally {
+      vi.useRealTimers();
+      window.api = savedApi;
+      await rm(downloadDirectory, { recursive: true, force: true });
+    }
   },
 });

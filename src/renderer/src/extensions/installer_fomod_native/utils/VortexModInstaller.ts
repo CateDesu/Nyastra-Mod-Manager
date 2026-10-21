@@ -32,6 +32,7 @@ export class VortexModInstaller {
   // choices come from the input preset, not from Redux state. Skipping these
   // eliminates dozens of expensive main-thread TSFN callbacks per fomod mod.
   private mUnattended: boolean;
+  private mDisposed = false;
 
   private constructor(
     api: IExtensionApi,
@@ -61,6 +62,7 @@ export class VortexModInstaller {
   }
 
   public dispose() {
+    this.mDisposed = true;
     log("debug", "Disposing VortexModInstaller", {
       instanceId: this.mInstanceId,
     });
@@ -131,7 +133,7 @@ export class VortexModInstaller {
     contCallback: fomodT.types.ContinueCallback,
     cancelCallback: fomodT.types.CancelCallback,
   ): void => {
-    if (this.mUnattended) {
+    if (this.mUnattended || this.mDisposed) {
       return;
     }
     log("debug", "Starting FOMOD dialog", { instanceId: this.mInstanceId });
@@ -153,7 +155,7 @@ export class VortexModInstaller {
     installSteps: fomodT.types.IInstallStep[],
     currentStepId: number,
   ): void => {
-    if (this.mUnattended) {
+    if (this.mUnattended || this.mDisposed) {
       return;
     }
     if (!this.mDialogManager) {
@@ -179,7 +181,7 @@ export class VortexModInstaller {
    * Delegates to DialogManager instance
    */
   private uiEndDialog = (): void => {
-    if (this.mUnattended) {
+    if (this.mUnattended || this.mDisposed) {
       return;
     }
     if (!this.mDialogManager) {

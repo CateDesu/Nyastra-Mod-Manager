@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { VortexError } from "@vortex/shared";
 import { QualifiedPath } from "@vortex/shared/filesystem";
 import { NativePathResolver } from "@vortex/shared/filesystem";
-import { afterEach, assert, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { NodeFileSystemBackendImpl } from "./backend";
 import { NodeFileSystemImpl } from "./filesystem-impl";
@@ -35,6 +35,21 @@ describe("NodeFileSystemImpl", () => {
     await fs.writeFile(target, new Uint8Array([1, 2, 3]));
     const bytes = await fs.readFile(target);
     expect(Array.from(bytes)).toEqual([1, 2, 3]);
+  });
+
+  it("does not overwrite a dangling symlink unless replacement is requested", async () => {
+    await nodeFs.writeFile(join(root, "source"), "new data");
+    await nodeFs.symlink("missing", join(root, "destination"));
+
+    await expect(fs.move(rootQP.join("source"), rootQP.join("destination"))).rejects.toMatchObject({
+      data: { kind: "fs:already-exists" },
+    });
+    expect(await nodeFs.readlink(join(root, "destination"))).toBe("missing");
+    expect(await nodeFs.readFile(join(root, "source"), "utf8")).toBe("new data");
+
+    await fs.move(rootQP.join("source"), rootQP.join("destination"), { overwrite: true });
+    expect(await nodeFs.readFile(join(root, "destination"), "utf8")).toBe("new data");
+    await expect(nodeFs.lstat(join(root, "source"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("stats existing files and reports missing ones", async () => {
@@ -87,6 +102,7 @@ describe("NodeFileSystemImpl", () => {
     expect(qp.basename).toBe("x.txt");
     assert(status.isFile);
     expect(status.size).toBe(2);
+    await iter.return?.(undefined);
   });
 
   it("rehydrates nested entries under the root QP when recursive", async () => {
@@ -105,6 +121,43 @@ describe("NodeFileSystemImpl", () => {
     expect(seen.some((p) => p.endsWith(`${rootQP.path}/sub/nested.txt`))).toBe(true);
   });
 
+  it("enumerates names beginning with two dots inside the selected directory", async () => {
+    await nodeFs.mkdir(join(root, "..cache"));
+    await nodeFs.writeFile(join(root, "..cache", "data.txt"), "data");
+    await nodeFs.writeFile(join(root, "..manifest.acf"), "manifest");
+    const iterator = await fs.enumerateDirectory(rootQP, { recursive: true, types: "files" });
+    const seen: string[] = [];
+    try {
+      for await (const entry of iterator) seen.push(entry.path);
+    } finally {
+      await iterator.return?.(undefined);
+    }
+    expect(seen.toSorted()).toEqual(
+      [rootQP.join("..cache", "data.txt").path, rootQP.join("..manifest.acf").path].toSorted(),
+    );
+  });
+
+  it("still rejects entries outside the selected directory", async () => {
+    const backend = new NodeFileSystemBackendImpl();
+    vi.spyOn(backend, "enumerateDirectory").mockResolvedValue({
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+      next: () => Promise.resolve({ done: false, value: join(root, "..", "outside.txt") }),
+      return: () => Promise.resolve({ done: true, value: undefined }),
+    });
+    const guarded = new NodeFileSystemImpl(
+      backend,
+      new PathResolverRegistryImpl([new NativePathResolver()]),
+    );
+    const iterator = await guarded.enumerateDirectory(rootQP);
+    try {
+      await expect(iterator.next()).rejects.toMatchObject({ data: { kind: "argument-invalid" } });
+    } finally {
+      await iterator.return?.(undefined);
+    }
+  });
+
   it("closes the backend iterator when return() is called", async () => {
     for (const name of ["a", "b", "c"]) {
       await nodeFs.writeFile(join(root, name), name);
@@ -112,11 +165,44 @@ describe("NodeFileSystemImpl", () => {
     const iter = await fs.enumerateDirectory(rootQP, { types: "files" });
     await iter.next();
     await iter.return?.(undefined);
-    // After return, next() must report done without throwing (the underlying
-    // Dir handle is closed, but the wrapper swallows that in return()).
-    const tail = await iter.next().catch(() => ({ done: true, value: undefined }));
+    // Closed iterators remain exhausted.
+    const tail = await iter.next();
     expect(tail.done).toBe(true);
   });
+
+  it.each(["complete", "early", "unread", "error"])(
+    "releases the real directory handle after %s iteration",
+    async (ending) => {
+      const openHandles = async () => {
+        const descriptors = await nodeFs.readdir("/proc/self/fd");
+        const targets = await Promise.all(
+          descriptors.map((fd) => nodeFs.readlink(`/proc/self/fd/${fd}`).catch(() => "")),
+        );
+        return targets.filter((target) => target === root).length;
+      };
+      if (ending === "error") await nodeFs.symlink("loop", join(root, "loop"));
+      else await nodeFs.writeFile(join(root, "entry"), "data");
+      const iterator = await fs.enumerateDirectory(rootQP, { includeStatus: true });
+      try {
+        expect(await openHandles()).toBe(1);
+        if (ending === "error") {
+          await expect(iterator.next()).rejects.toThrow();
+        } else if (ending === "unread") {
+          await iterator.return?.(undefined);
+        } else if (ending === "early") {
+          for await (const _entry of iterator) break;
+        } else {
+          for await (const _entry of iterator) {
+            /* drain the directory */
+          }
+        }
+        expect(await openHandles()).toBe(0);
+        expect((await iterator.next()).done).toBe(true);
+      } finally {
+        await iterator.return?.(undefined);
+      }
+    },
+  );
 
   it("rejects paths whose scheme has no registered resolver", async () => {
     const unknown = QualifiedPath.of({

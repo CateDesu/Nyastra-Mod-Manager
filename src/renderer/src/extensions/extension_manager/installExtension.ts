@@ -128,10 +128,10 @@ export function clearStaleRemovalFlags(
   const extState = state.app.extensions ?? {};
   // Compare paths, not key strings: info.json `id` can decouple the state key
   // from the folder basename, and the archive-name fallback differs again.
-  const normalizedDest = path.normalize(destPath).toLowerCase();
+  const normalizedDest = path.normalize(destPath);
   removedKeys.forEach((key) => {
     const prevPath = extState[key]?.path;
-    if (prevPath !== undefined && path.normalize(prevPath).toLowerCase() === normalizedDest) {
+    if (prevPath !== undefined && path.normalize(prevPath) === normalizedDest) {
       api.store.dispatch(forgetExtension(key));
     }
   });
@@ -224,7 +224,7 @@ function installExtension(
   archivePath: string,
   data?: { catalogEntry?: IAvailableExtension; analytics?: InstallAnalytics },
 ): Promise<void> {
-  const key = path.basename(archivePath).toLowerCase();
+  const key = path.basename(archivePath);
   const active = activeInstalls.get(key);
 
   if (active !== undefined) {
@@ -329,6 +329,9 @@ async function installExtensionImpl(
       }
 
       const dirName = sanitize(extensionInfo?.id ?? path.basename(archivePath));
+      if (dirName === "" || dirName === "." || dirName === "..") {
+        throw new DataInvalid(`Invalid extension directory name: "${dirName}"`);
+      }
       destPath = path.join(extensionsPath, dirName);
 
       // Keys whose previous-version state entries were marked for removal during

@@ -954,6 +954,7 @@ overrides:
 
 patchedDependencies:
   '@nexusmods/fomod-installer-native@0.13.4': beaeb653029a6d0dda9c937d9fa644bba6073248c25e450ac193392f19ce83b6
+  turbowalk@3.1.1: f3a81169d1bb1bcdf435e126127abdb6573f385a48bbf8417dae5d1ff0d2f2ad
 
 importers:
 
@@ -1274,7 +1275,7 @@ importers:
         version: 2.4.2(redux@4.2.1)
       turbowalk:
         specifier: 'catalog:'
-        version: https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f
+        version: https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f(patch_hash=f3a81169d1bb1bcdf435e126127abdb6573f385a48bbf8417dae5d1ff0d2f2ad)
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
@@ -1569,7 +1570,7 @@ importers:
         version: 2.4.2(redux@4.2.1)
       turbowalk:
         specifier: 'catalog:'
-        version: https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f
+        version: https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f(patch_hash=f3a81169d1bb1bcdf435e126127abdb6573f385a48bbf8417dae5d1ff0d2f2ad)
       vortex-parse-ini:
         specifier: workspace:*
         version: link:../../packages/parse-ini
@@ -1656,7 +1657,7 @@ importers:
         version: 7.7.4
       turbowalk:
         specifier: 'catalog:'
-        version: https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f
+        version: https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f(patch_hash=f3a81169d1bb1bcdf435e126127abdb6573f385a48bbf8417dae5d1ff0d2f2ad)
       xml2js:
         specifier: 'catalog:'
         version: 0.5.0
@@ -1726,7 +1727,7 @@ importers:
         version: 2.2.17
       turbowalk:
         specifier: 'catalog:'
-        version: https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f
+        version: https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f(patch_hash=f3a81169d1bb1bcdf435e126127abdb6573f385a48bbf8417dae5d1ff0d2f2ad)
       vitest:
         specifier: 'catalog:'
         version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@24.12.2)(@vitest/coverage-v8@4.1.9)(@vitest/ui@4.1.9)(happy-dom@20.10.6)(vite@8.1.3)
@@ -1765,7 +1766,7 @@ importers:
         version: 7.7.4
       turbowalk:
         specifier: 'catalog:'
-        version: https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f
+        version: https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f(patch_hash=f3a81169d1bb1bcdf435e126127abdb6573f385a48bbf8417dae5d1ff0d2f2ad)
 
   extensions/games/game-breakingwheel:
     devDependencies:
@@ -1792,7 +1793,7 @@ importers:
         version: 7.7.4
       turbowalk:
         specifier: 'catalog:'
-        version: https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f
+        version: https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f(patch_hash=f3a81169d1bb1bcdf435e126127abdb6573f385a48bbf8417dae5d1ff0d2f2ad)
 
   extensions/games/game-conanexiles:
     devDependencies:
@@ -2251,7 +2252,7 @@ importers:
         version: 7.7.4
       turbowalk:
         specifier: 'catalog:'
-        version: https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f
+        version: https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f(patch_hash=f3a81169d1bb1bcdf435e126127abdb6573f385a48bbf8417dae5d1ff0d2f2ad)
 
   extensions/games/game-starbound:
     devDependencies:
@@ -2287,7 +2288,7 @@ importers:
         version: 7.7.4
       turbowalk:
         specifier: 'catalog:'
-        version: https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f
+        version: https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f(patch_hash=f3a81169d1bb1bcdf435e126127abdb6573f385a48bbf8417dae5d1ff0d2f2ad)
     devDependencies:
       '@nexusmods/nexus-api':
         specifier: 'catalog:'
@@ -2496,7 +2497,7 @@ importers:
         version: 2.2.17
       turbowalk:
         specifier: 'catalog:'
-        version: https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f
+        version: https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f(patch_hash=f3a81169d1bb1bcdf435e126127abdb6573f385a48bbf8417dae5d1ff0d2f2ad)
       vortex-parse-ini:
         specifier: workspace:*
         version: link:../../../packages/parse-ini
@@ -2812,7 +2813,7 @@ importers:
         version: 4.2.1
       turbowalk:
         specifier: 'catalog:'
-        version: https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f
+        version: https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f(patch_hash=f3a81169d1bb1bcdf435e126127abdb6573f385a48bbf8417dae5d1ff0d2f2ad)
 
   extensions/mod-dependency-manager:
     devDependencies:
@@ -2929,7 +2930,7 @@ importers:
         version: 2.2.17
       turbowalk:
         specifier: 'catalog:'
-        version: https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f
+        version: https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f(patch_hash=f3a81169d1bb1bcdf435e126127abdb6573f385a48bbf8417dae5d1ff0d2f2ad)
 
   extensions/mod-highlight:
     devDependencies:
@@ -2986,7 +2987,7 @@ importers:
         version: 44.2.0(supports-color@10.2.2)
       turbowalk:
         specifier: 'catalog:'
-        version: https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f
+        version: https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f(patch_hash=f3a81169d1bb1bcdf435e126127abdb6573f385a48bbf8417dae5d1ff0d2f2ad)
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
@@ -3240,7 +3241,7 @@ importers:
         version: 4.2.1
       turbowalk:
         specifier: 'catalog:'
-        version: https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f
+        version: https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f(patch_hash=f3a81169d1bb1bcdf435e126127abdb6573f385a48bbf8417dae5d1ff0d2f2ad)
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
@@ -3345,7 +3346,7 @@ importers:
         version: 0.33.1(react-dom@18.3.1)(react@18.3.1)
       turbowalk:
         specifier: 'catalog:'
-        version: https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f
+        version: https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f(patch_hash=f3a81169d1bb1bcdf435e126127abdb6573f385a48bbf8417dae5d1ff0d2f2ad)
 
   extensions/script-extender-installer:
     dependencies:
@@ -4109,7 +4110,7 @@ importers:
         version: 6.0.1
       turbowalk:
         specifier: 'catalog:'
-        version: https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f
+        version: https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f(patch_hash=f3a81169d1bb1bcdf435e126127abdb6573f385a48bbf8417dae5d1ff0d2f2ad)
       universal-analytics:
         specifier: 'catalog:'
         version: 0.4.23(supports-color@10.2.2)
@@ -4774,7 +4775,7 @@ importers:
         version: 0.1.0
       turbowalk:
         specifier: 'catalog:'
-        version: https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f
+        version: https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f(patch_hash=f3a81169d1bb1bcdf435e126127abdb6573f385a48bbf8417dae5d1ff0d2f2ad)
       universal-analytics:
         specifier: 'catalog:'
         version: 0.4.23(supports-color@10.2.2)
@@ -20078,7 +20079,7 @@ snapshots:
     dependencies:
       safe-buffer: 5.2.1
 
-  turbowalk@https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f:
+  turbowalk@https://codeload.github.com/Nexus-Mods/node-turbowalk/tar.gz/3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f(patch_hash=f3a81169d1bb1bcdf435e126127abdb6573f385a48bbf8417dae5d1ff0d2f2ad):
     dependencies:
       fs-extra: 8.1.0
 

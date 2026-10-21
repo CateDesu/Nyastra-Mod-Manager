@@ -1,9 +1,8 @@
 # Vortex Documentation
 
-Project and coding documentation. To set up and build Vortex, start with
+Program and coding documentation. To set up and build Vortex, start with
 [.github/CONTRIBUTING.md](../.github/CONTRIBUTING.md). For code style, see
-[docs/code-style.md](code-style.md). Agents should also read
-[AGENTS.md](../AGENTS.md).
+[docs/code-style.md](code-style.md).
 
 ## Start here
 
