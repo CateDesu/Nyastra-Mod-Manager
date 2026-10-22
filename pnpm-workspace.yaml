@@ -108,8 +108,8 @@ catalog:
   "@types/xml2js": 0.4.14
   "@typescript-eslint/utils": 8.62.1
   "@vitejs/plugin-react": 6.0.3
-  "@vitest/coverage-v8": 4.1.9
-  "@vitest/ui": 4.1.9
+  "@vitest/coverage-v8": 4.1.12
+  "@vitest/ui": 4.1.12
   "@welldone-software/why-did-you-render": 7.0.1
   babel-loader: 10.1.1
   bbcode-to-react: github:TanninOne/bbcode-to-react#c67356006470e5066ea447e04a3968dca367339d
@@ -136,7 +136,10 @@ catalog:
   dnd-core: 9.5.1
   draggabilly: 2.4.1
   drivelist: github:TanninOne/drivelist#720d1890db11482ec05fc0f6aa176cfa6e6844dd
-  electron: 44.2.0
+  # TODO: Update Electron once it includes the Node 24.22.1 security fixes.
+  # Electron 44.9.3 bundles Node 24.22.0 despite the separate build runtime pin.
+  # Rebuild and verify the bundled Node version and eMudhra certificate rejection.
+  electron: 44.9.3
   electron-builder: 24.13.3
   electron-context-menu: 3.6.1
   electron-extension-installer: 2.0.1
@@ -250,9 +253,9 @@ catalog:
   universal-analytics: 0.4.23
   uuid: 3.4.0
   vite-plugin-doctest: 2.0.0
-  vite: 8.1.3
+  vite: 8.1.6
   vitest-fetch-mock: 0.4.5
-  vitest: 4.1.9
+  vitest: 4.1.12
   webpack: 5.108.4
   webpack-cli: 7.2.1
   webpack-node-externals: 3.0.0
@@ -275,6 +278,7 @@ failIfNoMatch: true
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
   - "@nexusmods/*"
+  - "electron@44.9.3"
 minimumReleaseAgeIgnoreMissingTime: true
 minimumReleaseAgeStrict: true
 
@@ -321,7 +325,7 @@ allowBuilds:
   font-scanner: true
   leveldown: true
   loot@https://codeload.github.com/Nexus-Mods/node-loot/tar.gz/44306bda0dd9c54e1e38c8ab217afedffd4510aa: true
-  node@runtime:24.17.0: true
+  node@runtime:24.22.1: true
   nx: false
   xxhash-addon: true
 
