@@ -22,6 +22,10 @@ The Astra mascot in assets/images/nyastra.png was generated for this program.
 Its generation prompt and tool record are in assets/images/nyastra.prompt.txt.
 No reference artwork was supplied for that generation.
 
+The bundled 7-Zip 26.05 executable is copyright Igor Pavlov and its contributors.
+Its license is retained at node_modules/7z-bin/License.txt in the runtime.
+Unmodified source: https://github.com/ip7z/7zip/tree/26.05.
+
 Nexus Mods website addresses, accounts, services and download protocols retain
 their service names. Game names and artwork identify their respective games.
 See LICENSE.md and Dependency Report.md in the packaged program for licenses.

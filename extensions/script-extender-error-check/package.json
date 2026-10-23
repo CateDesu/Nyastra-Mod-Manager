@@ -11,7 +11,7 @@
   "author": "Black Tree Gaming Ltd.",
   "license": "GPL-3.0",
   "devDependencies": {
-    "7z-bin": "catalog:",
+    "7z-bin": "workspace:*",
     "@nexusmods/vortex-api": "workspace:*",
     "@types/node": "catalog:",
     "@types/react": "catalog:",

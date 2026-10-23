@@ -10,7 +10,7 @@
   "author": "Pickysaurus",
   "license": "GPL-3.0",
   "devDependencies": {
-    "7z-bin": "catalog:",
+    "7z-bin": "workspace:*",
     "@nexusmods/nexus-api": "catalog:",
     "@types/bluebird": "catalog:",
     "@types/lodash": "catalog:",

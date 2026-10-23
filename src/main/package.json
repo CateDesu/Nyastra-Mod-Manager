@@ -3,7 +3,7 @@
   "name": "@vortex/main",
   "author": "Black Tree Gaming Ltd.",
   "license": "GPL-3.0-only",
-  "version": "2.9.1",
+  "version": "2.9.2",
   "private": true,
   "type": "commonjs",
   "main": "build/main.cjs",

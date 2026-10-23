@@ -1,0 +1,24 @@
+{
+  "$schema": "https://www.schemastore.org/package.json",
+  "name": "7z-bin",
+  "version": "26.5.0",
+  "description": "7-Zip 26.05 for the Linux x64 runtime",
+  "private": true,
+  "main": "index.cjs",
+  "license": "SEE LICENSE IN License.txt",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "bin": {
+    "7z": "bin/7zzs"
+  },
+  "files": [
+    "index.cjs",
+    "bin/7zzs",
+    "License.txt",
+    "README.md"
+  ]
+}

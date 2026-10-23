@@ -18,6 +18,7 @@
  * exactly the corruption this guards against, and fails the run.
  */
 
+import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import { createRequire } from "node:module";
 import * as path from "node:path";
@@ -105,3 +106,15 @@ if (mismatches > 0) {
   );
   process.exit(1);
 }
+
+const archiveTool = "node_modules/7z-bin/bin/7zzs";
+if (!asar.statFile(asarPath, archiveTool).unpacked) {
+  throw new Error("the bundled archive executable must be unpacked");
+}
+const archiveVersion = execFileSync(path.join(`${asarPath}.unpacked`, archiveTool), [], {
+  encoding: "utf8",
+});
+if (!/7-Zip \(z\) 26\.05/.test(archiveVersion)) {
+  throw new Error("the packaged archive executable must be 7-Zip 26.05");
+}
+console.log("verified packaged 7-Zip 26.05 executable");

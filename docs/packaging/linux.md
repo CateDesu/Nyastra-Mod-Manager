@@ -150,6 +150,20 @@ node scripts/smoke-linux.mjs dist/linux-unpacked/nyastra-mod-manager
 node linux/extension-adaptations/verify.mjs --source-plugins /path/to/original/plugins
 ```
 
+CI also runs `node scripts/audit-runtime.mjs` and
+`node --test scripts/archive-runtime.test.mjs`. The dependency audit prints the
+remaining request, uuid, d3-color and braces findings and rejects new advisories.
+Request and braces have no published fixed version. Updating uuid and d3-color
+needs a separate API migration. Archive checks exercise extension and node-7z
+resolution plus ZIP, 7z and XZ extraction. Packaging verifies the actual bundled
+7-Zip executable as well.
+
+The retained electron-builder 24 collector preserves nested dependency versions.
+Its AppImage launcher is replaced with `scripts/AppRun.sh` to fix the empty
+search path issue in CVE-2026-54672. Launcher tests cover unset and empty
+environment variables. Packaging extracts the actual AppRun and verifies it
+matches the safe template before allowing publication.
+
 The startup check uses a disposable profile and needs a display. CI uses Xvfb
 and a sandbox helper prepared on its disposable runner. Extension verification
 needs original supported third-party plugins, which are not bundled here.

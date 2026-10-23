@@ -352,19 +352,33 @@ test(
       "scripts/releases/cleanup-builds.mjs",
       await readFile(new URL("./cleanup-builds.mjs", import.meta.url), "utf8"),
     );
+    for (const filename of ["verify-appimage.mjs", "AppRun.sh"])
+      await put(
+        `scripts/${filename}`,
+        await readFile(new URL(`../${filename}`, import.meta.url), "utf8"),
+      );
     await symlink(
       new URL("./node_modules", import.meta.url),
       path.join(root, "scripts/releases/node_modules"),
       "dir",
     );
     await put("node_modules/electron-builder/package.json", '{"main":"cli.js"}');
+    const imageStub = `#!${process.execPath}
+const fs = require('node:fs');
+fs.mkdirSync('squashfs-root');
+const launcher = process.env.FIXTURE_UNSAFE_APPIMAGE === 'true' ? 'unsafe launcher' :
+  fs.readFileSync(${JSON.stringify(path.join(root, "scripts/AppRun.sh"))}, 'utf8')
+    .replace('{{.ExecutableName}}', 'nyastra-mod-manager');
+fs.writeFileSync('squashfs-root/AppRun', launcher);
+`;
     await put(
       "node_modules/electron-builder/cli.js",
       `
 const fs = require('node:fs');
 const path = require('node:path');
 for (const ext of process.env.FIXTURE_BUILD_FORMATS.split(','))
-  fs.writeFileSync(path.resolve('../../dist/nyastra-${version}-linux-x64.' + ext), 'new build');
+  fs.writeFileSync(path.resolve('../../dist/nyastra-${version}-linux-x64.' + ext),
+    ext === 'AppImage' ? ${JSON.stringify(imageStub)} : 'new build', { mode: 0o755 });
 process.exit(Number(process.env.FIXTURE_BUILD_STATUS));
 `,
     );
@@ -376,13 +390,14 @@ process.exit(Number(process.env.FIXTURE_BUILD_STATUS));
     );
     await put("helper", "fixture helper");
     for (const name of buildNames("2.0.0")) await put(`dist/${name}`, "old build");
-    const run = (status, formats = "zip,AppImage,deb") =>
+    const run = (status, formats = "zip,AppImage,deb", unsafe = false) =>
       spawnSync(process.execPath, [path.join(root, "src/main/package-linux.mjs")], {
         cwd: root,
         env: {
           ...process.env,
           FIXTURE_BUILD_STATUS: String(status),
           FIXTURE_BUILD_FORMATS: formats,
+          FIXTURE_UNSAFE_APPIMAGE: String(unsafe),
         },
         encoding: "utf8",
       });
@@ -392,6 +407,11 @@ process.exit(Number(process.env.FIXTURE_BUILD_STATUS));
       assert.equal(await readFile(path.join(root, "dist", name), "utf8"), "old build");
     const partial = run(0, "zip");
     assert.equal(partial.status, 0, partial.stderr);
+    for (const name of buildNames("2.0.0"))
+      assert.equal(await readFile(path.join(root, "dist", name), "utf8"), "old build");
+    const unsafe = run(0, "zip,AppImage,deb", true);
+    assert.equal(unsafe.status, 1, unsafe.stderr);
+    assert.match(unsafe.stderr, /safe search path launcher/);
     for (const name of buildNames("2.0.0"))
       assert.equal(await readFile(path.join(root, "dist", name), "utf8"), "old build");
     const succeeded = run(0);

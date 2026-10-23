@@ -13,7 +13,6 @@ packages:
   - ./extensions/games/*
 
 catalog:
-  7z-bin: github:Nexus-Mods/7z-bin#3298c42e69e3220dc39694bc2f610c077c3e213a
   "@babel/core": 7.29.7
   "@babel/polyfill": 7.12.1
   "@babel/preset-env": 7.29.2
@@ -162,12 +161,12 @@ catalog:
   happy-dom: 20.10.6
   husky: 9.1.7
   i18next: 21.10.0
-  i18next-fs-backend: 2.6.1
+  i18next-fs-backend: 2.6.6
   iconv-lite: 0.5.2
   immutability-helper: 3.1.1
   ini: 6.0.0
   interweave: 12.9.0
-  js-yaml: 4.1.1
+  js-yaml: 4.3.2
   json-loader: 0.5.7
   json-socket: github:foi/node-json-socket#d56c8e2938fa4284c4001b815d9b6e4a92b5c07b
   jsonwebtoken: 9.0.3
@@ -175,7 +174,7 @@ catalog:
   levelup: 4.4.0
   limiter: 3.0.0
   lint-staged: 17.0.8
-  lodash: 4.17.23
+  lodash: 4.18.1
   loot: github:Nexus-Mods/node-loot#44306bda0dd9c54e1e38c8ab217afedffd4510aa
   lru-cache: 11.2.7
   markdown-ast: 0.2.1
@@ -189,7 +188,7 @@ catalog:
   node-abi: 4.35.0
   normalize-url: 6.1.0
   numeral: 2.0.6
-  nx: 23.0.1
+  nx: 23.2.1
   octokit: 5.0.5
   openapi-fetch: 0.17.0
   openapi-typescript: 7.13.0
@@ -240,7 +239,7 @@ catalog:
   tailwindcss: 4.3.2
   temporal-polyfill: 1.0.4
   terser-webpack-plugin: 5.6.1
-  tmp: 0.1.0
+  tmp: 0.2.7
   tough-cookie: 6.0.1
   ts-loader: 9.6.2
   ts-v-gen: 1.0.3
@@ -262,7 +261,7 @@ catalog:
   which: 1.3.1
   winston: 2.4.7
   write-file-atomic: 3.0.3
-  ws: 7.5.10
+  ws: 7.5.13
   xml2js: 0.5.0
   xxhash-addon: 2.1.0
   zod: 4.4.3
@@ -298,7 +297,29 @@ peerDependencyRules:
     "@nosferatu500/react-dnd-scrollzone>react-dnd": "14"
 
 overrides:
+  "node-7z>7z-bin": "workspace:*"
   "turbowalk>winapi-bindings": "-"
+  # request pins an older minor that predates the multipart security fixes.
+  "request>form-data": 2.5.6
+  # request uses the synchronous CookieJar API retained in tough-cookie 4.
+  "request>tough-cookie": 4.1.4
+  # The packager uses tar.create, which retains its API in tar 7.
+  "app-builder-lib>tar": 7.5.22
+  # Keep fixed releases where transitive parents pin vulnerable versions.
+  "@xmldom/xmldom@<0.8.15": 0.8.15
+  "axios@>=1 <1.20.0": 1.20.0
+  "body-parser@>=1 <1.20.6": 1.20.8
+  "brace-expansion@>=5 <5.0.12": 5.0.12
+  "builder-util-runtime@>=9 <9.7.0": 9.7.0
+  "fast-uri@>=3 <3.1.8": 3.1.9
+  "follow-redirects@>=1 <1.16.1": 1.16.1
+  "js-yaml@>=4 <4.3.2": 4.3.2
+  "lodash@>=4 <4.18.1": 4.18.1
+  "path-to-regexp@<0.1.13": 0.1.13
+  "proxy-addr@>=2 <2.0.8": 2.0.8
+  "qs@>=6 <6.16.0": 6.16.1
+  "smol-toml@>=1 <1.8.1": 1.9.1
+  "tinypool@>=2 <2.1.2": 2.1.2
   "@types/react": "18"
   "@types/react-dom": "18"
   node-addon-api: 8.5.0

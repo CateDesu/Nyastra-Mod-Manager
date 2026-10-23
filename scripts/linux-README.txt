@@ -1,8 +1,8 @@
 Nyastra's Mod Manager for Linux
 
-Testing preview v1.01.
+Testing preview v1.02.
 Independent GPL-3.0 fork of Nexus-Mods/Vortex, maintained by CateDesu.
-Source: https://github.com/CateDesu/Nyastra-Mod-Manager/tree/v2.9.1
+Source: https://github.com/CateDesu/Nyastra-Mod-Manager/tree/v2.9.2
 Support: https://github.com/CateDesu/Nyastra-Mod-Manager/issues
 
 Extract the ZIP and run ./install.sh. Open Nyastra's Mod Manager from the menu
