@@ -264,7 +264,7 @@ catalog:
   ws: 7.5.13
   xml2js: 0.5.0
   xxhash-addon: 2.1.0
-  zod: 4.4.3
+  zod: 4.6.6
 
 blockExoticSubdeps: false
 catalogMode: strict
@@ -308,7 +308,7 @@ overrides:
   # Keep fixed releases where transitive parents pin vulnerable versions.
   "@xmldom/xmldom@<0.8.15": 0.8.15
   "axios@>=1 <1.20.0": 1.20.0
-  "body-parser@>=1 <1.20.6": 1.20.8
+  "body-parser@>=1 <1.20.9": 1.20.9
   "brace-expansion@>=5 <5.0.12": 5.0.12
   "builder-util-runtime@>=9 <9.7.0": 9.7.0
   "fast-uri@>=3 <3.1.8": 3.1.9

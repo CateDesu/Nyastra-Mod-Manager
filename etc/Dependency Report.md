@@ -131,4 +131,4 @@ This is a list of all modules leaked by Vortex to extensions. Any module listed 
 | ws | 7.5.13 |
 | xml2js | 0.5.0 |
 | xxhash-addon | 2.1.0 |
-| zod | 4.4.3 |
+| zod | 4.6.6 |
