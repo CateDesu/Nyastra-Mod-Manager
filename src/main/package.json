@@ -252,7 +252,6 @@
     "@tailwindcss/cli": "catalog:",
     "@tanstack/react-virtual": "catalog:",
     "@types/bluebird": "catalog:",
-    "@types/uuid": "catalog:",
     "@vortex/nexus-api-v3": "workspace:*",
     "@vortex/shared": "workspace:*",
     "bbcode-to-react": "catalog:",
@@ -267,7 +266,6 @@
     "cytoscape": "catalog:",
     "cytoscape-cose-bilkent": "catalog:",
     "cytoscape-edgehandles": "catalog:",
-    "d3": "catalog:",
     "dayjs": "catalog:",
     "dequal": "catalog:",
     "dnd-core": "catalog:",
@@ -345,7 +343,6 @@
     "tmp": "catalog:",
     "tough-cookie": "catalog:",
     "turbowalk": "catalog:",
-    "universal-analytics": "catalog:",
     "uuid": "catalog:",
     "vortex-parse-ini": "workspace:*",
     "winston": "catalog:",
@@ -353,7 +350,8 @@
     "ws": "catalog:",
     "xml2js": "catalog:",
     "xxhash-addon": "catalog:",
-    "zod": "catalog:"
+    "zod": "catalog:",
+    "d3-shape": "catalog:"
   },
   "devDependencies": {
     "@electron/rebuild": "catalog:",
@@ -362,7 +360,6 @@
     "@types/big.js": "catalog:",
     "@types/content-disposition": "catalog:",
     "@types/content-type": "catalog:",
-    "@types/d3": "catalog:",
     "@types/draggabilly": "catalog:",
     "@types/feedparser": "catalog:",
     "@types/fs-extra": "catalog:",
@@ -385,7 +382,6 @@
     "@types/source-map-support": "catalog:",
     "@types/string-template": "catalog:",
     "@types/tmp": "catalog:",
-    "@types/universal-analytics": "catalog:",
     "@types/write-file-atomic": "catalog:",
     "@types/ws": "catalog:",
     "@types/xml2js": "catalog:",
@@ -397,7 +393,8 @@
     "openapi-typescript": "catalog:",
     "react-refresh": "catalog:",
     "redux-freeze": "catalog:",
-    "vitest-fetch-mock": "catalog:"
+    "vitest-fetch-mock": "catalog:",
+    "@types/d3-shape": "catalog:"
   },
   "os": [
     "linux"

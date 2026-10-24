@@ -12,8 +12,7 @@ import { app, dialog, ipcMain, protocol, shell } from "electron";
 import contextMenu from "electron-context-menu";
 import * as _ from "lodash";
 import * as semver from "semver";
-import uuidpkg from "uuid";
-const { v4: uuidv4 } = uuidpkg;
+import { v4 as uuidv4 } from "uuid";
 
 import { shutdownBsdiffWorker } from "./bsdiff/host";
 import { parseCommandline, updateStartupSettings } from "./cli";

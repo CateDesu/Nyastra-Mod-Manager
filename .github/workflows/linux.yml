@@ -30,6 +30,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Audit runtime dependencies
         run: node scripts/audit-runtime.mjs
+      - name: Verify dependency compatibility
+        run: node --test scripts/dependency-security.test.mjs
+      - name: Verify StackMap
+        working-directory: tools/stackmap
+        run: |
+          npm ci --ignore-scripts
+          npm test
+          npm audit
       - name: Verify archive runtime and AppImage launcher
         run: node --test scripts/archive-runtime.test.mjs scripts/appimage-launcher.test.mjs
       - run: pnpm run verify

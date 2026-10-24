@@ -91,7 +91,6 @@
     "@types/bluebird": "catalog:",
     "@types/content-disposition": "catalog:",
     "@types/content-type": "catalog:",
-    "@types/d3": "catalog:",
     "@types/draggabilly": "catalog:",
     "@types/encoding-down": "catalog:",
     "@types/fs-extra": "catalog:",
@@ -121,7 +120,6 @@
     "@types/source-map-support": "catalog:",
     "@types/string-template": "catalog:",
     "@types/tmp": "catalog:",
-    "@types/universal-analytics": "catalog:",
     "@types/write-file-atomic": "catalog:",
     "@types/ws": "catalog:",
     "@types/xml2js": "catalog:",
@@ -143,7 +141,6 @@
     "cytoscape": "catalog:",
     "cytoscape-cose-bilkent": "catalog:",
     "cytoscape-edgehandles": "catalog:",
-    "d3": "catalog:",
     "dayjs": "catalog:",
     "dequal": "catalog:",
     "dnd-core": "catalog:",
@@ -220,7 +217,6 @@
     "temporal-polyfill": "catalog:",
     "tmp": "catalog:",
     "turbowalk": "catalog:",
-    "universal-analytics": "catalog:",
     "uuid": "catalog:",
     "vortex-parse-ini": "workspace:*",
     "winston": "catalog:",
@@ -228,7 +224,9 @@
     "ws": "catalog:",
     "xml2js": "catalog:",
     "xxhash-addon": "catalog:",
-    "zod": "catalog:"
+    "zod": "catalog:",
+    "d3-shape": "catalog:",
+    "@types/d3-shape": "catalog:"
   },
   "dependencies": {
     "@cyclonedx/cyclonedx-library": "catalog:"

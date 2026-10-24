@@ -240,7 +240,7 @@ export function init(fs: FileSystem) {
           contextIsolation: true,
           partition: partition,
           sandbox: true,
-          webSecurity: false,
+          webSecurity: true,
         },
       });
       view.setBackgroundColor("#00000000");
@@ -274,14 +274,22 @@ export function init(fs: FileSystem) {
       if (!window || window.isDestroyed()) throw new Error("Browser window is closed");
 
       const typedOptions = options ?? {};
+      if (typedOptions.webContents !== undefined) {
+        throw new Error("Existing web contents cannot be supplied to a browser view");
+      }
       const viewOptions: Electron.WebContentsViewConstructorOptions = {
         ...typedOptions,
         webPreferences: {
+          ...typedOptions.webPreferences,
           nodeIntegration: false,
+          nodeIntegrationInWorker: false,
+          nodeIntegrationInSubFrames: false,
           contextIsolation: true,
           sandbox: true,
-          webSecurity: false,
-          ...typedOptions?.webPreferences,
+          webSecurity: true,
+          allowRunningInsecureContent: false,
+          webviewTag: false,
+          preload: undefined,
         },
       };
 

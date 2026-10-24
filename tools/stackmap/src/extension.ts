@@ -1,10 +1,8 @@
 import * as fs from "fs";
 import * as path from "path";
 
-import { paste } from "copy-paste";
 import * as semver from "semver";
 import type { NullableMappedPosition } from "source-map";
-import { Position } from "source-map";
 import type { StackFrame } from "stack-trace";
 import { parse } from "stack-trace";
 import * as vscode from "vscode";
@@ -213,9 +211,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   {
     const disposable = vscode.commands.registerCommand("stackmap.fromClipboard", () => {
-      paste((err, text) => {
-        provider.setStack(text);
-      });
+      return vscode.env.clipboard.readText().then((text) => provider.setStack(text));
     });
 
     context.subscriptions.push(disposable);

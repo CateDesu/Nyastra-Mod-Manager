@@ -18,7 +18,7 @@ const { handlers, windows, views, MockView, initialLoad } = vi.hoisted(() => {
     });
     setBackgroundColor = vi.fn();
     setBounds = vi.fn();
-    constructor() {
+    constructor(public options: Electron.WebContentsViewConstructorOptions) {
       views.push(this);
     }
   }
@@ -145,4 +145,51 @@ it("closes a view when its owner disappears during navigation", async () => {
   expect(views[0]!.webContents.close).toHaveBeenCalledOnce();
   expect(window.listenerCount("resize")).toBe(0);
   expect(extraWebViews[sender.id]).toBeUndefined();
+});
+
+it("keeps web security enabled for the standard browser view", async () => {
+  await call("create", "about:blank", "test", false);
+  expect(views[0]!.options.webPreferences).toMatchObject({
+    webSecurity: true,
+    nodeIntegration: false,
+    contextIsolation: true,
+    sandbox: true,
+    partition: "test",
+  });
+});
+
+it("overrides unsafe supplied browser preferences", async () => {
+  await call("createWithEvents", "about:blank", [], {
+    webPreferences: {
+      partition: "test",
+      nodeIntegration: true,
+      nodeIntegrationInWorker: true,
+      nodeIntegrationInSubFrames: true,
+      contextIsolation: false,
+      sandbox: false,
+      webSecurity: false,
+      allowRunningInsecureContent: true,
+      webviewTag: true,
+      preload: "/tmp/untrusted-preload.js",
+    },
+  });
+  expect(views[0]!.options.webPreferences).toEqual({
+    partition: "test",
+    nodeIntegration: false,
+    nodeIntegrationInWorker: false,
+    nodeIntegrationInSubFrames: false,
+    contextIsolation: true,
+    sandbox: true,
+    webSecurity: true,
+    allowRunningInsecureContent: false,
+    webviewTag: false,
+    preload: undefined,
+  });
+});
+
+it("rejects existing web contents that could bypass browser preferences", async () => {
+  await expect(call("createWithEvents", "about:blank", [], { webContents: {} })).rejects.toThrow(
+    "Existing web contents",
+  );
+  expect(views).toHaveLength(0);
 });

@@ -36,6 +36,7 @@
         "inputs": [
           "default",
           "typescript",
+          "{projectRoot}/download_dependencies.js",
           "vortex-api"
         ]
       },

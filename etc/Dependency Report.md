@@ -30,7 +30,6 @@ This is a list of all modules leaked by Vortex to extensions. Any module listed 
 | @tailwindcss/cli | 4.3.2 |
 | @tanstack/react-virtual | 3.13.23 |
 | @types/bluebird | 3.5.20 |
-| @types/uuid | 3.4.13 |
 | @vortex/nexus-api-v3 | link:../../packages/nexus-api-v3 |
 | @vortex/shared | link:../shared |
 | bbcode-to-react | 0.2.11 |
@@ -45,7 +44,7 @@ This is a list of all modules leaked by Vortex to extensions. Any module listed 
 | cytoscape | 3.33.1 |
 | cytoscape-cose-bilkent | 4.1.0 |
 | cytoscape-edgehandles | 3.6.0 |
-| d3 | 5.16.0 |
+| d3-shape | 1.3.7 |
 | dayjs | 1.11.20 |
 | dequal | 2.0.3 |
 | dnd-core | 9.5.1 |
@@ -123,8 +122,7 @@ This is a list of all modules leaked by Vortex to extensions. Any module listed 
 | tmp | 0.2.7 |
 | tough-cookie | 6.0.1 |
 | turbowalk | 3.1.1 |
-| universal-analytics | 0.4.23 |
-| uuid | 3.4.0 |
+| uuid | 11.1.1 |
 | vortex-parse-ini | link:../../packages/parse-ini |
 | winston | 2.4.7 |
 | write-file-atomic | 3.0.3 |
