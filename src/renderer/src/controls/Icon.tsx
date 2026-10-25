@@ -3,6 +3,7 @@
 import * as fs from "fs/promises";
 import * as path from "path";
 
+import DOMPurify from "dompurify";
 import React, { type CSSProperties, type FC, type MouseEventHandler } from "react";
 
 import getVortexPath from "../util/getVortexPath";
@@ -58,13 +59,16 @@ export const installIconSet = (set: string, setPath: string): Promise<Set<string
   // This prevents race conditions where another icon sees the DOM element
   // but the promise isn't in the map yet.
   const promise = (async () => {
+    log("info", "read font", setPath);
+    const data = await fs.readFile(setPath);
+    const icons = DOMPurify.sanitize(data.toString(), {
+      USE_PROFILES: { svg: true, svgFilters: true },
+      RETURN_DOM_FRAGMENT: true,
+    });
     const container = document.createElement("div");
     container.id = "iconset-" + set;
+    container.appendChild(icons);
     document.getElementById("icon-sets").appendChild(container);
-    log("info", "read font", setPath);
-
-    const data = await fs.readFile(setPath);
-    container.innerHTML = data.toString();
 
     const symbols = new Set<string>();
     container.querySelectorAll("symbol").forEach((el) => symbols.add(el.id));

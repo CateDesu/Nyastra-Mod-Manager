@@ -19,6 +19,18 @@ afterEach(async () => {
 });
 
 describe("Linux game INI editing", () => {
+  it("handles long lines without separators and preserves key spacing", async () => {
+    const padding = " ".repeat(100000);
+    await writeFile(filePath, `[Game]\n${padding}no separator\n  Enabled  =1\nName=a=b\n`);
+    const ini = await parser.read<Data>(filePath);
+    expect(ini.data.Game).toEqual({ Enabled: "1", Name: "a=b" });
+    ini.data.Game!.Enabled = "2";
+    await parser.write(filePath, ini);
+    expect(await readFile(filePath, "utf8")).toBe(
+      `[Game]\n${padding}no separator\n  Enabled  =2\nName=a=b\n`,
+    );
+  });
+
   it("updates and removes keys while preserving comments, casing and unrelated sections", async () => {
     await writeFile(
       filePath,

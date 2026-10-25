@@ -225,7 +225,7 @@ export const QuickLauncher: React.FC<React.PropsWithChildren<unknown>> = () => {
 
       const iconPath =
         gameIconCache[gameId].icon !== undefined
-          ? pathToFileURL(gameIconCache[gameId].icon).href.replace("'", "%27")
+          ? pathToFileURL(gameIconCache[gameId].icon).href.replaceAll("'", "%27")
           : undefined;
       const cachedGame = gameIconCache[gameId].game;
 

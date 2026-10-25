@@ -32,6 +32,10 @@ jobs:
         run: node scripts/audit-runtime.mjs
       - name: Verify dependency compatibility
         run: node --test scripts/dependency-security.test.mjs
+      - name: Verify developer tool boundaries
+        run: |
+          node --test scripts/security-tools.test.mjs
+          python3 flatpak/scripts/test_flatpak_nuget_hash.py
       - name: Verify StackMap
         working-directory: tools/stackmap
         run: |

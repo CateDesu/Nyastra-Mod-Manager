@@ -45,7 +45,7 @@ export const PlayButton: FC<React.PropsWithChildren<PlayButtonProps>> = ({
     try {
       const iconPath = StarterInfo.getIconPath(primaryStarter);
       if (iconPath) {
-        return pathToFileURL(iconPath).href.replace("'", "%27");
+        return pathToFileURL(iconPath).href.replaceAll("'", "%27");
       }
     } catch {
       // ignore

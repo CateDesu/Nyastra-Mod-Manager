@@ -1,57 +1,61 @@
 "use strict";
 
-/**
- * I made this build script since some times I just want to build one specific extension and get it's dist in the bundledPlugins
- * without having to manually move it, or having to change directory in my cmd too many times
- * To use it either in the cmd run `node buildSingleExtension.js extension-name-here` or `yarn buildext extension-name-here`
- * I was thinking about using Inquirer.JS to autocomplete the paramsm but for now it is okay to just write it properly
- */
+const fs = require("node:fs");
+const path = require("node:path");
+const { spawn } = require("node:child_process");
 
-const fs = require("fs-extra");
-const path = require("path");
-const { spawn } = require("child_process");
+const rootPath = fs.realpathSync(path.resolve(__dirname, "..", ".."));
 
-const rootPath = path.resolve(__dirname, "..", "..");
-
-const [extensionName, buildScript = "build"] = process.argv.slice(2);
-
-if (!extensionName) {
-  console.error("❌ You must pass at least the extension name");
-  process.exit(0);
+function inside(root, filename) {
+  const relative = path.relative(root, filename);
+  return relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
 }
 
-const extensionPath = path.resolve(rootPath, "extensions", extensionName);
+async function main() {
+  const [extensionName, buildScript = "build", ...extra] = process.argv.slice(2);
+  if (
+    extra.length ||
+    !extensionName ||
+    !/^[a-z0-9_-]+(?:\/[a-z0-9_-]+)*$/i.test(extensionName) ||
+    !/^[a-z0-9_][a-z0-9:_-]*$/i.test(buildScript)
+  ) {
+    throw new Error("Usage: node buildSingleExtension.js <extension-name> [build-script]");
+  }
 
-if (!fs.existsSync(extensionPath)) {
-  console.error(`❌ No folder found with name ${extensionPath}`);
-  process.exit(0);
-}
-
-console.log(`🔨 Found extension ${extensionPath}, building using "${buildScript}" script`);
-console.log(`🔨 Building...`);
-
-const exe = "yarn.cmd";
-const args = ["run", buildScript, "--mutex", "file"];
-// Using `shell: true and stdio: 'inherit'` to keep the console output from the build script without having to hook on proc.stdout.on
-const options = {
-  cwd: `extensions/${extensionName}`,
-  shell: true,
-  stdio: "inherit",
-};
-
-const proc = spawn(exe, args, options);
-// Yeah, I know, I should handle the `on error`
-proc.on("close", (code) => {
-  console.log(`child process exited with code ${code}`);
-
-  console.log(`✅ Build done`);
-  console.log(`🔨 Now copying "dist" to "out/bundledPlugins/${extensionName}"`);
-
-  fs.copy(
-    path.join(extensionPath, "dist"),
-    path.resolve(rootPath, "out", "bundledPlugins", extensionName),
-    { overwrite: true },
-  ).then(() => {
-    console.log(`✅ Copy successful`);
+  const extensionsRoot = path.join(rootPath, "extensions");
+  const extensionPath = fs.realpathSync(path.join(extensionsRoot, extensionName));
+  if (!inside(extensionsRoot, extensionPath) || !fs.statSync(extensionPath).isDirectory()) {
+    throw new Error("Choose an extension inside the repository");
+  }
+  console.log(`Building ${extensionName}`);
+  await new Promise((resolve, reject) => {
+    const child = spawn("pnpm", ["run", buildScript], { cwd: extensionPath, stdio: "inherit" });
+    child.once("error", reject);
+    child.once("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`Extension build failed with exit code ${code}`));
+    });
   });
+
+  const source = fs.realpathSync(path.join(extensionPath, "dist"));
+  if (!inside(extensionPath, source))
+    throw new Error("Extension output must stay in its directory");
+  const destination = path.join(rootPath, "out", "bundledPlugins", extensionName);
+  for (let current = destination; current !== rootPath; current = path.dirname(current)) {
+    try {
+      if (fs.lstatSync(current).isSymbolicLink())
+        throw new Error("Refusing a linked output directory");
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.rmSync(destination, { recursive: true, force: true });
+  fs.cpSync(source, destination, { recursive: true });
+  console.log(`Copied ${extensionName} to out/bundledPlugins`);
+}
+
+main().catch((error) => {
+  console.error(error.message);
+  process.exitCode = 1;
 });

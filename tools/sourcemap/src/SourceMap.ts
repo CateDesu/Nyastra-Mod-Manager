@@ -17,7 +17,7 @@ class SourceMap {
   private mBasePath: string;
 
   constructor(sourcePath: string, basePath: string) {
-    this.mSourcePath = sourcePath;
+    this.mSourcePath = path.resolve(sourcePath);
     this.mBasePath = basePath;
   }
 
@@ -48,8 +48,7 @@ class SourceMap {
 
     if (this.mConsumers[relPath] === undefined) {
       const correctedPath = path.join(this.mSourcePath, relPath);
-      this.mConsumers[relPath] = fs
-        .readFile(correctedPath)
+      this.mConsumers[relPath] = this.readSourceFile(correctedPath)
         .then((data) => {
           const sourceMapPath = this.findSourceMapPath(data.toString());
           if (sourceMapPath === undefined) {
@@ -58,7 +57,7 @@ class SourceMap {
           const fullPath: string = sourceMapPath.startsWith("/")
             ? this.mSourcePath + sourceMapPath
             : path.resolve(this.mSourcePath, path.dirname(relPath), sourceMapPath);
-          return fs.readFile(fullPath);
+          return this.readSourceFile(fullPath);
         })
         .then((data: Buffer) => new SourceMapConsumer(data.toString()))
         .catch((err) => {
@@ -69,6 +68,16 @@ class SourceMap {
         });
     }
     return this.mConsumers[relPath];
+  }
+
+  private async readSourceFile(filename: string): Promise<Buffer> {
+    const root = await fs.realpath(this.mSourcePath);
+    const resolved = await fs.realpath(filename);
+    const relative = path.relative(root, resolved);
+    if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+      throw new Error("Source map files must stay inside the source directory");
+    }
+    return fs.readFile(resolved);
   }
 }
 

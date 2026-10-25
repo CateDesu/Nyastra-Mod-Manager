@@ -18,9 +18,9 @@ import { fileURLToPath } from "node:url";
 
 const installer = fileURLToPath(new URL("./install-linux.mjs", import.meta.url));
 
-function fixture() {
+function fixture(homeName = "Home with ' apostrophe") {
   const root = mkdtempSync(path.join(tmpdir(), "vortex-install-"));
-  const home = path.join(root, "Home with ' apostrophe");
+  const home = path.join(root, homeName);
   const source = path.join(root, "Extracted with ' apostrophe");
   const bin = path.join(root, "bin");
   const env = {
@@ -89,6 +89,22 @@ test("installed launcher survives extraction removal and passes literal NXM argu
     assert.equal(launched.status, 0, launched.stderr);
     assert.deepEqual(JSON.parse(readFileSync(f.env.CAPTURE, "utf8")), ["--install", uri]);
     assert.match(readFileSync(f.desktop, "utf8"), /Exec=env .* %u/);
+  } finally {
+    f.clean();
+  }
+});
+
+test("desktop launchers preserve quotes, backslashes and shell characters", async () => {
+  const f = fixture('Home with "quotes" \\slashes $dollars `ticks`');
+  try {
+    const installed = f.run();
+    assert.equal(installed.status, 0, installed.stderr);
+    const uri = "nxm://game/mods/1/files/2?key=literal";
+    const launched = spawnSync("gio", ["launch", f.desktop, uri], { env: f.env, encoding: "utf8" });
+    assert.equal(launched.status, 0, launched.stderr);
+    for (let attempt = 0; attempt < 100 && !existsSync(f.env.CAPTURE); attempt++)
+      await setTimeout(25);
+    assert.deepEqual(JSON.parse(readFileSync(f.env.CAPTURE, "utf8")), ["--install", uri]);
   } finally {
     f.clean();
   }

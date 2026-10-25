@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as https from "node:https";
 import * as path from "node:path";
+import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
 import * as zlib from "node:zlib";
 
@@ -52,6 +54,13 @@ export function parseDuckDBVersion(rawVersion: string): string {
  */
 export function buildExtensionUrl(opts: BuildUrlOptions): string {
   const { type, name, version, platform, repository } = opts;
+  if (
+    !/^[a-z0-9_]+$/.test(name) ||
+    !/^[a-z0-9_]+$/.test(platform) ||
+    !/^v\d+\.\d+\.\d+$/.test(version)
+  ) {
+    throw new Error("Invalid DuckDB extension name, platform or version");
+  }
 
   if (type === "community") {
     return `https://community-extensions.duckdb.org/v1/${version}/${platform}/${name}.duckdb_extension.gz`;
@@ -60,6 +69,14 @@ export function buildExtensionUrl(opts: BuildUrlOptions): string {
   if (type === "http") {
     if (!repository) {
       throw new Error(`Extension "${name}" has type "http" but is missing a "repository" field.`);
+    }
+    if (
+      ![
+        "https://nexus-mods.github.io/duckdb-level-pivot/current_release",
+        "https://halgari.github.io/duckdb-level-pivot/current_release",
+      ].includes(repository)
+    ) {
+      throw new Error(`Untrusted DuckDB extension repository: ${repository}`);
     }
     return `${repository}/${version}/${platform}/${name}.duckdb_extension.gz`;
   }
@@ -71,50 +88,45 @@ export function buildExtensionUrl(opts: BuildUrlOptions): string {
 // I/O helpers
 // ---------------------------------------------------------------------------
 
-function downloadFile(url: string, destPath: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const dir = path.dirname(destPath);
-    fs.mkdirSync(dir, { recursive: true });
-
-    const file = fs.createWriteStream(destPath);
-
-    const request = (url: string) => {
-      https
-        .get(url, (res) => {
-          if (res.statusCode === 301 || res.statusCode === 302) {
-            // Follow redirect
-            file.destroy();
-            fs.unlinkSync(destPath);
-            request(res.headers.location!);
-            return;
-          }
-          if (res.statusCode !== 200) {
-            file.destroy();
-            fs.unlinkSync(destPath);
-            reject(new Error(`HTTP ${res.statusCode} downloading ${url}`));
-            return;
-          }
-          const gunzip = zlib.createGunzip();
-          res.pipe(gunzip).pipe(file);
-          file.on("finish", () => {
-            file.close();
-            resolve();
-          });
-          gunzip.on("error", (err) => {
-            file.destroy();
-            fs.unlinkSync(destPath);
-            reject(err);
-          });
-          file.on("error", (err) => {
-            fs.unlinkSync(destPath);
-            reject(err);
-          });
-        })
-        .on("error", reject);
-    };
-
-    request(url);
-  });
+export async function downloadFile(url: string, destPath: string): Promise<void> {
+  const target = new URL(url);
+  if (
+    target.protocol !== "https:" ||
+    !["community-extensions.duckdb.org", "nexus-mods.github.io", "halgari.github.io"].includes(
+      target.hostname,
+    ) ||
+    target.username ||
+    target.password ||
+    target.port
+  ) {
+    throw new Error("Untrusted DuckDB extension URL");
+  }
+  await fs.promises.mkdir(path.dirname(destPath), { recursive: true });
+  const temporary = `${destPath}.${randomUUID()}.tmp`;
+  try {
+    const response = await new Promise<import("node:http").IncomingMessage>((resolve, reject) => {
+      const request = https.get(target, (res) => {
+        if (res.statusCode !== 200) {
+          res.resume();
+          reject(new Error(`HTTP ${res.statusCode} downloading ${url}`));
+          return;
+        }
+        resolve(res);
+      });
+      request.on("error", reject);
+      request.setTimeout(30000, () =>
+        request.destroy(new Error("DuckDB extension download timed out")),
+      );
+    });
+    await pipeline(
+      response,
+      zlib.createGunzip(),
+      fs.createWriteStream(temporary, { flags: "wx", mode: 0o600 }),
+    );
+    await fs.promises.rename(temporary, destPath);
+  } finally {
+    await fs.promises.rm(temporary, { force: true });
+  }
 }
 
 // ---------------------------------------------------------------------------

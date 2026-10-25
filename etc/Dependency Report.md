@@ -48,6 +48,7 @@ This is a list of all modules leaked by Vortex to extensions. Any module listed 
 | dayjs | 1.11.20 |
 | dequal | 2.0.3 |
 | dnd-core | 9.5.1 |
+| dompurify | 3.4.17 |
 | draggabilly | 2.4.1 |
 | drivelist | 10.0.2 |
 | electron-context-menu | 3.6.1 |

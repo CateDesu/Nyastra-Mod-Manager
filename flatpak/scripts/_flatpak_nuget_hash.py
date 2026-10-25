@@ -37,9 +37,12 @@ def _is_nuget_input_file(filename: str) -> bool:
 
 
 def collect_nuget_input_files(search_root: Path) -> List[Path]:
-    root = repo_root()
+    root = repo_root().resolve()
     if not search_root.is_absolute():
         search_root = root / search_root
+    search_root = search_root.resolve()
+    if not search_root.is_relative_to(root):
+        raise ValueError("NuGet search root must be inside the repository")
 
     if not search_root.exists():
         raise FileNotFoundError(f"NuGet search root not found: {search_root}")
@@ -55,7 +58,10 @@ def collect_nuget_input_files(search_root: Path) -> List[Path]:
 
         for filename in filenames:
             if _is_nuget_input_file(filename):
-                files.append(current / filename)
+                candidate = current / filename
+                if not candidate.resolve().is_relative_to(root):
+                    raise ValueError("NuGet input files must stay inside the repository")
+                files.append(candidate)
 
     if not files:
         raise FileNotFoundError(f"No NuGet input files found under: {search_root}")

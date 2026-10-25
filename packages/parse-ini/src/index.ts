@@ -108,13 +108,14 @@ function parse(lines: string[]): IniData {
       continue;
     }
     if (!section || /^\s*[;#]/.test(line)) continue;
-    const pair = line.match(/^\s*([^=]+?)\s*=(.*)$/);
-    if (!pair) continue;
+    const separator = line.indexOf("=");
+    if (separator < 0) continue;
+    const name = line.slice(0, separator).trim();
+    if (!name) continue;
     const values = data[section]!;
-    const key =
-      Object.keys(values).find((key) => key.toLowerCase() === pair[1]!.toLowerCase()) ?? pair[1]!;
+    const key = Object.keys(values).find((key) => key.toLowerCase() === name.toLowerCase()) ?? name;
     if (!Object.hasOwn(values, key)) {
-      const value = pair[2]!.trim();
+      const value = line.slice(separator + 1).trim();
       values[key] = /^(".*"|'.*')$/.test(value) ? value.slice(1, -1) : value;
     }
   }
@@ -161,15 +162,15 @@ export class PortableIniFormat implements IIniFormat {
           current = header[1]!.toLowerCase();
           if (current === section.toLowerCase()) foundSection = true;
         }
-        const pair = line.match(/^(\s*[^=]+?\s*=)(.*)$/);
+        const separator = line.indexOf("=");
         if (
           current === section.toLowerCase() &&
           !/^\s*[;#]/.test(line) &&
-          pair &&
-          pair[1]!.slice(0, -1).trim().toLowerCase() === key.toLowerCase()
+          separator >= 0 &&
+          line.slice(0, separator).trim().toLowerCase() === key.toLowerCase()
         ) {
           if (value !== undefined && !wrote) {
-            output.push(`${pair[1]}${String(value)}`);
+            output.push(`${line.slice(0, separator + 1)}${String(value)}`);
             wrote = true;
           }
           continue;

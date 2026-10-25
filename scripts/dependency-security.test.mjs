@@ -15,6 +15,12 @@ const rendererRequire = createRequire(new URL("../src/renderer/package.json", im
 const nexusPath = mainRequire.resolve("@nexusmods/nexus-api");
 const Nexus = mainRequire("@nexusmods/nexus-api").default;
 
+test("the renderer SVG sanitizer is available from the program runtime", () => {
+  const createDOMPurify = mainRequire("dompurify");
+  assert.equal(typeof createDOMPurify, "function");
+  assert.ok(createDOMPurify.version);
+});
+
 test("QuickBMS requires HTTPS and rejects redirects and failed downloads before extraction", async (t) => {
   const source = await readFile(
     new URL("../extensions/quickbms-support/download_dependencies.js", import.meta.url),

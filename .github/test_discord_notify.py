@@ -10,6 +10,7 @@ from email.parser import BytesParser
 from email.policy import default
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlsplit
 from unittest.mock import patch
 
 
@@ -28,12 +29,18 @@ class NotificationTests(unittest.TestCase):
         self.image_failures = 0
         self.image = PNG
         self.post_status = 200
-        self.metadata = '<meta content="/image.png?a=1&amp;b=2" property="og:image">'
+        self.redirect_path = None
+        self.metadata = '<meta content="https://opengraph.githubassets.com/image.png?a=1&amp;b=2" property="og:image">'
         test = self
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
                 test.requests.append(self.path)
+                if self.path.startswith(test.redirect_path or "never-redirect"):
+                    self.send_response(302)
+                    self.send_header("Location", test.url + "/private")
+                    self.end_headers()
+                    return
                 if self.path.startswith("/image.png"):
                     if test.image_failures:
                         test.image_failures -= 1
@@ -66,13 +73,26 @@ class NotificationTests(unittest.TestCase):
         self.url = f"http://127.0.0.1:{self.server.server_port}"
         self.temp = tempfile.TemporaryDirectory()
         self.output = Path(self.temp.name)
+        self.commit_url = "https://github.com/CateDesu/Nyastra-Mod-Manager/commit/" + "a" * 40
         self.env = {
             "REPO": "CateDesu/Nyastra-Mod-Manager", "REF": "main", "ACTOR": "CateDesu",
-            "COMMIT_SHA": "a" * 40, "COMMIT_URL": self.url + "/commit/large",
+            "COMMIT_SHA": "a" * 40, "COMMIT_URL": self.commit_url,
             "COMMIT_MSG": "Update 11,161 lines\n\n- Keep the original GitHub card",
         }
+        transport = notify.build_opener(notify.NoRedirects())
+
+        def open_preview(request, timeout):
+            remote = urlsplit(request.full_url)
+            local_path = "/commit/large" if remote.hostname == "github.com" else remote.path
+            if remote.query:
+                local_path += "?" + remote.query
+            return transport.open(self.url + local_path, timeout=timeout)
+
+        self.preview_mock = patch.object(notify.preview_opener, "open", side_effect=open_preview)
+        self.preview_mock.start()
 
     def tearDown(self):
+        self.preview_mock.stop()
         self.server.shutdown()
         self.thread.join()
         self.server.server_close()
@@ -82,6 +102,9 @@ class NotificationTests(unittest.TestCase):
         workflow = Path(__file__).with_name("workflows") / "discord-notify.yml"
         post = workflow.read_text().split("      - name: Post push to Discord\n", 1)[1]
         script = textwrap.dedent(post.split("        run: |\n", 1)[1])
+        if webhook != "":
+            notify.prepare(self.env, self.output)
+        script = script.replace("python3 .github/discord_notify.py\n", "")
         return subprocess.run(
             ["bash", "-euo", "pipefail", "-c", script],
             cwd=Path(__file__).resolve().parent.parent,
@@ -117,7 +140,7 @@ class NotificationTests(unittest.TestCase):
     def test_preview_generation_can_recover_before_posting(self):
         self.image_failures = 1
         with patch.object(notify.time, "sleep") as sleep:
-            self.assertEqual(notify.fetch_preview(self.url + "/commit/large"), PNG)
+            self.assertEqual(notify.fetch_preview(self.commit_url), PNG)
         sleep.assert_called_once_with(2)
         self.assertEqual(sum(path.startswith("/image.png") for path in self.requests), 2)
 
@@ -138,7 +161,37 @@ class NotificationTests(unittest.TestCase):
         for body in [b"<html>Not ready</html>", PNG[:-12], PNG[:-12] + b"x" * (5 * 1024 * 1024) + PNG[-12:]]:
             with self.subTest(size=len(body)), patch("builtins.print"):
                 self.image = body
-                self.assertIsNone(notify.fetch_preview(self.url + "/commit/large", attempts=1))
+                self.assertIsNone(notify.fetch_preview(self.commit_url, attempts=1))
+
+    def test_untrusted_commit_urls_do_not_make_requests(self):
+        for url in [self.url + "/private", "http://github.com/private",
+                    "https://github.com.attacker.test/private", "https://github.com@127.0.0.1/private",
+                    "https://user:password@github.com/private", "https://github.com:8443/private"]:
+            with self.subTest(url=url), patch("builtins.print"):
+                self.assertIsNone(notify.fetch_preview(url, attempts=1))
+        self.assertEqual(self.requests, [])
+
+    def test_preview_requests_rebuild_fixed_origins_and_preserve_paths_and_queries(self):
+        request = notify.preview_request(
+            "https://GITHUB.COM:443//path?next=https://127.0.0.1/private#fragment", "github.com"
+        )
+        self.assertEqual(
+            request.full_url, "https://github.com//path?next=https://127.0.0.1/private"
+        )
+
+    def test_untrusted_image_urls_do_not_make_image_requests(self):
+        for url in [self.url + "/private", "file:///etc/passwd",
+                    "https://opengraph.githubassets.com.attacker.test/private"]:
+            self.metadata = f'<meta property="og:image" content="{url}">'
+            with self.subTest(url=url), patch("builtins.print"):
+                self.assertIsNone(notify.fetch_preview(self.commit_url, attempts=1))
+        self.assertEqual(self.requests, ["/commit/large"] * 3)
+
+    def test_commit_and_image_redirects_are_not_followed(self):
+        for self.redirect_path in ["/commit/", "/image.png"]:
+            with self.subTest(path=self.redirect_path), patch("builtins.print"):
+                self.assertIsNone(notify.fetch_preview(self.commit_url, attempts=1))
+        self.assertNotIn("/private", self.requests)
 
     def test_long_commit_messages_keep_the_link_and_embed_within_limits(self):
         message = 'Large change "quoted" `$(touch nope)`\n' + "日本語\n" * 3000

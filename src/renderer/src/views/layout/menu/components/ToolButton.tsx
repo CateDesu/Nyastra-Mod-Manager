@@ -29,7 +29,7 @@ export const ToolButton: FC<React.PropsWithChildren<ToolButtonProps>> = ({
     try {
       const iconPath = StarterInfo.getIconPath(starter);
       if (iconPath) {
-        return pathToFileURL(iconPath).href.replace("'", "%27");
+        return pathToFileURL(iconPath).href.replaceAll("'", "%27");
       }
       return undefined;
     } catch {

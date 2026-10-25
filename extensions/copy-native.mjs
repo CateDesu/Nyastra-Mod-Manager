@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 
 const args = process.argv.slice(2);
@@ -11,8 +11,8 @@ if (args.length === 0) {
 }
 
 const files = args.filter((arg) => !arg.startsWith("-") && !/^\d+$/.test(arg));
-const copyFlags =
-  args.filter((arg) => arg.startsWith("-") || /^\d+$/.test(arg)).join(" ") || "-u 1 -f";
+const copyFlags = args.filter((arg) => arg.startsWith("-") || /^\d+$/.test(arg));
+if (copyFlags.length === 0) copyFlags.push("-u", "1", "-f");
 
 const missingFiles = [];
 
@@ -35,11 +35,8 @@ if (!fs.existsSync(destDir)) {
   fs.mkdirSync(destDir, { recursive: true });
 }
 
-const fileList = files.join(" ");
-const command = `copyfiles ${copyFlags} ${fileList} ${destDir}`;
-
 try {
-  execSync(command, { stdio: "inherit" });
+  execFileSync("copyfiles", [...copyFlags, ...files, destDir], { stdio: "inherit" });
 } catch (err) {
   console.error("Failed to copy native files");
   process.exit(1);

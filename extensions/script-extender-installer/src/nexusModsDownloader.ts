@@ -125,7 +125,10 @@ async function startDownload(
         .slice(0, 5);
       const gameStore = getGameStore(gameId, api);
       // For some weird reason, New Vegas has a tab character in the middle of it's name, so that needs to be removed.
-      const title = (selectors.gameById(api.getState(), gameId)?.name || "game").replace("\t", " ");
+      const title = (selectors.gameById(api.getState(), gameId)?.name || "game").replaceAll(
+        "\t",
+        " ",
+      );
       const userChoice: types.IDialogResult = await api.showDialog(
         "question",
         "Select script extender version",
