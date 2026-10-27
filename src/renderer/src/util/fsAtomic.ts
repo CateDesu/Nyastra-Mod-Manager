@@ -1,6 +1,7 @@
 import { createHash } from "crypto";
 import { constants } from "node:fs";
 import { copyFile, link, lstat, readlink, rename, symlink, unlink, utimes } from "node:fs/promises";
+import * as path from "node:path";
 
 import { unknownToError } from "@vortex/shared";
 import PromiseBB from "bluebird";
@@ -74,7 +75,8 @@ function writeFileAtomicImpl(
       {
         cleanup: false,
         detachDescriptor: true,
-        template: `${filePath}.XXXXXX.tmp`,
+        tmpdir: path.dirname(path.resolve(filePath)),
+        template: `${path.basename(filePath)}.XXXXXX.tmp`,
       },
     )
     .then(() => fs.readFileAsync(tmpPath))
@@ -109,19 +111,21 @@ function writeFileAtomicImpl(
 export function copyFileAtomic(srcPath: string, destPath: string): PromiseBB<void> {
   let cleanup: (next?: (err?: Error) => void) => void;
   let tmpPath: string;
+  const options = {
+    tmpdir: path.dirname(path.resolve(destPath)),
+    template: `${path.basename(destPath)}.XXXXXX.tmp`,
+    discardDescriptor: true,
+  };
   return new PromiseBB<void>((resolve, reject) => {
     // Close tmp's descriptor before copyFile opens the temporary path.
-    file(
-      { template: `${destPath}.XXXXXX.tmp`, discardDescriptor: true },
-      (err: any, genPath: string, _fd: number, cleanupCB: () => void) => {
-        if (err) {
-          return reject(err);
-        }
-        cleanup = cleanupCB;
-        tmpPath = genPath;
-        resolve();
-      },
-    );
+    file(options, (err: any, genPath: string, _fd: number, cleanupCB: () => void) => {
+      if (err) {
+        return reject(err);
+      }
+      cleanup = cleanupCB;
+      tmpPath = genPath;
+      resolve();
+    });
   })
     .then(() => copyFile(srcPath, tmpPath))
     .then(() => (tmpPath !== undefined ? rename(tmpPath, destPath) : PromiseBB.resolve()))

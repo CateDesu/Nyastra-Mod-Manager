@@ -105,6 +105,7 @@ import {
   processErrorMessage,
   requestLogin,
   retrieveNexusGames,
+  updateKey,
   updateToken,
 } from "./util";
 import { checkModVersion } from "./util/checkModsVersion";
@@ -1075,8 +1076,8 @@ function once(api: IExtensionApi, callbacks: Array<(nexus: NexusT) => void>) {
             (): UserInfoRead => "failed",
           ),
         );
-      } else {
-        //updateKey(api, nexus, apiKey);
+      } else if (apiKey !== undefined) {
+        updateKey(api, nexus, apiKey);
       }
     }
 

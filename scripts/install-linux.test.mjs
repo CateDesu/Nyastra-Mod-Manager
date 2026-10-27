@@ -15,8 +15,69 @@ import path from "node:path";
 import { test } from "node:test";
 import { setTimeout } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import vm from "node:vm";
+
+import { adapt, helldiversMarker, helperName } from "../linux/extension-adaptations/adapt.mjs";
+import { applyExtensions } from "../linux/extension-adaptations/apply.mjs";
 
 const installer = fileURLToPath(new URL("./install-linux.mjs", import.meta.url));
+
+// Synthetic extension source with the supported archive scan boundary.
+const helldiversSource = `
+const BASE_ARCHIVE_RE = /^([0-9a-f]{16})(?:\\.gpu_resources|\\.stream)?$/i;
+async function scanBaseArchives() {
+  const result = new Set();
+  const entries = await fsp.readdir();
+  for (const entry of entries) {
+    const match = BASE_ARCHIVE_RE.exec(entry);
+    if (match !== null) result.add(match[1].toLowerCase());
+  }
+  return result;
+}
+`;
+
+test("Helldivers archive checks distinguish loose and packed installations", async () => {
+  const source = adapt(helldiversSource, "helldivers2");
+  const sandbox = { fsp: { readdir: async () => [] } };
+  vm.runInNewContext(source, sandbox);
+  const archive = "0123456789abcdef";
+  sandbox.fsp.readdir = async () => [archive, `${archive}.stream`, "fedcba9876543210.patch_0"];
+  assert.deepEqual(Array.from(await sandbox.scanBaseArchives()), [archive]);
+  for (const bundle of ["bundles.nxa", "bundles.00.nxa", "BUNDLES.NXA"]) {
+    sandbox.fsp.readdir = async () => [archive, bundle];
+    assert.equal((await sandbox.scanBaseArchives()).size, 0);
+  }
+  assert.equal(adapt(source, "helldivers2"), source);
+  assert.ok(adapt(helldiversSource.replaceAll("\n", "\r\n"), "helldivers2").includes("\r\n"));
+  assert.throws(() => adapt("changed upstream source", "helldivers2"), /Extension source changed/);
+});
+
+test("Helldivers adaptation preserves a backup and needs no Fluffy helper", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "nyastra-helldivers-"));
+  try {
+    const plugin = path.join(root, "plugins", "helldivers2");
+    mkdirSync(plugin, { recursive: true });
+    writeFileSync(path.join(plugin, "index.js"), helldiversSource);
+    writeFileSync(
+      path.join(plugin, "info.json"),
+      JSON.stringify({ name: "Game: Helldivers 2", version: "1.2.2" }),
+    );
+    const preview = await applyExtensions({ userData: root, dryRun: true });
+    assert.deepEqual(preview.adapted, ["Game: Helldivers 2"]);
+    assert.equal(readFileSync(path.join(plugin, "index.js"), "utf8"), helldiversSource);
+    const result = await applyExtensions({ userData: root });
+    assert.deepEqual(result.adapted, preview.adapted);
+    assert.equal(
+      readFileSync(path.join(result.backupRoot, "helldivers2", "index.js"), "utf8"),
+      helldiversSource,
+    );
+    assert.ok(readFileSync(path.join(plugin, "index.js"), "utf8").includes(helldiversMarker));
+    assert.equal(existsSync(path.join(plugin, helperName)), false);
+    assert.deepEqual((await applyExtensions({ userData: root })).adapted, []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 function fixture(homeName = "Home with ' apostrophe") {
   const root = mkdtempSync(path.join(tmpdir(), "vortex-install-"));

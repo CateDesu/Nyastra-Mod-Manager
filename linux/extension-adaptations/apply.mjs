@@ -62,6 +62,7 @@ export async function applyExtensions({
   const plan = [];
   const skipped = [];
   for (const plugin of manifest.plugins) {
+    const installHelper = plugin.helper !== false;
     const directory = path.join(destinationRoot, plugin.directory);
     if (!(await exists(directory))) {
       skipped.push({ plugin: plugin.name, reason: "Not installed" });
@@ -98,9 +99,10 @@ export async function applyExtensions({
     const previous = await fs.readFile(filename);
     const source = await fs.readFile(path.join(sourceDirectory, "index.js"), "utf8");
     const updated = Buffer.from(adapt(source, plugin.game));
-    const helperPath = path.join(directory, helperName);
-    const previousHelper = (await exists(helperPath)) ? await fs.readFile(helperPath) : undefined;
-    if (previous.equals(updated) && previousHelper?.equals(helper)) {
+    const helperPath = installHelper ? path.join(directory, helperName) : undefined;
+    const previousHelper =
+      helperPath && (await exists(helperPath)) ? await fs.readFile(helperPath) : undefined;
+    if (previous.equals(updated) && (!installHelper || previousHelper?.equals(helper))) {
       skipped.push({ plugin: plugin.name, reason: "Already adapted" });
       continue;
     }
@@ -146,7 +148,7 @@ export async function applyExtensions({
     }
     for (const entry of plan) {
       changed.push(entry);
-      await replaceFile(entry.helperPath, helper);
+      if (entry.helperPath) await replaceFile(entry.helperPath, helper);
       await replaceFile(entry.filename, entry.updated, entry.mode);
     }
     result.backupRoot = backupRoot;
@@ -161,7 +163,7 @@ export async function applyExtensions({
       try {
         await replaceFile(entry.filename, entry.previous, entry.mode);
         if (entry.previousHelper) await replaceFile(entry.helperPath, entry.previousHelper);
-        else await fs.rm(entry.helperPath, { force: true });
+        else if (entry.helperPath) await fs.rm(entry.helperPath, { force: true });
       } catch (rollbackError) {
         rollbackErrors.push(rollbackError.message);
       }
