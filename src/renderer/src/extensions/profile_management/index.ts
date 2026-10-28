@@ -418,8 +418,7 @@ function genOnProfileChange(
 
         if (current === undefined) {
           log("info", "switched to no profile");
-          confirmProfile(undefined, undefined);
-          return queue;
+          return queue.then(() => confirmProfile(undefined, undefined));
         }
 
         sanitizeProfile(store, profile);
@@ -706,13 +705,17 @@ function removeProfileImpl(api: IExtensionApi, profileId: string) {
     .catch((err) => (err.code === "ENOENT" ? PromiseBB.resolve() : PromiseBB.reject(err)))
     .then(() => {
       const gameMode = profiles[profileId].gameId;
-      const lastProfileId = lastActiveProfileForGame(state, gameMode);
+      const lastProfileId = lastActiveProfileForGame(api.getState(), gameMode);
       if (profileId === lastProfileId) {
         store.dispatch(clearLastActiveProfile(gameMode));
       }
       store.dispatch(removeProfile(profileId));
     })
     .catch((err) => {
+      const remaining = api.getState().persistent.profiles[profileId];
+      if (remaining !== undefined) {
+        store.dispatch(setProfile({ ...remaining, pendingRemove: false }));
+      }
       api.showErrorNotification("Failed to remove profile", err, {
         allowReport: err.code !== "EPERM",
       });

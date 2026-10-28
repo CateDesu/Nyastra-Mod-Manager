@@ -127,12 +127,6 @@ export async function download<T>(
       : [];
   const isChunked = chunks.length > 1;
 
-  const completedRanges = checkpoint?.completedRanges ?? [];
-  const pendingChunks = chunks.filter(
-    (chunk) =>
-      !completedRanges.some((r) => r.start <= chunk.range.start && r.end >= chunk.range.end),
-  );
-
   let handle: FileHandle;
 
   try {
@@ -145,6 +139,20 @@ export async function download<T>(
   }
 
   try {
+    if (checkpoint) {
+      const { size } = await handle.fd.stat();
+      // A shortened partial no longer contains every completed range.
+      if (checkpoint.completedRanges.some((range) => range.end >= size)) {
+        checkpoint = undefined;
+        await handle.fd.truncate(0);
+      }
+    }
+    const completedRanges = checkpoint?.completedRanges ?? [];
+    const pendingChunks = chunks.filter(
+      (chunk) =>
+        !completedRanges.some((r) => r.start <= chunk.range.start && r.end >= chunk.range.end),
+    );
+
     if (checkpoint && probe.size) {
       try {
         await handle.fd.truncate(probe.size);

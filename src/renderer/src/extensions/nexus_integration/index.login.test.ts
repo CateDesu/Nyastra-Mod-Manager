@@ -1,6 +1,6 @@
 import Nexus from "@nexusmods/nexus-api";
 import Quota from "@nexusmods/nexus-api/lib/Quota";
-import { afterEach, expect, vi } from "vitest";
+import { afterEach, beforeAll, expect, vi } from "vitest";
 
 import { test } from "@/test-utils/harnessTest";
 import type { IExtensionContext } from "@/types/IExtensionContext";
@@ -17,6 +17,13 @@ vi.mock("./util", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   retrieveNexusGames: vi.fn().mockResolvedValue([]),
 }));
+
+let init: typeof NexusExtension.default;
+
+beforeAll(async () => {
+  // Import after the shared setup initializes program paths.
+  init = (await vi.importActual<typeof NexusExtension>("./index")).default;
+});
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -56,7 +63,6 @@ test("restores a saved API key before the first download after startup", async (
     } as unknown as IExtensionContext,
     { get: (target, key) => Reflect.get(target, key) ?? vi.fn() },
   );
-  const { default: init } = await vi.importActual<typeof NexusExtension>("./index");
   expect(init(context)).toBe(true);
   let nexus: Nexus;
   context["registerNexusIntegration"]((client: Nexus) => {

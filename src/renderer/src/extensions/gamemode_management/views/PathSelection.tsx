@@ -25,6 +25,9 @@ function GameSelectionDialog(props: IProps): JSX.Element {
   const { t, onHide, onScan, onSelectPath, onSetSearchPaths, searchPaths, visible } = props;
 
   const [paths, setPaths] = React.useState(searchPaths);
+  React.useEffect(() => {
+    if (visible) setPaths(searchPaths);
+  }, [visible, searchPaths]);
 
   const addSearchPath = React.useCallback(() => {
     setPaths([].concat(paths, "/"));
@@ -68,8 +71,12 @@ function GameSelectionDialog(props: IProps): JSX.Element {
         />
       </Modal.Body>
       <Modal.Footer>
-        <Button onClick={onHide}>{t("Cancel")}</Button>
-        <Button onClick={scan}>{t("Scan")}</Button>
+        <Button data-testid="game-search-cancel" onClick={onHide}>
+          {t("Cancel")}
+        </Button>
+        <Button data-testid="game-search-scan" onClick={scan}>
+          {t("Scan")}
+        </Button>
       </Modal.Footer>
     </Modal>
   );

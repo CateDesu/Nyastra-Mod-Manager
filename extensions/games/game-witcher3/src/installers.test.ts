@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { GAME_ID } from "./common";
 import { MAX_MOD_NAME_LENGTH } from "./edition";
-import { installContent, testSupportedContent } from "./installers";
+import { installContent, installTL, testSupportedContent, testSupportedTL } from "./installers";
 
 // Built with the host's separators, as the file lists Vortex passes in are.
 const SCRIPT = path.join("content", "scripts", "x.ws");
@@ -26,6 +26,43 @@ describe("testSupportedContent", () => {
   it("ignores archives for other games", async () => {
     const result = await testSupportedContent([SCRIPT], "skyrim");
     expect(result.supported).toBeFalsy();
+  });
+});
+
+describe("top-level Witcher archives", () => {
+  it.each([{ prefix: [] }, { prefix: ["Wrapper"] }, { prefix: ["Wrapper", "Release"] }])(
+    "strips the complete wrapper path $prefix",
+    async ({ prefix }) => {
+      const source = path.join(...prefix, "Mods", "modFixture", "content", "data.bundle");
+      const sibling = path.join(...prefix, "DLC", "dlcFixture", "content", "data.bundle");
+      const directory = path.join(...prefix, "Mods") + path.sep;
+      expect((await testSupportedTL([directory, source, sibling], GAME_ID)).supported).toBe(true);
+      expect((await installTL([directory, source, sibling])).instructions).toEqual([
+        {
+          type: "copy",
+          source,
+          destination: path.join("Mods", "modFixture", "content", "data.bundle"),
+        },
+        {
+          type: "copy",
+          source: sibling,
+          destination: path.join("DLC", "dlcFixture", "content", "data.bundle"),
+        },
+      ]);
+    },
+  );
+
+  it("excludes files outside the selected wrapper boundary", async () => {
+    const source = path.join("Wrapper", "Mods", "modFixture", "content", "data.bundle");
+    expect(
+      (await installTL([source, path.join("Wrapper2", "unrelated.txt")])).instructions,
+    ).toEqual([
+      {
+        type: "copy",
+        source,
+        destination: path.join("Mods", "modFixture", "content", "data.bundle"),
+      },
+    ]);
   });
 });
 

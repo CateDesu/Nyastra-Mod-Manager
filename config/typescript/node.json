@@ -3,9 +3,11 @@
   "include": [
     "../../config/eslint-rules/*.mjs",
     "../../eslint.config.mjs",
+    "../../linux/extension-adaptations/*.mjs",
     "../../scripts/**/*.mjs",
     "../../scripts/**/*.ts",
     "../../src/main/src/store/queryParser.ts",
+    "../../src/shared/src/programVersion.ts",
     "../../ts-to-zod.config.mjs",
     "../../vitest.config.ts",
     "../*.ts",

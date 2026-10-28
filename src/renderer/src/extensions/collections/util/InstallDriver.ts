@@ -100,6 +100,7 @@ class InstallDriver {
   private mPrepare: Bluebird<void> = Bluebird.resolve();
   private mTimeStarted: number;
   private mPostprocessing: boolean = false;
+  private mStartGeneration: number = 0;
 
   // Throttle the progress notification to avoid flooding Redux/UI on every single mod
   // event. (Session status writes are dispatched directly now - InstallManager is the
@@ -377,6 +378,7 @@ class InstallDriver {
       });
       return;
     }
+    this.mStartGeneration++;
     this.mProfile = profile;
     this.mLastCollection = this.mCollection = collection;
     this.mGameId = profile?.gameId ?? activeGameId(this.mApi.getState());
@@ -576,7 +578,9 @@ class InstallDriver {
 
   public async continue() {
     if (this.canContinue() && this.mCollection?.archiveId !== undefined) {
+      const generation = this.mStartGeneration;
       await this.initCollectionInfo();
+      if (generation !== this.mStartGeneration) return;
 
       const steps = {
         query: this.startInstall,
@@ -621,11 +625,12 @@ class InstallDriver {
     if (this.mCollection?.archiveId === undefined) {
       return;
     }
+    const generation = this.mStartGeneration;
     const slug = this.collectionSlug;
     const state: IState = this.mApi.store.getState();
     const modInfo = state.persistent.downloads.files[this.mCollection.archiveId]?.modInfo;
     const nexusInfo = modInfo?.nexus;
-    this.mCollectionInfo =
+    const collectionInfo =
       nexusInfo?.collectionInfo ??
       (await this.mInfoCache.getCollectionInfo(slug)) ??
       // this last fallback is for the weird case where we have revision info cached but
@@ -634,6 +639,8 @@ class InstallDriver {
       // Not sure if/why this would happen on live, it did occur during testing because the
       // stuff was getting deleted from the DB directly
       this.mRevisionInfo?.collection;
+    if (generation !== this.mStartGeneration) return;
+    this.mCollectionInfo = collectionInfo;
   }
 
   /**
@@ -766,6 +773,7 @@ class InstallDriver {
     outcome: "cancelled" | "paused" = "cancelled",
     context: CollectionInstallOutcomeContext = {},
   ) {
+    this.mStartGeneration++;
     this.mPostprocessing = false;
     if (this.mCollection !== undefined) {
       this.mApi.dismissNotification(INSTALLING_NOTIFICATION_ID + this.mCollection.id);
@@ -799,14 +807,16 @@ class InstallDriver {
     // a restarted install replaces the hold it already has
     this.mOnStop?.();
     // hold off the checks while the collection installs
+    let releaseHold: (() => void) | undefined;
     this.mApi.ext.withSuppressedTests?.(
       ["plugins-changed", "settings-changed", "mod-activated", "mod-installed"],
       () =>
         new Promise<void>((resolve) => {
-          this.mOnStop = () => {
+          const release = () => {
             resolve();
-            this.mOnStop = undefined;
+            if (this.mOnStop === release) this.mOnStop = undefined;
           };
+          this.mOnStop = releaseHold = release;
         }),
     );
 
@@ -817,7 +827,7 @@ class InstallDriver {
       return started;
     } finally {
       if (started === false) {
-        this.mOnStop?.();
+        releaseHold?.();
       }
     }
   };
@@ -826,6 +836,7 @@ class InstallDriver {
     if (this.mCollection?.archiveId === undefined || this.mProfile === undefined) {
       return false;
     }
+    const generation = ++this.mStartGeneration;
 
     this.mInstalledMods = [];
     this.mInstallingMod = undefined;
@@ -859,9 +870,11 @@ class InstallDriver {
 
     if (revisionId !== undefined) {
       try {
-        this.mRevisionInfo = Array.isArray(nexusInfo?.revisionInfo?.modFiles)
+        const revisionInfo = Array.isArray(nexusInfo?.revisionInfo?.modFiles)
           ? nexusInfo.revisionInfo
           : await this.mInfoCache.getRevisionInfo(revisionId, slug, this.revisionNumber);
+        if (generation !== this.mStartGeneration) return false;
+        this.mRevisionInfo = revisionInfo;
       } catch (err) {
         log("error", "failed to get remote info for revision", {
           revisionId,
@@ -871,6 +884,7 @@ class InstallDriver {
         });
       }
     }
+    if (generation !== this.mStartGeneration) return false;
 
     const { userInfo } = state.persistent["nexus"] ?? {};
     // don't request a vote on own collection
@@ -882,6 +896,7 @@ class InstallDriver {
     const currentgame = getGame(gameMode);
     const discovery = discoveryByGame(state, gameMode);
     const gameVersion = await currentgame.getInstalledVersion(discovery);
+    if (generation !== this.mStartGeneration) return false;
     const gvMatch = (gv) => gv.reference === gameVersion;
     const revGameVersions = this.mRevisionInfo?.gameVersions ?? [];
     if ((revGameVersions.length ?? 0 !== 0) && revGameVersions.find(gvMatch) === undefined) {
@@ -908,6 +923,7 @@ class InstallDriver {
         },
         [{ label: "Cancel" }, { label: "Continue" }],
       );
+      if (generation !== this.mStartGeneration) return false;
       if (choice.action === "Cancel") {
         this.mInstallDone = true;
         return false;

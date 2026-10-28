@@ -3,6 +3,7 @@ import * as path from "path";
 
 import type { ICollectionManifest, ICreateCollectionResult } from "@nexusmods/nexus-api";
 import { uploadHeadersFor } from "@vortex/nexus-api-v3";
+import { UserCanceled } from "@vortex/shared/errors";
 
 import { log } from "../../../logging";
 import type { IExtensionApi } from "../../../types/IExtensionContext";
@@ -15,7 +16,7 @@ import { pollUploadAvailable, uploadFile, uploadS3Multipart } from "./uploadV3";
 
 export type SubmitCollectionOptions = {
   onProgress?: UploadProgressHandler;
-  /** Aborting stops the transfer; the upload session is then abandoned. */
+  /** Aborting stops submission and abandons the upload session. */
   abortSignal?: AbortSignal;
 };
 
@@ -26,11 +27,27 @@ export async function submitCollectionV3(
   collectionId: number | undefined,
   options: SubmitCollectionOptions = {},
 ): Promise<ICreateCollectionResult> {
+  try {
+    options.abortSignal?.throwIfAborted();
+    return await submitCollection(api, collectionInfo, assetFilePath, collectionId, options);
+  } catch (err) {
+    if (options.abortSignal?.aborted) throw new UserCanceled();
+    throw err;
+  }
+}
+
+async function submitCollection(
+  api: IExtensionApi,
+  collectionInfo: ICollectionManifest,
+  assetFilePath: string,
+  collectionId: number | undefined,
+  options: SubmitCollectionOptions,
+): Promise<ICreateCollectionResult> {
   if (!isLoggedIn(api.getState())) {
     throw new Error("Not logged in to Nexus Mods");
   }
 
-  const client = createVortexNexusV3Client(api);
+  const client = createVortexNexusV3Client(api, { signal: options.abortSignal });
   const { size: fileSize } = await stat(assetFilePath);
   const filename = path.basename(assetFilePath);
 
@@ -42,11 +59,8 @@ export async function submitCollectionV3(
 
   // Step 1: Create upload session
   //
-  // Aborting mid-transfer abandons the session rather than releasing it: the v3
-  // API exposes no way to cancel or delete one (its only upload operations are
-  // create, create-multipart, finalise and get). An abandoned session is never
-  // finalised, so it stays `created` and is never referenced by a collection;
-  // any parts already written rely on the storage's own cleanup.
+  // Cancellation cannot undo accepted requests or delete remote upload sessions.
+  // Storage cleanup remains with the server.
   let uploadId: string;
 
   // The session is presigned against these header values; they have to be sent
@@ -74,7 +88,7 @@ export async function submitCollectionV3(
 
   // Step 2: Finalise and wait for availability
   await client.finaliseUpload(uploadId);
-  await pollUploadAvailable(client, uploadId);
+  await pollUploadAvailable(client, uploadId, abortSignal);
 
   // Step 3: Create collection or revision
   const payload = toV3CollectionPayload(collectionInfo);

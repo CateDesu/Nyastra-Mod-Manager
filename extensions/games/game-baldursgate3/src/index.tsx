@@ -94,7 +94,7 @@ function findGame(): any {
 
 async function ensureGlobalProfile(api: types.IExtensionApi, discovery: types.IDiscoveryResult) {
   if (discovery?.path) {
-    const profilePath = await globalProfilePath(api);
+    const profilePath = await globalProfilePath(api, discovery);
     try {
       await fs.ensureDirWritableAsync(profilePath);
       const modSettingsFilePath = path.join(profilePath, "modsettings.lsx");
@@ -111,7 +111,7 @@ async function ensureGlobalProfile(api: types.IExtensionApi, discovery: types.ID
 }
 
 async function prepareForModding(api: types.IExtensionApi, discovery) {
-  const mp = modsPath();
+  const mp = modsPath(api, discovery);
 
   const format = await getDefaultModSettingsFormat(api);
   if (!["v7", "v8"].includes(format)) {
@@ -211,7 +211,7 @@ async function onGameModeActivated(api: types.IExtensionApi, gameId: string) {
   try {
     await migrate(api);
     const bg3ProfileId = await getActivePlayerProfile(api);
-    const gameSettingsPath: string = path.join(profilesPath(), bg3ProfileId, "modsettings.lsx");
+    const gameSettingsPath: string = path.join(profilesPath(api), bg3ProfileId, "modsettings.lsx");
     // The game generates modsettings.lsx on first run for the active player
     // profile. If it's absent (game never launched on this profile, or the
     // profile resolved to the "global" fallback) there is nothing to read or
@@ -279,7 +279,7 @@ function main(context: types.IExtensionContext) {
         relative: true,
       },
     ],
-    queryModPath: modsPath,
+    queryModPath: () => modsPath(context.api),
     logo: "gameart.jpg",
     executable: () => "bin/bg3_dx11.exe",
     setup: (discovery) => prepareForModding(context.api, discovery) as any,
@@ -381,7 +381,7 @@ function main(context: types.IExtensionContext) {
     MOD_TYPE_SECONFIG,
     15,
     (gameId) => gameId === GAME_ID,
-    () => scriptExtenderPath(),
+    () => scriptExtenderPath(context.api),
     () => Bluebird.resolve(false),
     { name: "BG3 Script Extender Config" } as any,
   );
@@ -473,7 +473,11 @@ function main(context: types.IExtensionContext) {
     "Open Load Order File",
     () => {
       getActivePlayerProfile(context.api).then((bg3ProfileId) => {
-        const gameSettingsPath: string = path.join(profilesPath(), bg3ProfileId, "modsettings.lsx");
+        const gameSettingsPath: string = path.join(
+          profilesPath(context.api),
+          bg3ProfileId,
+          "modsettings.lsx",
+        );
         util.opn(gameSettingsPath).catch(() => null);
       });
     },

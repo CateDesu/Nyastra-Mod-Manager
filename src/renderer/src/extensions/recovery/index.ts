@@ -18,12 +18,12 @@ import Workarounds from "./Workarounds";
 
 const ONE_HOUR = 60 * 60 * 1000;
 
-function createBackup(api: IExtensionApi, name: string): Promise<string> {
+function createBackup(api: IExtensionApi, name: string): Promise<string | undefined> {
   return createFullStateBackup(name, api.store).catch((err) => {
     log("error", "failed to create state backup", {
       error: getErrorMessageOrDefault(err),
     });
-    return api.sendNotification({
+    api.sendNotification({
       type: "error",
       message: "Failed to create state backup.",
       actions: [
@@ -48,6 +48,7 @@ function createBackup(api: IExtensionApi, name: string): Promise<string> {
         },
       ],
     });
+    return undefined;
   });
 }
 
@@ -99,8 +100,9 @@ async function resetToManifest(api: IExtensionApi) {
     const mods = getSafe(state, ["persistent", "mods", profile.gameId], {});
     const isEnabled = (modId) => getSafe(profile, ["modState", modId, "enabled"], false);
     Object.keys(mods).forEach((modId) => {
-      if (isEnabled(modId) !== enabledMods.has(modId)) {
-        api.store.dispatch(setModEnabled(profile.id, modId, enabledMods.has(modId)));
+      const enabled = enabledMods.has(mods[modId].installationPath);
+      if (isEnabled(modId) !== enabled) {
+        api.store.dispatch(setModEnabled(profile.id, modId, enabled));
       }
     });
   } catch (err) {
@@ -116,7 +118,8 @@ function init(context: IExtensionContext): boolean {
     Workarounds,
     () => ({
       onCreateManualBackup: () => {
-        void createBackup(context.api, "manual").then((backupPath) =>
+        return createBackup(context.api, "manual").then((backupPath) => {
+          if (backupPath === undefined) return;
           context.api.sendNotification({
             type: "success",
             message: "Backup created",
@@ -144,8 +147,8 @@ function init(context: IExtensionContext): boolean {
                 },
               },
             ],
-          }),
-        );
+          });
+        });
       },
     }),
     undefined,

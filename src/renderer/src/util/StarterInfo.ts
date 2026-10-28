@@ -91,11 +91,16 @@ async function shouldRunWithProton(
     const steamStore = storeLookup.getGameStore(getGameStoresSafe(), "steam") as Steam;
     const games = await steamStore.allGames();
 
-    // Find the game entry that matches this executable's location
+    const isInGame = (target: string, gamePath: string) => {
+      if (!target) return false;
+      const relative = path.relative(gamePath, target);
+      return (
+        relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)
+      );
+    };
+
     return games.find(
-      (g) =>
-        info.workingDirectory?.toLowerCase().startsWith(g.gamePath.toLowerCase()) ||
-        info.exePath.toLowerCase().startsWith(g.gamePath.toLowerCase()),
+      (g) => isInGame(info.workingDirectory, g.gamePath) || isInGame(info.exePath, g.gamePath),
     );
   } catch (err: any) {
     log("debug", "Could not check for Proton execution", {

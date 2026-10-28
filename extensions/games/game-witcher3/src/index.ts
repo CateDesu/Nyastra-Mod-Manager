@@ -172,7 +172,7 @@ function prepareForModding(api: types.IExtensionApi) {
       Promise.all([
         ensurePath(path.join(discovery.path, "Mods")),
         ensurePath(path.join(discovery.path, "DLC")),
-        ensurePath(path.dirname(getLoadOrderFilePath())),
+        ensurePath(path.dirname(getLoadOrderFilePath(api, discovery))),
       ])
         // Runs before the download, which resolves the install directory from
         // the tool this may re-point.
@@ -271,7 +271,7 @@ function main(context: types.IExtensionContext) {
     "witcher3menumoddocuments",
     60,
     isTW3(context.api),
-    getDocumentsPath,
+    (game) => getDocumentsPath(game, context.api),
     () => Bluebird.resolve(false),
   );
 

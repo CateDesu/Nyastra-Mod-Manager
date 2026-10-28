@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
@@ -98,6 +98,91 @@ function setup(downloads: Record<string, IDownload>) {
 }
 
 describe("download filesystem ownership", () => {
+  it("settles an import with no active game without copying files", async () => {
+    const source = path.join(root, "incoming.zip");
+    await writeFile(source, "unassigned archive");
+    const harness = setup({});
+    harness.setState((state) => {
+      state.settings.profiles.activeProfileId = undefined;
+    });
+    const completed = vi.fn();
+
+    harness.api.events.emit("import-downloads", [source], completed, true);
+
+    await vi.waitFor(() => expect(completed).toHaveBeenCalledExactlyOnceWith([]));
+    expect(harness.getState().persistent.downloads.files).toEqual({});
+    expect(await readFile(source, "utf8")).toBe("unassigned archive");
+    expect(await readdir(path.join(root, GAME))).toEqual([]);
+  });
+
+  it("imports a fresh directory using the native archive writer", async () => {
+    const source = path.join(root, "fresh-directory");
+    await mkdir(source);
+    await writeFile(path.join(source, "new.txt"), "current directory payload");
+    const harness = setup({});
+
+    const ids = await new Promise<string[]>((resolve) => {
+      harness.api.events.emit("import-downloads", [source], resolve, true);
+    });
+
+    const extracted = path.join(root, "extracted");
+    await new Zip().extractFull(path.join(root, GAME, "fresh-directory.7z"), extracted);
+    expect(await readdir(extracted)).toEqual(["new.txt"]);
+    expect(await readFile(path.join(extracted, "new.txt"), "utf8")).toBe(
+      "current directory payload",
+    );
+    expect(ids).toHaveLength(1);
+    expect(harness.getState().persistent.downloads.files[ids[0]]).toMatchObject({
+      game: [GAME],
+      localPath: "fresh-directory.7z",
+    });
+  });
+
+  for (const action of ["Cancel", "Replace"]) {
+    it(`honors ${action} for a directory archive collision`, async () => {
+      const source = path.join(root, "incoming-directory");
+      const oldSource = path.join(root, "old-source");
+      await Promise.all([mkdir(source), mkdir(oldSource)]);
+      await writeFile(path.join(source, "new.txt"), "current directory payload");
+      await writeFile(path.join(oldSource, "stale.txt"), "previous directory payload");
+      const destination = path.join(root, GAME, "incoming-directory.7z");
+      await new Zip().add(destination, [path.join(oldSource, "stale.txt")]);
+      const originalBytes = await readFile(destination);
+      await writeFile(path.join(root, OTHER_GAME, "incoming-directory.7z"), "other archive");
+      const original = download("original", GAME, "incoming-directory.7z");
+      const other = download("other", OTHER_GAME, "incoming-directory.7z");
+      const harness = setup({ original, other });
+      harness.setNextDialog({ action, input: {} });
+
+      const ids = await new Promise<string[]>((resolve) => {
+        harness.api.events.emit("import-downloads", [source], resolve, true);
+      });
+
+      if (action === "Cancel") {
+        expect(await readFile(destination)).toEqual(originalBytes);
+        expect(ids).toEqual([]);
+        expect(harness.getState().persistent.downloads.files.original).toEqual(original);
+      } else {
+        const extracted = path.join(root, "extracted");
+        await new Zip().extractFull(destination, extracted);
+        expect(await readdir(extracted)).toEqual(["new.txt"]);
+        expect(await readFile(path.join(extracted, "new.txt"), "utf8")).toBe(
+          "current directory payload",
+        );
+        expect(ids).toHaveLength(1);
+        expect(harness.getState().persistent.downloads.files.original).toBeUndefined();
+        expect(harness.getState().persistent.downloads.files[ids[0]]).toMatchObject({
+          game: [GAME],
+          localPath: "incoming-directory.7z",
+        });
+      }
+      expect(harness.getState().persistent.downloads.files.other).toEqual(other);
+      expect(await readFile(path.join(root, OTHER_GAME, "incoming-directory.7z"), "utf8")).toBe(
+        "other archive",
+      );
+    });
+  }
+
   it("keeps inactive-game archives with zero received bytes during active-game cleanup", async () => {
     await writeFile(path.join(root, GAME, "active.zip"), "active!!");
     await writeFile(path.join(root, OTHER_GAME, "other.zip"), "other!!!");

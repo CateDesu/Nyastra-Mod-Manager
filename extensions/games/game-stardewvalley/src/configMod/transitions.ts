@@ -13,7 +13,7 @@ import type { IEntry } from "turbowalk";
 
 import { GAME_ID, MOD_CONFIG, MOD_MANIFEST } from "../common";
 import { selectSdvMods } from "../state/selectors";
-import { deleteFolder, walkPath } from "./filesystem";
+import { walkPath } from "./filesystem";
 import {
   extractConfigModAttributes,
   initializeConfigMod,
@@ -80,28 +80,34 @@ export async function onWillEnableModsImpl(
       skipHidden: true,
       skipInaccessible: true,
     });
-    const manifestFile = files.find((file) => path.basename(file.filePath) === MOD_MANIFEST);
-    if (manifestFile === undefined) {
+    const manifests = files.filter((file) => path.basename(file.filePath) === MOD_MANIFEST);
+    if (manifests.length === 0) {
       continue;
     }
 
-    const relPath = path.relative(modPath, path.dirname(manifestFile.filePath));
-    const modConfigFilePath = path.join(configMod.configModPath, relPath, MOD_CONFIG);
-    await fs
-      .copyAsync(modConfigFilePath, path.join(modPath, relPath, MOD_CONFIG), {
-        overwrite: true,
-      })
-      .catch(() => null);
-
     try {
-      await applyToConfigMod(api, profileId, () => deleteFolder(path.dirname(modConfigFilePath)));
+      for (const manifest of manifests) {
+        const relPath = path.relative(modPath, path.dirname(manifest.filePath));
+        const modConfigFilePath = path.join(configMod.configModPath, relPath, MOD_CONFIG);
+        try {
+          await fs.statAsync(modConfigFilePath);
+        } catch (err) {
+          if (err.code === "ENOENT") {
+            continue;
+          }
+          throw err;
+        }
+        await fs.copyAsync(modConfigFilePath, path.join(modPath, relPath, MOD_CONFIG), {
+          overwrite: true,
+        });
+        await applyToConfigMod(api, profileId, () => fs.removeAsync(modConfigFilePath));
+      }
+      removeConfigModAttributes(api, configMod.mod, [modId]);
     } catch (err) {
       api.showErrorNotification?.("Failed to write mod config", err);
-      return;
+      throw err;
     }
   }
-
-  removeConfigModAttributes(api, configMod.mod, relevantModIds);
 }
 
 /** Restores all tracked config files from the synthetic config mod to their mods. */
@@ -131,19 +137,18 @@ export async function onRevertFilesImpl(
 async function applyToConfigMod(
   api: types.IExtensionApi,
   profileId: string,
-  cb: () => Promise<void>,
+  cb: () => PromiseLike<void>,
 ): Promise<void> {
-  try {
-    const configMod = await initializeConfigMod(api, profileId);
-    if (configMod === undefined) {
-      return;
-    }
+  const configMod = await initializeConfigMod(api, profileId);
+  if (configMod === undefined) {
+    return;
+  }
 
-    // Re-deploy around edits so deployment metadata stays consistent.
-    await api.emitAndAwait("deploy-single-mod", GAME_ID, configMod.mod.id, false);
+  // Re-deploy around edits so deployment metadata stays consistent.
+  await api.emitAndAwait("deploy-single-mod", GAME_ID, configMod.mod.id, false);
+  try {
     await cb();
+  } finally {
     await api.emitAndAwait("deploy-single-mod", GAME_ID, configMod.mod.id, true);
-  } catch (err) {
-    api.showErrorNotification?.("Failed to write mod config", err);
   }
 }

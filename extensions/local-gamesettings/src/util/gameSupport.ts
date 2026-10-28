@@ -141,6 +141,18 @@ export function gameSupported(gameMode: string): boolean {
 }
 
 export function mygamesPath(gameMode: string): string {
+  const discovery = discoveryForGame(gameMode);
+  if (discovery?.protonPrefix) {
+    return path.join(
+      discovery.protonPrefix,
+      "drive_c",
+      "users",
+      "steamuser",
+      "Documents",
+      "My Games",
+      gameSupport.get(gameMode, "mygamesPath"),
+    );
+  }
   return path.join(
     util.getVortexPath("documents"),
     "My Games",

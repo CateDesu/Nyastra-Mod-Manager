@@ -1,6 +1,8 @@
+import { realpath } from "node:fs/promises";
 import * as path from "path";
 import * as util from "util";
 
+import { getErrorCode } from "@vortex/shared";
 import PromiseBB from "bluebird";
 import type { TFunction } from "i18next";
 import type { IEntry } from "turbowalk";
@@ -11,6 +13,7 @@ import type { IExtensionApi, IExtensionContext } from "../../types/IExtensionCon
 import type { IGame } from "../../types/IGame";
 import { UserCanceled } from "../../util/CustomErrors";
 import * as fs from "../../util/fs";
+import { moveFileNoReplace } from "../../util/fsAtomic";
 import { log } from "../../util/log";
 import type { IDiscoveryResult } from "../gamemode_management/types/IDiscoveryResult";
 import { getGame } from "../gamemode_management/util/getGame";
@@ -234,6 +237,30 @@ class DeploymentMethod extends LinkingDeployment {
 
   protected purgeLinks(installationPath: string, dataPath: string): PromiseBB<void> {
     let links: IEntry[] = [];
+    let purgeFailed = false;
+    let purgeError: unknown;
+    const directories = new Map<string, Promise<string>>();
+    const resolveDirectory = (directory: string): Promise<string> => {
+      if (!directories.has(directory)) {
+        directories.set(
+          directory,
+          realpath(directory).catch((err) => {
+            const parent = path.dirname(directory);
+            if (getErrorCode(err) !== "ENOENT" || parent === directory) throw err;
+            return resolveDirectory(parent).then((resolved) =>
+              path.join(resolved, path.basename(directory)),
+            );
+          }),
+        );
+      }
+      return directories.get(directory);
+    };
+    const isInside = (directory: string, target: string): boolean => {
+      const relative = path.relative(directory, target);
+      return (
+        relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)
+      );
+    };
 
     // find lnk files in our mods directory
     return turbowalk(
@@ -246,7 +273,31 @@ class DeploymentMethod extends LinkingDeployment {
         skipHidden: false,
         skipInaccessible: false,
       },
-    ).then(() => PromiseBB.map(links, (entry) => this.restoreLink(entry.filePath)));
+    )
+      .then(() =>
+        PromiseBB.map(links, (entry) =>
+          this.readLink(entry.filePath.slice(0, -LNK_EXT.length))
+            .then(async (link) => {
+              if (isInside(dataPath, link.target)) {
+                return this.restoreLink(entry.filePath);
+              }
+              const [root, parent] = await Promise.all([
+                resolveDirectory(dataPath),
+                resolveDirectory(path.dirname(link.target)),
+              ]);
+              if (isInside(root, path.join(parent, path.basename(link.target)))) {
+                return this.restoreLink(entry.filePath);
+              }
+            })
+            .catch((err: unknown) => {
+              if (!purgeFailed) purgeError = err;
+              purgeFailed = true;
+            }),
+        ),
+      )
+      .then(() => {
+        if (purgeFailed) throw purgeError;
+      });
   }
 
   protected linkFile(linkPath: string, sourcePath: string, dirTags?: boolean): Promise<void> {
@@ -267,7 +318,14 @@ class DeploymentMethod extends LinkingDeployment {
       .readFileAsync(sourcePath + LNK_EXT, { encoding: "utf-8" })
       .then((data) => {
         try {
-          return JSON.parse(data).target === linkPath;
+          if (JSON.parse(data).target !== linkPath) return false;
+          // A staged file means the move did not finish or was changed externally.
+          return fs
+            .lstatAsync(sourcePath)
+            .then(() => false)
+            .catch((err) =>
+              err.code === "ENOENT" ? PromiseBB.resolve(true) : PromiseBB.reject(err),
+            );
         } catch (err) {
           log("error", "invalid link", { link: sourcePath + LNK_EXT, data });
           return false;
@@ -325,20 +383,31 @@ class DeploymentMethod extends LinkingDeployment {
         fs.statAsync(sourcePath + LNK_EXT).then(() => this.restoreLink(sourcePath + LNK_EXT)),
       )
       .then(() =>
-        fs.writeFileAsync(sourcePath + LNK_EXT, linkInfo, {
-          encoding: "utf-8",
-        }),
-      )
-      .then(() =>
-        fs.statAsync(sourcePath).then((stat) =>
-          // TODO: Hmm, unfortunately this seems to be really slow (on windows at least)
-          //   The alternative would be to store mtime in the linkInfo and then use that when
-          //   checking if the content has changed (not that that could happen with move
-          //   deployment anyway)
-          fs.utimesAsync(sourcePath + LNK_EXT, stat.atime as any, stat.mtime as any),
-        ),
-      )
-      .then(() => fs.renameAsync(sourcePath, linkPath));
+        fs
+          .writeFileAsync(sourcePath + LNK_EXT, linkInfo, {
+            encoding: "utf-8",
+          })
+          .then(() =>
+            fs
+              .statAsync(sourcePath)
+              .then((stat) =>
+                fs.utimesAsync(sourcePath + LNK_EXT, stat.atime as any, stat.mtime as any),
+              ),
+          )
+          .then(() => fs.renameAsync(sourcePath, linkPath))
+          .catch((err) =>
+            // A failed move must not leave a placeholder claiming the target file.
+            fs
+              .removeAsync(sourcePath + LNK_EXT)
+              .catch((cleanupError) => {
+                log("warn", "failed to remove placeholder after deployment failure", {
+                  path: sourcePath + LNK_EXT,
+                  error: cleanupError.message,
+                });
+              })
+              .then(() => PromiseBB.reject(err)),
+          ),
+      );
   }
 
   private restoreLink(linkPath: string): PromiseBB<void> {
@@ -346,18 +415,12 @@ class DeploymentMethod extends LinkingDeployment {
       try {
         const dat = JSON.parse(data);
         const outPath = linkPath.replace(this.mLnkExpression, "");
-        return fs
-          .renameAsync(dat.target, outPath)
+        return PromiseBB.resolve(moveFileNoReplace(dat.target, outPath))
           .catch((err) =>
             err.code === "ENOENT"
               ? // file was deleted. Well, the user is the boss...
                 PromiseBB.resolve()
-              : // how did we successfully deploy if this is on a different drive?
-                // if the game was moved the links shouldn't point to a valid location,
-                // if the staging folder was moved we should have purged
-                err.code === "EXDEV"
-                ? fs.moveAsync(dat.target, outPath)
-                : PromiseBB.reject(err),
+              : PromiseBB.reject(err),
           )
           .then(() => fs.removeAsync(linkPath));
       } catch (err) {

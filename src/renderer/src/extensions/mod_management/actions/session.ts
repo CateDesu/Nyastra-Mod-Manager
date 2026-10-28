@@ -1,7 +1,7 @@
 import safeCreateAction from "../../../actions/safeCreateAction";
 import { UserCanceled } from "../../../util/CustomErrors";
 import type { IFileChange } from "../types/IDeploymentMethod";
-import type { IFileEntry } from "../types/IFileEntry";
+import type { FileAction, IFileEntry, IFileEntryIdentity } from "../types/IFileEntry";
 import { changeToEntry } from "../util/externalChanges";
 
 export interface IDeploymentProblem {
@@ -55,7 +55,10 @@ export const setExternalChanges = safeCreateAction("SET_EXTERNAL_CHANGES", (entr
 
 export const setExternalChangeAction = safeCreateAction(
   "SET_EXTERNAL_CHANGE_ACTION",
-  (filePaths: string[], action: string) => ({ filePaths, action }),
+  (files: IFileEntryIdentity[], action: FileAction) => ({
+    files: files.map(({ modTypeId, source, filePath }) => ({ modTypeId, source, filePath })),
+    action,
+  }),
 );
 
 let curResolve;

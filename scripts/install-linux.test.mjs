@@ -307,6 +307,92 @@ test("failed desktop registration restores the prior runtime and launcher", () =
   }
 });
 
+for (const launcher of ["wrapper", "desktop"]) {
+  void test(`a read-only ${launcher} directory preserves the previous installation on failure`, () => {
+    const f = fixture();
+    let directory;
+    try {
+      assert.equal(f.run().status, 0);
+      writeFileSync(f.wrapper, "previous wrapper");
+      writeFileSync(f.desktop, "previous desktop");
+      const wrapper = readFileSync(f.wrapper);
+      const desktop = readFileSync(f.desktop);
+      writeFileSync(path.join(f.source, "version"), "failed update");
+      directory = path.dirname(f[launcher]);
+      chmodSync(directory, 0o555);
+
+      const failed = f.run();
+
+      assert.equal(failed.status, 1, failed.stderr);
+      assert.match(failed.stderr, /EACCES/);
+      assert.equal(readFileSync(path.join(f.app, "version"), "utf8"), "one");
+      assert.deepEqual(readFileSync(f.wrapper), wrapper);
+      assert.deepEqual(readFileSync(f.desktop), desktop);
+      chmodSync(directory, 0o755);
+      assert.equal(f.run().status, 0, "The failed installer releases its lock for retry");
+      assert.equal(readFileSync(path.join(f.app, "version"), "utf8"), "failed update");
+    } finally {
+      if (directory) chmodSync(directory, 0o755);
+      f.clean();
+    }
+  });
+}
+
+void test("failed imported-profile cleanup does not block runtime and launcher recovery", () => {
+  const f = fixture();
+  const imported = path.join(f.env.XDG_CONFIG_HOME, "NyastraModManager");
+  try {
+    assert.equal(f.run().status, 0);
+    writeFileSync(f.wrapper, "previous wrapper");
+    writeFileSync(f.desktop, "previous desktop");
+    writeFileSync(f.env.HANDLER, "prior-custom.desktop");
+    const wrapper = readFileSync(f.wrapper);
+    const desktop = readFileSync(f.desktop);
+    const sourceProfile = path.join(f.root, "Vortex");
+    mkdirSync(path.join(sourceProfile, "state.v2"), { recursive: true });
+    writeFileSync(path.join(sourceProfile, "state.v2/CURRENT"), "MANIFEST-000001\n");
+    writeFileSync(path.join(sourceProfile, "state.v2/LOCK"), "");
+    writeFileSync(path.join(sourceProfile, "state.v2/MANIFEST-000001"), "source state");
+    const oldFluffy = path.join(f.env.XDG_CONFIG_HOME, "vortex-native/fluffy.json");
+    const copiedFluffy = path.join(f.env.XDG_CONFIG_HOME, "nyastra-mod-manager/fluffy.json");
+    mkdirSync(path.dirname(oldFluffy), { recursive: true });
+    writeFileSync(oldFluffy, '{"sharedFluffyRoot":"/fixture/Fluffy"}');
+    writeFileSync(path.join(f.source, "version"), "failed import update");
+    mkdirSync(path.join(f.source, "linux-extensions"));
+    writeFileSync(
+      path.join(f.source, "linux-extensions/apply.mjs"),
+      `import { chmodSync } from 'node:fs';
+export async function applyExtensions({ userData }) {
+  chmodSync(userData, 0o500);
+  throw new Error('fixture adaptation failed after import');
+}`,
+    );
+
+    const failed = spawnSync(
+      process.execPath,
+      [installer, f.source, "--import-profile", sourceProfile],
+      { env: f.env, encoding: "utf8", timeout: 20000 },
+    );
+
+    assert.equal(failed.status, 1, failed.stderr);
+    assert.equal(readFileSync(path.join(f.app, "version"), "utf8"), "one");
+    assert.deepEqual(readFileSync(f.wrapper), wrapper);
+    assert.deepEqual(readFileSync(f.desktop), desktop);
+    assert.equal(readFileSync(f.env.HANDLER, "utf8"), "prior-custom.desktop");
+    assert.ok(!existsSync(copiedFluffy), "Independent Fluffy cleanup still completes");
+    assert.equal(readFileSync(oldFluffy, "utf8"), '{"sharedFluffyRoot":"/fixture/Fluffy"}');
+    assert.match(failed.stderr, /fixture adaptation failed after import/);
+    assert.match(failed.stderr, /EACCES/);
+    assert.equal(
+      readFileSync(path.join(sourceProfile, "state.v2/MANIFEST-000001"), "utf8"),
+      "source state",
+    );
+  } finally {
+    if (existsSync(imported)) chmodSync(imported, 0o700);
+    f.clean();
+  }
+});
+
 test("failed first registration restores existing external launchers", () => {
   const f = fixture();
   try {

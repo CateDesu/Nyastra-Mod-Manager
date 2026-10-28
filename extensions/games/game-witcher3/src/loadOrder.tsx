@@ -95,7 +95,7 @@ class TW3LoadOrder implements types.ILoadOrderGameInfo {
     try {
       // A purge rewrites or deletes mods.settings, and a missing file reads as
       // empty rather than failing, so neither may replace the stored order.
-      if (iniStructure.revertedByPurge || !(await fileExists(getLoadOrderFilePath()))) {
+      if (iniStructure.revertedByPurge || !(await fileExists(getLoadOrderFilePath(this.mApi)))) {
         return stored;
       }
       const unsorted: { [key: string]: any } = await iniStructure.readStructure();

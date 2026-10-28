@@ -10,7 +10,7 @@ import { getActivePlayerProfile, logDebug, profilesPath } from "./util";
 
 export async function migrate(api: types.IExtensionApi): Promise<void> {
   const bg3ProfileId = await getActivePlayerProfile(api);
-  const settingsPath: string = path.join(profilesPath(), bg3ProfileId, "modsettings.lsx");
+  const settingsPath: string = path.join(profilesPath(api), bg3ProfileId, "modsettings.lsx");
   const backupPath = settingsPath + ".backup";
   const currentVersion = util.getSafe(
     api.getState(),

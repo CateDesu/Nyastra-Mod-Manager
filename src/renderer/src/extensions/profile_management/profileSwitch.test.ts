@@ -1,7 +1,14 @@
-import { describe, expect } from "vitest";
+import * as path from "node:path";
+
+import Bluebird from "bluebird";
+import { afterEach, describe, expect, vi } from "vitest";
 
 import { makeProfile } from "../../test-utils/builders";
 import { test } from "../../test-utils/profileSwitchTest";
+import * as atomic from "../../util/fsAtomic";
+import { profilePath } from "./util/manage";
+
+afterEach(() => vi.restoreAllMocks());
 
 const profiles = [
   makeProfile({ id: "skyrim1", gameId: "skyrimse" }),
@@ -12,6 +19,45 @@ const lastActive = { skyrimse: "skyrim1", stardewvalley: "stardew1" };
 const skyrimPending = { profiles, lastActive, needToDeploy: { skyrimse: true } };
 
 describe("profile switch", () => {
+  test("finishes saving the outgoing profile before announcing deactivation", async ({
+    makeProfileSwitch,
+  }) => {
+    const h = await makeProfileSwitch({
+      profiles,
+      lastActive,
+      activeProfileId: "skyrim1",
+      gameSettings: { skyrimse: "outgoing settings" },
+    });
+    const order: string[] = [];
+    const entered = Bluebird.defer<void>();
+    const gate = Bluebird.defer<void>();
+    const copied = Bluebird.defer<void>();
+    const copy = atomic.copyFileAtomic;
+    vi.spyOn(atomic, "copyFileAtomic").mockImplementation((source, destination) => {
+      if (destination !== path.join(profilePath(profiles[0]), "settings.ini"))
+        return copy(source, destination);
+      order.push("save started");
+      entered.resolve();
+      return Bluebird.resolve(gate.promise)
+        .then(() => copy(source, destination))
+        .then(() => {
+          order.push("save completed");
+        })
+        .finally(() => copied.resolve());
+    });
+    h.api.events.on("profile-did-change", () => order.push("profile changed"));
+    const deactivated = h.switchTo(undefined);
+    try {
+      await entered.promise;
+    } finally {
+      gate.resolve();
+      await copied.promise;
+      await deactivated;
+    }
+    expect(order).toEqual(["save started", "save completed", "profile changed"]);
+    expect(await h.savedSettings("skyrim1")).toBe("outgoing settings");
+  });
+
   test("deploys both profiles when switching within the same game", async ({
     makeProfileSwitch,
   }) => {

@@ -19,7 +19,7 @@ async function removeProfileImpl(api: IExtensionApi, profile: IProfile) {
   api.store.dispatch(actions.willRemoveProfile(profile.id));
   const state = api.getState();
   const currentProfile = activeProfile(state);
-  const gameMode = currentProfile?.gameId;
+  const gameMode = profile.gameId;
 
   if (profile.id === currentProfile?.id) {
     api.store.dispatch(setNextProfile(undefined));
@@ -31,7 +31,7 @@ async function removeProfileImpl(api: IExtensionApi, profile: IProfile) {
       // It's possible that this is the last active profile
       //  for this game - we need to remove the last active
       //  game entry.
-      const lastActiveProfileId = lastActiveProfileForGame(state, gameMode);
+      const lastActiveProfileId = lastActiveProfileForGame(api.getState(), gameMode);
       if (profile.id === lastActiveProfileId) {
         api.store.dispatch(clearLastActiveProfile(gameMode));
       }
@@ -40,13 +40,19 @@ async function removeProfileImpl(api: IExtensionApi, profile: IProfile) {
   return fs
     .removeAsync(profilePath(state.persistent.profiles[profile.id]))
     .then(() => doRemoveProfile())
-    .catch((err) =>
-      err.code === "ENOENT"
-        ? doRemoveProfile() // Profile path is already missing, that's fine.
-        : api.showErrorNotification("Failed to remove profile", err, {
-            allowReport: err.code !== "EPERM",
-          }),
-    );
+    .catch((err) => {
+      if (err.code === "ENOENT") {
+        doRemoveProfile();
+      } else {
+        const remaining = api.getState().persistent.profiles[profile.id];
+        if (remaining !== undefined) {
+          api.store.dispatch(actions.setProfile({ ...remaining, pendingRemove: false }));
+        }
+        api.showErrorNotification("Failed to remove profile", err, {
+          allowReport: err.code !== "EPERM",
+        });
+      }
+    });
 }
 
 let removeProfilePP: (profile: IProfile) => void;

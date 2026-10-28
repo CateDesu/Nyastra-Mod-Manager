@@ -91,7 +91,7 @@ class FormInput extends React.PureComponent<IProps, IComponentState> {
 
     if (cachedValue) {
       if (clearable) {
-        this.renderClear();
+        icon = this.renderClear();
       }
     } else if (emptyIcon !== undefined) {
       icon = this.renderIcon(emptyIcon);

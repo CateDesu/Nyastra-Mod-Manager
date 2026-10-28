@@ -617,7 +617,12 @@ function importDirectory(
   addLocalInProgress.add(fileName);
 
   return fs
-    .readdirAsync(source)
+    .statAsync(destination)
+    .then(() => queryReplace(api, destination, gameId))
+    .catch((err) => {
+      if (getErrorCode(err) !== "ENOENT") throw err;
+    })
+    .then(() => fs.readdirAsync(source))
     .then((files) =>
       zipper.add(
         destination,
@@ -646,6 +651,7 @@ function genImportDownloadsHandler(api: IExtensionApi) {
 
     if (gameMode === undefined) {
       log("warn", "can't import download(s) when no game is active", downloadPaths);
+      cb?.([]);
       return;
     }
 

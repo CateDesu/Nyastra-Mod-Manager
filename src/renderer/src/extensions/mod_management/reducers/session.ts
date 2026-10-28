@@ -3,7 +3,10 @@ import { setSafe } from "../../../util/storeHelper";
 import type { IDeploymentFailure, IDeploymentProblem } from "../actions/session";
 import * as actions from "../actions/session";
 import { MAX_STORED_DEPLOYMENT_FAILURES } from "../constants";
-import type { IFileEntry } from "../types/IFileEntry";
+import type { IFileEntry, IFileEntryIdentity } from "../types/IFileEntry";
+
+const fileKey = (entry: IFileEntryIdentity) =>
+  JSON.stringify([entry.modTypeId, entry.source, entry.filePath]);
 
 export interface IModsSessionState {
   /** files changed outside Vortex, awaiting the user's decision */
@@ -29,10 +32,10 @@ export const sessionReducer: IReducerSpec = {
   reducers: {
     [actions.setExternalChanges as any]: (state, payload) => setSafe(state, ["changes"], payload),
     [actions.setExternalChangeAction as any]: (state, payload) => {
-      const changeSet = new Set(payload.filePaths);
+      const changeSet = new Set(payload.files.map(fileKey));
       let current = state;
       state.changes.forEach((entry, idx) => {
-        if (changeSet.has(entry.filePath)) {
+        if (changeSet.has(fileKey(entry))) {
           current = setSafe(current, ["changes", idx, "action"], payload.action);
         }
       });

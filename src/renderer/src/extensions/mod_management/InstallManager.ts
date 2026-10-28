@@ -1205,8 +1205,8 @@ class InstallManager {
     modReference?: IModReference,
   ): void {
     const baseName = path.basename(archivePath, path.extname(archivePath)).trim() || "EMPTY_NAME";
-    const installId = this.generateDependencyInstallKey(sourceModId, archiveId);
     const dummyArchiveId = archiveId || "direct-install-" + shortid();
+    const installId = this.generateDependencyInstallKey(sourceModId, dummyArchiveId);
     const installInfo: IActiveInstallation = {
       installId,
       archiveId: archiveId || dummyArchiveId,
@@ -1220,7 +1220,10 @@ class InstallManager {
     this.mActiveInstalls.set(installId, installInfo);
 
     // Wrap callback to ensure proper cleanup and tracking
+    let callbackCalled = false;
     const trackedCallback = (err: Error, id: string) => {
+      if (callbackCalled) return;
+      callbackCalled = true;
       const activeInstall = this.mActiveInstalls.get(installId);
       if (activeInstall) {
         activeInstall.modId = id || activeInstall.modId;
@@ -1236,11 +1239,8 @@ class InstallManager {
         }
       }
 
-      // Call the original callback
-      callback?.(err, id);
-
-      // Clean up tracking
       this.mActiveInstalls.delete(installId);
+      callback?.(err, id);
     };
 
     if (archiveId != null) {

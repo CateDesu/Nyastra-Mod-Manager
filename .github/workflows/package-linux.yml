@@ -30,7 +30,7 @@ jobs:
       - name: Audit runtime dependencies
         run: node scripts/audit-runtime.mjs
       - name: Verify archive runtime and AppImage launcher
-        run: node --test scripts/archive-runtime.test.mjs scripts/appimage-launcher.test.mjs
+        run: node --test scripts/archive-runtime.test.mjs scripts/appimage-launcher.test.mjs scripts/smoke-linux.test.mjs
       - run: pnpm run verify
         env:
           NX_STREAM_OUTPUT: "true"

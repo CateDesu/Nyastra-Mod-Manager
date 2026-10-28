@@ -53,6 +53,14 @@ function writeAtomic(filename, content, mode) {
   renameSync(temporary, filename);
 }
 
+function recover(operation) {
+  try {
+    operation();
+  } catch (recoveryError) {
+    console.error(`Installation recovery failed: ${recoveryError.message}`);
+  }
+}
+
 function mimeSnapshots(configHome, applications) {
   const desktops = (process.env.XDG_CURRENT_DESKTOP || "")
     .split(":")
@@ -222,6 +230,7 @@ async function install() {
     let registrationAttempted = false;
     let extensionResult;
     let imported;
+    const changedFiles = new Set();
     try {
       if (!selfInstall) {
         cpSync(source, staging, {
@@ -253,6 +262,7 @@ exec ${shellQuote(executable)} "$@"
 `,
         0o755,
       );
+      changedFiles.add(wrapper);
       writeAtomic(
         desktop,
         `[Desktop Entry]
@@ -268,6 +278,7 @@ StartupNotify=true
 `,
         0o644,
       );
+      changedFiles.add(desktop);
       command("update-desktop-database", [applications], true);
       if (/(^|:)KDE(:|$)/i.test(process.env.XDG_CURRENT_DESKTOP || "")) {
         const cache = spawnSync("kbuildsycoca6", ["--noincremental"], {
@@ -288,15 +299,18 @@ StartupNotify=true
         });
       }
     } catch (error) {
-      imported?.rollback();
+      recover(() => imported?.rollback());
       for (const { filename, saved } of previousFiles) {
-        rmSync(filename, { force: true });
-        if (saved) cpSync(saved, filename, { dereference: false, verbatimSymlinks: true });
+        if (!changedFiles.has(filename)) continue;
+        recover(() => {
+          rmSync(filename, { force: true });
+          if (saved) cpSync(saved, filename, { dereference: false, verbatimSymlinks: true });
+        });
       }
-      if (movedNew) rmSync(installedApp, { recursive: true, force: true });
-      if (movedPrevious) renameSync(previousApp, installedApp);
+      if (movedNew) recover(() => rmSync(installedApp, { recursive: true, force: true }));
+      if (movedPrevious) recover(() => renameSync(previousApp, installedApp));
       if (previousHandler) command("xdg-mime", ["default", previousHandler, mimeType], true);
-      else if (registrationAttempted) restoreUnsetMime(previousMime);
+      else if (registrationAttempted) recover(() => restoreUnsetMime(previousMime));
       throw error;
     } finally {
       rmSync(staging, { recursive: true, force: true });

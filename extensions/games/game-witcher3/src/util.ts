@@ -12,6 +12,7 @@ import {
   ACTIVITY_ID_IMPORTING_LOADORDER,
   PART_SUFFIX,
   SCRIPT_MERGER_RELEASES_URL,
+  getGameDocumentsPath,
 } from "./common";
 import { detectEdition, determineExecutableFrom, W3Edition } from "./edition";
 import IniStructure from "./iniParser";
@@ -60,8 +61,8 @@ export async function getDeployment(
   return deployment;
 }
 
-export const getDocumentsPath = (game: types.IGame) => {
-  return path.join(util.getVortexPath("documents"), "The Witcher 3");
+export const getDocumentsPath = (game: types.IGame, api?: types.IExtensionApi) => {
+  return getGameDocumentsPath(api);
 };
 
 export const getDLCPath = (api: types.IExtensionApi) => {

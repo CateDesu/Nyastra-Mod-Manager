@@ -1,9 +1,7 @@
 /* eslint-disable */
-import path from "path";
-
 import { selectors, types, util } from "@nexusmods/vortex-api";
 
-import { GAME_ID, I18N_NAMESPACE } from "./common";
+import { GAME_ID, getGameDocumentsPath, I18N_NAMESPACE } from "./common";
 import { applyAlphabeticalSort, importLoadOrder } from "./loadOrder";
 import { makeOnContextImport } from "./mergeBackup";
 
@@ -15,7 +13,7 @@ interface IProps {
 export const registerActions = (props: IProps) => {
   const { context } = props;
   const openTW3DocPath = () => {
-    const docPath = path.join(util.getVortexPath("documents"), "The Witcher 3");
+    const docPath = getGameDocumentsPath(context.api);
     util.opn(docPath).catch(() => null);
   };
 

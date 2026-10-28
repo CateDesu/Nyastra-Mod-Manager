@@ -238,7 +238,7 @@ export async function importModSettingsFile(api: types.IExtensionApi): Promise<b
 
 export async function importModSettingsGame(api: types.IExtensionApi): Promise<boolean | void> {
   const bg3ProfileId = await getActivePlayerProfile(api);
-  const gameSettingsPath: string = path.join(profilesPath(), bg3ProfileId, "modsettings.lsx");
+  const gameSettingsPath: string = path.join(profilesPath(api), bg3ProfileId, "modsettings.lsx");
 
   logDebug("importModSettingsGame gameSettingsPath=", gameSettingsPath);
 
@@ -634,7 +634,7 @@ export async function exportToGame(
   silent: boolean = false,
 ): Promise<void> {
   const bg3ProfileId = await getActivePlayerProfile(api);
-  const settingsPath: string = path.join(profilesPath(), bg3ProfileId, "modsettings.lsx");
+  const settingsPath: string = path.join(profilesPath(api), bg3ProfileId, "modsettings.lsx");
 
   logDebug(`exportToGame ${settingsPath}`);
 
@@ -657,7 +657,7 @@ export async function deepRefresh(api: types.IExtensionApi): Promise<boolean | v
 
 async function readModSettings(api: types.IExtensionApi): Promise<IModSettings> {
   const bg3ProfileId = await getActivePlayerProfile(api);
-  const settingsPath: string = path.join(profilesPath(), bg3ProfileId, "modsettings.lsx");
+  const settingsPath: string = path.join(profilesPath(api), bg3ProfileId, "modsettings.lsx");
   const dat = await fs.readFileAsync(settingsPath, { encoding: "utf8" });
   logDebug("readModSettings", dat);
   return parseStringPromise(dat);
@@ -754,7 +754,7 @@ async function readPAKs(api: types.IExtensionApi): Promise<Array<ICacheEntry>> {
                 ? state.persistent.mods[GAME_ID]?.[manifestEntry.source]
                 : undefined;
 
-            const pakPath = path.join(modsPath(), fileName);
+            const pakPath = path.join(modsPath(api), fileName);
             // `return await` (not bare `return`) so this try/catch sees the
             // promise rejection — without await, the catch is dead code.
             return await cache.getCacheEntry(api, pakPath, mod);
@@ -807,20 +807,20 @@ async function readPAKs(api: types.IExtensionApi): Promise<Array<ICacheEntry>> {
 async function readPAKList(api: types.IExtensionApi) {
   let paks: string[];
   try {
-    paks = (await fs.readdirAsync(modsPath())).filter(
+    paks = (await fs.readdirAsync(modsPath(api))).filter(
       (fileName) => path.extname(fileName).toLowerCase() === ".pak",
     );
   } catch (err) {
     if (err.code === "ENOENT") {
       try {
-        await fs.ensureDirWritableAsync(modsPath(), () => Promise.resolve());
+        await fs.ensureDirWritableAsync(modsPath(api), () => Promise.resolve());
       } catch (err) {
         // nop
       }
     } else {
       api.showErrorNotification("Failed to read mods directory", err, {
         id: "bg3-failed-read-mods",
-        message: modsPath(),
+        message: modsPath(api),
       });
     }
     paks = [];

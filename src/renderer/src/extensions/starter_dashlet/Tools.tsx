@@ -214,24 +214,25 @@ export default function Tools(props: IStarterProps) {
     dispatch([
       { type: propOf<IWelcomeScreenState>("gameStarter"), value: gameStarter },
       { type: propOf<IWelcomeScreenState>("tools"), value: tools },
+      { type: propOf<IWelcomeScreenState>("validToolIds"), value: [] },
     ]);
     const jumpList = truthy(gameStarter) ? [gameStarter].concat(tools) : tools;
     updateJumpList(jumpList);
+    return tools;
   };
 
   React.useEffect(() => {
-    // One time deal.
-    onStateUpdate();
-  }, []);
-
-  React.useEffect(() => {
+    let current = true;
     const updateValidTools = async (tools: IStarterInfo[]) => {
       const valid = await onGetValidTools(tools, gameMode);
-      dispatch([{ type: "validToolIds", value: valid }]);
+      if (current) dispatch([{ type: "validToolIds", value: valid }]);
     };
-    onStateUpdate();
-    updateValidTools(state.tools);
-  }, [discoveredGames, gameMode, knownGames, toolsOrder, mods, deploymentCounter]);
+    const tools = onStateUpdate();
+    void updateValidTools(tools);
+    return () => {
+      current = false;
+    };
+  }, [discoveredGames, gameMode, knownGames, toolsOrder, mods, deploymentCounter, onGetValidTools]);
 
   React.useEffect(() => {
     if (toolsOrder.length === 0 && state.tools.length > 0) {

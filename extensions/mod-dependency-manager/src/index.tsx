@@ -34,7 +34,7 @@ import {
   setModTypeConflictsSetting,
 } from "./actions";
 import { sessionReducer as connectionReducer, settingsReducer } from "./reducers";
-import { enabledModKeys, enabledModsWithOverrides, modsWithOverrides } from "./selectors";
+import { enabledModKeys, enabledModsWithOverrides } from "./selectors";
 import { IBiDirRule } from "./types/IBiDirRule";
 import { IConflict } from "./types/IConflict";
 import { IModLookupInfo } from "./types/IModLookupInfo";
@@ -411,7 +411,7 @@ function removeFileOverrideRedundancies(
     ["persistent", "mods", gameMode],
     {},
   );
-  const modsWithRedundancies = (modsWithOverrides(state) ?? []).filter(
+  const modsWithRedundancies = Object.values(mods).filter(
     (mod) =>
       (mod?.fileOverrides ?? []).find((filePath) => (data?.[mod.id] ?? []).includes(filePath)) !==
       undefined,

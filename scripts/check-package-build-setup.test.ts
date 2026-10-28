@@ -1,9 +1,11 @@
 import * as fs from "node:fs";
+import { createRequire } from "node:module";
 import * as path from "node:path";
 
 import { describe, it, expect } from "vitest";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
+const require = createRequire(import.meta.url);
 
 /**
  * Discover package.json files under packages/ and packages/adaptors/.
@@ -106,14 +108,39 @@ const packages = discoverPackages().filter(
   (p) => hasRuntimeEntryPoint(p.pkg) && !EXCLUDED.has(p.name),
 );
 
-describe("workspace packages under packages/ must have a build setup", () => {
+describe("workspace packages under packages/ have a build or prebuilt runtime", () => {
+  describe.each(packages.filter(({ name }) => name !== "7z-bin"))("$name", ({ dir, pkg }) => {
+    it("has a build script", () => {
+      const scripts = pkg.scripts as Record<string, string> | undefined;
+      expect(scripts?.build, `${dir}/package.json is missing a "build" script`).toBeDefined();
+    });
+  });
+
+  // 7z-bin ships its CJS wrapper and Linux executable without compilation.
+  describe.each(packages.filter(({ name }) => name === "7z-bin"))("$name", ({ dir, pkg }) => {
+    const bin = pkg.bin;
+    if (
+      typeof bin !== "object" ||
+      bin === null ||
+      !("7z" in bin) ||
+      typeof bin["7z"] !== "string"
+    ) {
+      throw new Error(`${dir}/package.json must declare its 7z executable`);
+    }
+    const executable = path.resolve(ROOT, dir, bin["7z"]);
+
+    it("ships a loadable prebuilt runtime entry", () => {
+      expect(require(path.join(ROOT, dir))).toBe(executable);
+    });
+
+    it("ships its declared prebuilt executable", () => {
+      expect(fs.statSync(executable).isFile()).toBe(true);
+      fs.accessSync(executable, fs.constants.X_OK);
+    });
+  });
+
   for (const { name, dir, pkg } of packages) {
     describe(name, () => {
-      it("has a build script", () => {
-        const scripts = pkg.scripts as Record<string, string> | undefined;
-        expect(scripts?.build, `${dir}/package.json is missing a "build" script`).toBeDefined();
-      });
-
       it("main does not point to .ts source", () => {
         if (pkg.main === undefined) return;
         expect(

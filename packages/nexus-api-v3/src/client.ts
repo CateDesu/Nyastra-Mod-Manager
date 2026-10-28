@@ -65,7 +65,7 @@ export function createNexusV3Client(options: NexusV3ClientOptions) {
       const { data, error, response } = await client.POST("/uploads", {
         body: { size_bytes: sizeBytes, filename },
       });
-      if (error) throw toV3Error(error, response);
+      if (error || !response.ok) throw toV3Error(error, response);
       return data.data;
     },
 
@@ -78,7 +78,7 @@ export function createNexusV3Client(options: NexusV3ClientOptions) {
       const { data, error, response } = await client.POST("/uploads/multipart", {
         body: { size_bytes: sizeBytes, filename },
       });
-      if (error) throw toV3Error(error, response);
+      if (error || !response.ok) throw toV3Error(error, response);
       return data.data;
     },
 
@@ -86,7 +86,7 @@ export function createNexusV3Client(options: NexusV3ClientOptions) {
       const { data, error, response } = await client.POST("/uploads/{id}/finalise", {
         params: { path: { id: uploadId } },
       });
-      if (error) throw toV3Error(error, response);
+      if (error || !response.ok) throw toV3Error(error, response);
       return data.data;
     },
 
@@ -94,7 +94,7 @@ export function createNexusV3Client(options: NexusV3ClientOptions) {
       const { data, error, response } = await client.GET("/uploads/{id}", {
         params: { path: { id: uploadId } },
       });
-      if (error) throw toV3Error(error, response);
+      if (error || !response.ok) throw toV3Error(error, response);
       return data.data;
     },
 
@@ -105,7 +105,7 @@ export function createNexusV3Client(options: NexusV3ClientOptions) {
       const { data, error, response } = await client.POST("/collections", {
         body: { upload_id: uploadId, collection_data: collectionData },
       });
-      if (error) throw toV3Error(error, response);
+      if (error || !response.ok) throw toV3Error(error, response);
       return data.data;
     },
 
@@ -118,7 +118,7 @@ export function createNexusV3Client(options: NexusV3ClientOptions) {
         params: { path: { id: collectionId } },
         body: { upload_id: uploadId, collection_data: collectionData },
       });
-      if (error) throw toV3Error(error, response);
+      if (error || !response.ok) throw toV3Error(error, response);
       return data.data;
     },
 
@@ -130,7 +130,7 @@ export function createNexusV3Client(options: NexusV3ClientOptions) {
         params: { path: { id: collectionId } },
         body: patch,
       });
-      if (error) throw toV3Error(error, response);
+      if (error || !response.ok) throw toV3Error(error, response);
     },
 
     /**
@@ -150,7 +150,7 @@ export function createNexusV3Client(options: NexusV3ClientOptions) {
         "/mod-file-versions/dependencies/ranges/materialized/batch",
         { body: { version_ids: [...versionIds], page, page_size: pageSize } },
       );
-      if (error) throw toV3Error(error, response);
+      if (error || !response.ok) throw toV3Error(error, response);
       return { candidates: Array.from(data.data.candidates), meta: data.meta };
     },
 
@@ -165,7 +165,7 @@ export function createNexusV3Client(options: NexusV3ClientOptions) {
       const { data, error, response } = await client.POST("/mod-file-versions/batch", {
         body: { version_ids: [...versionIds] },
       });
-      if (error) throw toV3Error(error, response);
+      if (error || !response.ok) throw toV3Error(error, response);
       return Array.from(data.data.versions);
     },
 
@@ -176,7 +176,7 @@ export function createNexusV3Client(options: NexusV3ClientOptions) {
       translations: components["schemas"]["VortexTranslation"][];
     }> {
       const { data, error, response } = await client.GET("/vortex/extensions");
-      if (error) throw toV3Error(error, response);
+      if (error || !response.ok) throw toV3Error(error, response);
       return {
         extensions: Array.from(data.data.extensions),
         themes: Array.from(data.data.themes),
@@ -193,7 +193,7 @@ export function createNexusV3Client(options: NexusV3ClientOptions) {
       const { data, error, response } = await client.POST("/mods/batch", {
         body: { mod_ids: [...modIds] },
       });
-      if (error) throw toV3Error(error, response);
+      if (error || !response.ok) throw toV3Error(error, response);
       return Array.from(data.data.mods);
     },
   };
@@ -225,7 +225,7 @@ export function createNexusV3InternalClient(options: NexusV3ClientOptions) {
       const { data, error, response } = await client.POST("/telemetry/mod-lists", {
         body: snapshot,
       });
-      if (error) throw toV3Error(error, response);
+      if (error || !response.ok) throw toV3Error(error, response);
       return data.data;
     },
   };

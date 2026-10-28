@@ -9,12 +9,15 @@ function exeExtension(): string {
 }
 
 function findJava(): string {
-  if (process.env.JAVA_HOME === undefined) {
+  if (process.env.JAVA_HOME !== undefined) {
+    return path.join(process.env.JAVA_HOME, "bin", "java" + exeExtension());
+  }
+  try {
+    return which.sync("java");
+  } catch {
+    log("info", "java not found");
     return undefined;
   }
-  const fileName = "java" + exeExtension();
-  // TODO: A bit too simplistic, check the registry on windows
-  return path.join(process.env.JAVA_HOME, "bin", fileName);
 }
 
 function findPython(): string {

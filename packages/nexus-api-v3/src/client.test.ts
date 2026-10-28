@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import createFetchMock from "vitest-fetch-mock";
 
-import { createNexusV3Client } from "./client";
+import { createNexusV3Client, createNexusV3InternalClient } from "./client";
 import { V3ApiError } from "./errors";
 
 // Mock at the fetch boundary so the real openapi-fetch stack runs: header
@@ -227,6 +227,59 @@ describe("editCollection", () => {
 });
 
 describe("error fallback", () => {
+  const operations: Array<[string, (client: ReturnType<typeof makeClient>) => Promise<unknown>]> = [
+    ["createUpload", (client) => client.createUpload(1024, "file.zip")],
+    ["createMultipartUpload", (client) => client.createMultipartUpload(1024, "file.zip")],
+    ["finaliseUpload", (client) => client.finaliseUpload("upload-1")],
+    ["getUpload", (client) => client.getUpload("upload-1")],
+    ["createCollection", (client) => client.createCollection("upload-1", collectionData)],
+    [
+      "createCollectionRevision",
+      (client) => client.createCollectionRevision("1", "upload-1", collectionData),
+    ],
+    ["editCollection", (client) => client.editCollection(1, { name: "Renamed" })],
+    [
+      "getModFileVersionDependencyCandidatesBatch",
+      (client) => client.getModFileVersionDependencyCandidatesBatch(["1"], 1, 100),
+    ],
+    ["getModFileVersionsBatch", (client) => client.getModFileVersionsBatch(["1"])],
+    ["getVortexExtensions", (client) => client.getVortexExtensions()],
+    ["getModsBatch", (client) => client.getModsBatch(["1"])],
+  ];
+
+  it.each(operations)("rejects a bodyless HTTP failure from %s", async (_name, operation) => {
+    fetchMocker.mockResponseOnce("", { status: 403, headers: { "content-length": "0" } });
+
+    const promise = operation(makeClient());
+
+    await expect(promise).rejects.toBeInstanceOf(V3ApiError);
+    await expect(promise).rejects.toMatchObject({ status: 403, message: "HTTP 403" });
+  });
+
+  it.each(["", "null", "false", "0"])("rejects a falsy HTTP error body %j", async (body) => {
+    fetchMocker.mockResponseOnce(body, { status: 502 });
+
+    await expect(makeClient().editCollection(1, { name: "Renamed" })).rejects.toMatchObject({
+      status: 502,
+      message: "HTTP 502",
+    });
+  });
+
+  it("rejects a bodyless HTTP failure from the internal client", async () => {
+    fetchMocker.mockResponseOnce("", { status: 403, headers: { "content-length": "0" } });
+    const client = createNexusV3InternalClient({ baseUrl: BASE_URL });
+
+    await expect(
+      client.submitModLists({
+        instance_id: "test",
+        game_id: "1",
+        captured_at: "2026-10-26T00:00:00Z",
+        vortex_version: "test",
+        mods: [],
+      }),
+    ).rejects.toMatchObject({ status: 403, message: "HTTP 403" });
+  });
+
   it("builds a V3ApiError from the HTTP response when the body is not problem+json", async () => {
     fetchMocker.mockResponseOnce("<html>502 Bad Gateway</html>", { status: 502 });
 

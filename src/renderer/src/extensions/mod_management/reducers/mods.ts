@@ -140,7 +140,7 @@ export const modsReducer: IReducerSpec = {
       }
 
       const idx = getSafe(state, [gameId, modId, "rules"], []).findIndex((iterRule: IRule) => {
-        const typeMatch = group.indexOf(rule.type) !== -1;
+        const typeMatch = group.indexOf(iterRule.type) !== -1;
         const filteredIter = _.omitBy(iterRule.reference, _.isUndefined);
         return typeMatch && referenceEqual(filteredRef, filteredIter);
       });

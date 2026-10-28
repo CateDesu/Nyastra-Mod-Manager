@@ -16,6 +16,7 @@ import {
   activeGameId,
   activeProfile,
   getCollectionActiveSession,
+  modsForGame,
   profileById,
 } from "../../../util/selectors";
 import { setdefault, truthy } from "../../../util/util";
@@ -64,11 +65,18 @@ async function applyFileActions(
   // not doing anything with 'nop'. The regular deployment code is responsible for doing the right
   // thing in this case.
 
+  const fileKey = (source: string, filePath: string) => JSON.stringify([source, filePath]);
+  const targets = new Map(
+    lastDeployment.map((file) => [fileKey(file.source, file.relPath), file.target ?? ""]),
+  );
+  const deployedPath = (entry: IFileEntry) =>
+    path.join(outputPath, targets.get(fileKey(entry.source, entry.filePath)) ?? "", entry.filePath);
+
   // process the actions that the user selected in the dialog
   await Promise.all(
     (actionGroups["drop"] || []).map((entry) =>
       truthy(entry.filePath)
-        ? fs.removeAsync(path.join(outputPath, entry.filePath))
+        ? fs.removeAsync(deployedPath(entry))
         : Promise.reject(new Error("invalid file path")),
     ),
   );
@@ -84,7 +92,7 @@ async function applyFileActions(
   await Promise.all(
     (actionGroups["import"] || []).map((entry) => {
       const source = path.join(sourcePath, entry.source, entry.filePath);
-      const deployed = path.join(outputPath, entry.filePath);
+      const deployed = deployedPath(entry);
       // Very rarely we have a case where the files are links of each other
       // (or at least node reports that) so the copy would fail.
       // Instead of handling the errors (when we can't be sure if it's due to a bug in node.js
@@ -108,20 +116,22 @@ async function applyFileActions(
   // this includes files that were deleted and those replaced
   const dropSet = new Set(
     [].concat(
-      (actionGroups["restore"] || []).map((entry) => entry.filePath),
-      (actionGroups["drop"] || []).map((entry) => entry.filePath),
+      (actionGroups["restore"] || []).map((entry) => fileKey(entry.source, entry.filePath)),
+      (actionGroups["drop"] || []).map((entry) => fileKey(entry.source, entry.filePath)),
       // also remove the files that got deleted, except these won't be reinstalled
-      (actionGroups["delete"] || []).map((entry) => entry.filePath),
+      (actionGroups["delete"] || []).map((entry) => fileKey(entry.source, entry.filePath)),
       // also remove the files that got imported because they too only exist in staging
       // at this point
-      (actionGroups["import"] || []).map((entry) => entry.filePath),
+      (actionGroups["import"] || []).map((entry) => fileKey(entry.source, entry.filePath)),
     ),
   );
-  const newDeployment = lastDeployment.filter((entry) => !dropSet.has(entry.relPath));
+  const newDeployment = lastDeployment.filter(
+    (entry) => !dropSet.has(fileKey(entry.source, entry.relPath)),
+  );
   lastDeployment = newDeployment;
 
   const affectedMods = new Set<string>();
-  const testFileOverrides: { [modId: string]: string[] } = {};
+  const testFileOverrides: { [source: string]: string[] } = {};
   fileActions.forEach((action) => {
     if (["import", "newest", "nop", "delete", "drop"].indexOf(action.action) !== -1) {
       affectedMods.add(action.source);
@@ -131,7 +141,7 @@ async function applyFileActions(
       // A file has been deleted from the staging folder - we need to check whether
       //  the user had set a file override for it.
       const current = testFileOverrides[action.source] || [];
-      testFileOverrides[action.source] = current.concat(action.filePath);
+      testFileOverrides[action.source] = current.concat(deployedPath(action));
     }
   });
 
@@ -141,7 +151,7 @@ async function applyFileActions(
   if (profileId !== undefined) {
     const profile = profileById(state, profileId);
     if (profile !== undefined) {
-      gameId = profile.id;
+      gameId = profile.gameId;
     }
   }
 
@@ -149,12 +159,26 @@ async function applyFileActions(
     gameId = activeGameId(state);
   }
 
-  if (Object.keys(testFileOverrides).length > 0) {
-    api.events.emit("check-file-override-redundancies", gameId, testFileOverrides);
+  const modIdsBySource = new Map(
+    Object.entries(modsForGame(state, gameId)).map(([modId, mod]) => [mod.installationPath, modId]),
+  );
+  const overrides: { [modId: string]: string[] } = {};
+  Object.entries(testFileOverrides).forEach(([source, files]) => {
+    const modId = modIdsBySource.get(source);
+    if (modId !== undefined) {
+      overrides[modId] = files;
+    }
+  });
+
+  if (Object.keys(overrides).length > 0) {
+    api.events.emit("check-file-override-redundancies", gameId, overrides);
   }
 
   affectedMods.forEach((affected) => {
-    api.events.emit("mod-content-changed", gameId, affected);
+    const modId = modIdsBySource.get(affected);
+    if (modId !== undefined) {
+      api.events.emit("mod-content-changed", gameId, modId);
+    }
   });
 
   return lastDeployment;

@@ -38,6 +38,24 @@ export function importLinuxProfile(sourceDirectory, configHome) {
   const oldFluffy = path.join(configHome, "vortex-native/fluffy.json");
   let copiedFluffy = false;
   let moved = false;
+  const rollback = () => {
+    let failure;
+    for (const cleanup of [
+      () => {
+        if (moved) rmSync(destination, { recursive: true, force: true });
+      },
+      () => {
+        if (copiedFluffy) rmSync(fluffy, { force: true });
+      },
+    ]) {
+      try {
+        cleanup();
+      } catch (error) {
+        failure ??= error;
+      }
+    }
+    if (failure) throw failure;
+  };
   try {
     mkdirSync(staging, { recursive: false, mode: 0o700 });
     for (const name of ["state.v2", "plugins"]) {
@@ -82,14 +100,14 @@ export function importLinuxProfile(sourceDirectory, configHome) {
     }
     return {
       profile: destination,
-      rollback() {
-        rmSync(destination, { recursive: true, force: true });
-        if (copiedFluffy) rmSync(fluffy, { force: true });
-      },
+      rollback,
     };
   } catch (error) {
-    if (moved) rmSync(destination, { recursive: true, force: true });
-    if (copiedFluffy) rmSync(fluffy, { force: true });
+    try {
+      rollback();
+    } catch (recoveryError) {
+      console.error(`Profile recovery failed: ${recoveryError.message}`);
+    }
     throw error;
   } finally {
     rmSync(staging, { recursive: true, force: true });

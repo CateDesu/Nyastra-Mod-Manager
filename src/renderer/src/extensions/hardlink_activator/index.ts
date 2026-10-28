@@ -13,6 +13,7 @@ import { log } from "../../logging";
 import type { IExtensionApi, IExtensionContext } from "../../types/IExtensionContext";
 import type { IGame } from "../../types/IGame";
 import type { IState } from "../../types/IState";
+import { UserCanceled } from "../../util/CustomErrors";
 import * as fs from "../../util/fs";
 import { installPathForGame } from "../../util/selectors";
 import type { IDiscoveryResult } from "../gamemode_management/types/IDiscoveryResult";
@@ -281,6 +282,8 @@ class DeploymentMethod extends LinkingDeployment {
     return installEntryProm.then((inos) => {
       const total = inos.size;
       let purged: number = 0;
+      let purgeError: Error | undefined;
+      let canceled = false;
 
       let queue = PromiseBB.resolve();
       if (inos.size === 0) {
@@ -293,24 +296,38 @@ class DeploymentMethod extends LinkingDeployment {
             PromiseBB.map(
               entries,
               (entry) =>
-                this.getFileId(entry).then((id) => {
-                  if (id !== undefined && inos.has(id)) {
-                    ++purged;
-                    if (purged % 1000 === 0) {
-                      onProgress?.(purged, total);
+                this.getFileId(entry)
+                  .then((id) => {
+                    if (!canceled && id !== undefined && inos.has(id)) {
+                      ++purged;
+                      if (purged % 1000 === 0) {
+                        onProgress?.(purged, total);
+                      }
+                      return fs.unlinkAsync(entry.filePath, {
+                        showDialogCallback: () => !canceled,
+                      });
                     }
-                    return fs
-                      .unlinkAsync(entry.filePath)
-                      .catch((err) => log("warn", "failed to remove", entry.filePath));
-                  }
-                  return PromiseBB.resolve();
-                }),
+                    return PromiseBB.resolve();
+                  })
+                  .catch((err: unknown) => {
+                    if (getErrorCode(err) === "ENOENT") return;
+                    canceled ||= err instanceof UserCanceled;
+                    purgeError ??= unknownToError(err);
+                    log("warn", "failed to remove", {
+                      path: entry.filePath,
+                      error: getErrorMessageOrDefault(err),
+                    });
+                  }),
               { concurrency: 50 },
             ).then(() => undefined),
           );
         },
         { details: true, skipHidden: false, skipInaccessible: false },
-      ).then(() => queue);
+      )
+        .finally(() => queue)
+        .then(() => {
+          if (purgeError !== undefined) throw purgeError;
+        });
     });
   }
 

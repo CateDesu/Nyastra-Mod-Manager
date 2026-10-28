@@ -34,20 +34,24 @@ export function getGameDataPath(api) {
   }
 }
 
-export function documentsPath() {
-  return path.join(util.getVortexPath("localAppData"), "Larian Studios", "Baldur's Gate 3");
+export function documentsPath(api?: types.IExtensionApi, discovery?: types.IDiscoveryResult) {
+  const discovered = discovery ?? api?.getState().settings.gameMode.discovered?.[GAME_ID];
+  const localAppData = discovered?.protonPrefix
+    ? path.join(discovered.protonPrefix, "drive_c", "users", "steamuser", "AppData", "Local")
+    : util.getVortexPath("localAppData");
+  return path.join(localAppData, "Larian Studios", "Baldur's Gate 3");
 }
 
-export function modsPath() {
-  return path.join(documentsPath(), "Mods");
+export function modsPath(api?: types.IExtensionApi, discovery?: types.IDiscoveryResult) {
+  return path.join(documentsPath(api, discovery), "Mods");
 }
 
-export function profilesPath() {
-  return path.join(documentsPath(), "PlayerProfiles");
+export function profilesPath(api?: types.IExtensionApi, discovery?: types.IDiscoveryResult) {
+  return path.join(documentsPath(api, discovery), "PlayerProfiles");
 }
 
-export function scriptExtenderPath() {
-  return path.join(documentsPath(), "Script Extender");
+export function scriptExtenderPath(api?: types.IExtensionApi) {
+  return path.join(documentsPath(api), "Script Extender");
 }
 
 export async function fileExists(filePath: string): Promise<boolean> {
@@ -59,24 +63,26 @@ export async function fileExists(filePath: string): Promise<boolean> {
   }
 }
 
-export async function globalProfilePath(api: types.IExtensionApi) {
-  const bg3ProfileId = await getActivePlayerProfile(api);
-  return path.join(documentsPath(), bg3ProfileId);
+export async function globalProfilePath(
+  api: types.IExtensionApi,
+  discovery?: types.IDiscoveryResult,
+) {
+  const bg3ProfileId = await getActivePlayerProfile(api, discovery);
+  return path.join(profilesPath(api, discovery), bg3ProfileId);
 }
 
-export const getPlayerProfiles = (() => {
-  let cached = [];
+export function getPlayerProfiles(api?: types.IExtensionApi): string[] {
   try {
-    cached = (fs as any)
-      .readdirSync(profilesPath())
+    return (fs as any)
+      .readdirSync(profilesPath(api))
       .filter((name) => path.extname(name) === "" && name !== "Default");
   } catch (err) {
     if (err.code !== "ENOENT") {
       throw err;
     }
   }
-  return () => cached;
-})();
+  return [];
+}
 
 // The game's user-facing product version (read via getOwnGameVersion) coerces
 // to 4.1.1 for the public release. Only pre-release/early-access builds below
@@ -87,9 +93,13 @@ export function gameSupportsProfile(gameVersion: string) {
   return semver.lt(semver.coerce(gameVersion), "4.1.1");
 }
 
-export async function getOwnGameVersion(state: types.IState): Promise<string> {
-  const discovery = selectors.discoveryByGame(state, GAME_ID);
-  return await util.getGame(GAME_ID).getInstalledVersion(discovery);
+export async function getOwnGameVersion(
+  state: types.IState,
+  discovery?: types.IDiscoveryResult,
+): Promise<string> {
+  return await util
+    .getGame(GAME_ID)
+    .getInstalledVersion(discovery ?? selectors.discoveryByGame(state, GAME_ID));
 }
 
 // Patch-tier detection (v6/v7/v8) needs the numeric FileVersion, which is the
@@ -104,8 +114,11 @@ export async function getOwnGameFileVersion(state: types.IState): Promise<string
   return getFileVersion(path.join(discovery.path, "bin", "bg3.exe"));
 }
 
-export async function getActivePlayerProfile(api: types.IExtensionApi): Promise<string> {
-  return gameSupportsProfile(await getOwnGameVersion(api.getState()))
+export async function getActivePlayerProfile(
+  api: types.IExtensionApi,
+  discovery?: types.IDiscoveryResult,
+): Promise<string> {
+  return gameSupportsProfile(await getOwnGameVersion(api.getState(), discovery))
     ? api.store.getState().settings.baldursgate3?.playerProfile || "global"
     : "Public";
 }
@@ -463,7 +476,7 @@ export async function writeModSettings(
   const globalProfile = await globalProfilePath(api);
   const settingsPath =
     bg3profile !== "global"
-      ? path.join(profilesPath(), bg3profile, "modsettings.lsx")
+      ? path.join(profilesPath(api), bg3profile, "modsettings.lsx")
       : path.join(globalProfile, "modsettings.lsx");
 
   const builder = new Builder();
@@ -486,17 +499,17 @@ export async function parseLSXFile(lsxPath: string): Promise<IModSettings> {
 
 export async function readModSettings(api: types.IExtensionApi): Promise<IModSettings> {
   const bg3profile: string = await getActivePlayerProfile(api);
-  const playerProfiles = getPlayerProfiles();
+  const playerProfiles = getPlayerProfiles(api);
   if (playerProfiles.length === 0) {
     storedLO = [];
-    const settingsPath = path.join(profilesPath(), "Public", "modsettings.lsx");
+    const settingsPath = path.join(profilesPath(api), "Public", "modsettings.lsx");
     return parseLSXFile(settingsPath);
   }
 
   const globalProfile = await globalProfilePath(api);
   const settingsPath =
     bg3profile !== "global"
-      ? path.join(profilesPath(), bg3profile, "modsettings.lsx")
+      ? path.join(profilesPath(api), bg3profile, "modsettings.lsx")
       : path.join(globalProfile, "modsettings.lsx");
   return parseLSXFile(settingsPath);
 }

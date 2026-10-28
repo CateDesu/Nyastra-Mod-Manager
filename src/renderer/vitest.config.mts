@@ -22,6 +22,10 @@ export default defineConfig({
     tsconfigPaths: true,
     alias: {
       "original-fs": "fs",
+      "@nexusmods/vortex-api": path.resolve(
+        __dirname,
+        "../../packages/extension-test-mocks/src/index.ts",
+      ),
     },
   },
 });
