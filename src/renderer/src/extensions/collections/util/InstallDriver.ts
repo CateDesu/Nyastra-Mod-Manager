@@ -101,6 +101,7 @@ class InstallDriver {
   private mTimeStarted: number;
   private mPostprocessing: boolean = false;
   private mStartGeneration: number = 0;
+  private mPendingPatches: Map<Promise<void>, string> = new Map();
 
   // Throttle the progress notification to avoid flooding Redux/UI on every single mod
   // event. (Session status writes are dispatched directly now - InstallManager is the
@@ -180,6 +181,10 @@ class InstallDriver {
     this.mApi = api;
 
     this.mInfoCache = new InfoCache(api);
+
+    api.onAsync("will-deploy", (profileId: string) =>
+      this.awaitPatches(profileById(api.getState(), profileId)?.gameId),
+    );
 
     api.onAsync("will-install-mod", (_gameId: string, archiveId: string, _modId: string) => {
       const state: IState = api.store.getState();
@@ -281,14 +286,20 @@ class InstallDriver {
           this.mCollection?.installationPath !== undefined &&
           dependent.reference.description !== undefined
         ) {
-          applyPatches(
-            api,
-            this.mCollection,
-            gameId,
-            dependent.reference.description,
-            modId,
-            installSpec.patches,
-          );
+          const pending = Promise.resolve(
+            applyPatches(
+              api,
+              this.mCollection,
+              gameId,
+              dependent.reference.description,
+              modId,
+              installSpec.patches,
+            ),
+          ).catch((error) => {
+            api.showErrorNotification("Failed to apply collection patches", error);
+          });
+          this.mPendingPatches.set(pending, gameId);
+          void pending.then(() => this.mPendingPatches.delete(pending));
         }
       }
       this.triggerUpdate();
@@ -657,6 +668,7 @@ class InstallDriver {
     if (this.mCollection === undefined || this.mGameId === undefined) {
       return false;
     }
+    if ([...this.mPendingPatches.values()].includes(this.mGameId)) return false;
     const session = getCollectionActiveSession(this.mApi.getState());
     if (session === undefined || session.collectionId !== this.mCollection.id) {
       // no active session for this collection - nothing we can assert as complete
@@ -674,7 +686,18 @@ class InstallDriver {
       .every((mod) => isTerminalMemberStatus(mod.status));
   }
 
+  private async awaitPatches(gameId?: string): Promise<void> {
+    while (true) {
+      const pending = [...this.mPendingPatches.entries()]
+        .filter(([, pendingGame]) => gameId === undefined || pendingGame === gameId)
+        .map(([promise]) => promise);
+      if (pending.length === 0) return;
+      await Promise.all(pending);
+    }
+  }
+
   private async onDidInstallDependencies(gameId: string, modId: string, recommendations: boolean) {
+    await this.awaitPatches(gameId);
     const mods = this.mApi.getState().persistent.mods[gameId];
 
     if (mods[modId]?.type === MOD_TYPE) {

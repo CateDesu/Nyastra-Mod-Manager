@@ -1191,7 +1191,7 @@ export async function makeProfileSwitchHarness(
       base.api.events.once("profile-did-change", () => resolve());
     });
   // startup saves the active profile's files, then announces the profile
-  const started = nextProfileChange();
+  const started = opts.waitForStartup === false ? undefined : nextProfileChange();
   onceCallbacks.forEach((cb) => cb());
   await started;
 
@@ -1204,6 +1204,8 @@ export async function makeProfileSwitchHarness(
       return switched;
     },
     gameSettings: (gameId: string) => readSettings(gameSettingsPath(gameId)),
+    setGameSettings: (gameId: string, content: string) =>
+      writeSettings(gameSettingsPath(gameId), content),
     savedSettings: (profileId: string) => readSettings(savedSettingsPath(profileId)),
     // test-setup stubs window.api.log with a vi.fn, so its calls are the renderer's log
     loggedMessages: () =>

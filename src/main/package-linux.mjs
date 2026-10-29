@@ -1,6 +1,16 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { chmod, copyFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  copyFile,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -9,6 +19,27 @@ import { fileURLToPath } from "node:url";
 import { pruneLocalBuilds } from "../../scripts/releases/cleanup-builds.mjs";
 import { verifyAppImage } from "../../scripts/verify-appimage.mjs";
 import { formatProgramVersion } from "../shared/src/programVersion.ts";
+
+async function restorePackages(savedPackages, backupDirectory) {
+  const failures = [];
+  for (const [filename, backup] of savedPackages) {
+    try {
+      await lstat(backup);
+    } catch (error) {
+      if (error.code === "ENOENT") continue;
+      failures.push(error);
+      continue;
+    }
+    try {
+      await rename(backup, filename);
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(failures, `Restore previous packages from ${backupDirectory}`);
+  }
+}
 
 if (process.platform !== "linux" || process.arch !== "x64") {
   throw new Error("The Linux preview currently packages x64 only");
@@ -22,6 +53,13 @@ const pkg = JSON.parse(await readFile(new URL("./package.json", import.meta.url)
 const version = formatProgramVersion(pkg.version);
 const temporary = await mkdtemp(path.join(tmpdir(), "nyastra-builder-"));
 let status;
+let backupDirectory;
+let verified = false;
+const savedPackages = new Map();
+const outputDirectory = path.resolve(directory, "../../dist");
+const packages = ["zip", "AppImage", "deb"].map((extension) =>
+  path.join(outputDirectory, `nyastra-${version}-linux-x64.${extension}`),
+);
 try {
   // FPM's compressor command cannot quote apostrophes in its binary path.
   const helper = path.join(temporary, "app-builder");
@@ -41,10 +79,20 @@ process.exitCode = result.status ?? 1;
 `,
     { mode: 0o755 },
   );
-  for (const extension of ["zip", "AppImage", "deb"]) {
-    await rm(path.join(directory, "../../dist", `nyastra-${version}-linux-x64.${extension}`), {
-      force: true,
-    });
+  await mkdir(outputDirectory, { recursive: true });
+  backupDirectory = await mkdtemp(path.join(outputDirectory, ".nyastra-packages-"));
+  for (const filename of packages) {
+    try {
+      const info = await lstat(filename);
+      if (!info.isFile() && !info.isSymbolicLink()) {
+        throw new Error(`Package output is not a file: ${filename}`);
+      }
+      const backup = path.join(backupDirectory, path.basename(filename));
+      await rename(filename, backup);
+      savedPackages.set(filename, backup);
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
   }
   const result = spawnSync(
     process.execPath,
@@ -75,12 +123,33 @@ process.exitCode = result.status ?? 1;
   if (result.error) throw result.error;
   status = result.status ?? 1;
   if (status === 0) {
-    const appImage = path.join(directory, "../../dist", `nyastra-${version}-linux-x64.AppImage`);
+    const appImage = packages[1];
     if (existsSync(appImage)) await verifyAppImage(appImage, template);
-    const removed = await pruneLocalBuilds(path.join(directory, "../../dist"), pkg.version, "x64");
-    console.log(`Removed ${removed} old local builds`);
+    // Check fresh outputs before restoring formats omitted by a targeted build.
+    const outputs = await Promise.all(
+      packages.map((filename) =>
+        lstat(filename).catch((error) => {
+          if (error.code !== "ENOENT") throw error;
+          return undefined;
+        }),
+      ),
+    );
+    const complete = outputs.every((info) => info?.isFile() && info.size > 0);
+    for (const [filename, backup] of savedPackages) {
+      if (outputs[packages.indexOf(filename)] === undefined) await rename(backup, filename);
+    }
+    verified = true;
+    if (complete) {
+      const removed = await pruneLocalBuilds(outputDirectory, pkg.version, "x64");
+      console.log(`Removed ${removed} old local builds`);
+    }
   }
 } finally {
-  await rm(temporary, { recursive: true, force: true });
+  try {
+    if (!verified) await restorePackages(savedPackages, backupDirectory);
+    if (backupDirectory) await rm(backupDirectory, { recursive: true, force: true });
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
 }
 process.exitCode = status;

@@ -346,6 +346,7 @@ export interface IProfileSwitchOpts {
   gameSettings?: Record<string, string>;
   // the settings file saved in each profile, keyed by profileId
   savedSettings?: Record<string, string>;
+  waitForStartup?: boolean;
 }
 
 export interface IProfileSwitchHarness extends IApiHarness {
@@ -355,6 +356,7 @@ export interface IProfileSwitchHarness extends IApiHarness {
   deployed: string[];
   // the game's live settings file, which a deploy of profile X rewrites to "deployed:X"
   gameSettings: (gameId: string) => Promise<string | undefined>;
+  setGameSettings: (gameId: string, content: string) => Promise<void>;
   // the settings file saved in a profile
   savedSettings: (profileId: string) => Promise<string | undefined>;
   // messages logged since the harness was built, in order

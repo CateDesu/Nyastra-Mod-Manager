@@ -98,6 +98,21 @@ test("rejects symlinks and removes its partial profile", () => {
   }
 });
 
+test("preserves a staging directory owned by another import", () => {
+  const f = fixture();
+  try {
+    const staging = path.join(f.config, `.nyastra-import-${process.pid}`);
+    mkdirSync(staging);
+    const saved = path.join(staging, "keep");
+    writeFileSync(saved, "existing import");
+    assert.throws(() => importLinuxProfile(f.source, f.config), { code: "EEXIST" });
+    assert.equal(readFileSync(saved, "utf8"), "existing import");
+    assert.ok(!existsSync(path.join(f.config, "NyastraModManager")));
+  } finally {
+    f.clean();
+  }
+});
+
 test("copies Fluffy configuration and rolls back only its own copy", () => {
   const f = fixture();
   try {

@@ -122,6 +122,7 @@ import {
   getSupportedActivators,
   registerDeploymentMethod,
 } from "./util/deploymentMethods";
+import { normalizeDeployment } from "./util/deploymentNormalize";
 import { NoDeployment } from "./util/exceptions";
 import extendApi from "./util/extendAPI";
 import { dealWithExternalChanges } from "./util/externalChanges";
@@ -285,7 +286,11 @@ async function deployModType(
     activator,
     lastDeployment,
     typeId,
-    new BlacklistSet(mergeResult[typeId]?.usedInMerge ?? [], game, normalize),
+    new BlacklistSet(
+      mergeResult[typeId]?.usedInMerge ?? [],
+      game,
+      normalizeDeployment(game.id, normalize),
+    ),
     genSubDirFunc(game, getModType(typeId)),
     onProgress,
   );
@@ -1285,7 +1290,7 @@ function onDeploySingleMod(api: IExtensionApi) {
     const subdir = genSubDirFunc(game, getModType(mod.type));
     await withActivationLock(async () => {
       try {
-        const normalize = await getNormalizeFunc(dataPath);
+        const normalize = normalizeDeployment(gameId, await getNormalizeFunc(dataPath));
         const lastActivation = await loadActivation(
           api,
           gameId,

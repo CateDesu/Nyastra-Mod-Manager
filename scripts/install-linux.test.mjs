@@ -582,3 +582,33 @@ test("installer refuses to replace a symlink or unrelated installation folder", 
     f.clean();
   }
 });
+
+for (const prefix of ["install", "previous"]) {
+  test(`installer preserves an existing ${prefix} transaction directory`, () => {
+    const f = fixture();
+    try {
+      assert.equal(f.run().status, 0);
+      const mime = path.join(f.env.PATH.split(path.delimiter)[0], "xdg-mime");
+      const original = readFileSync(mime, "utf8");
+      writeFileSync(
+        mime,
+        `${original}\nif (operation === 'query') {
+const directory = require('node:path').join(process.env.XDG_DATA_HOME, 'nyastra-mod-manager', '.app-${prefix}-' + process.ppid);
+fs.mkdirSync(directory);
+fs.writeFileSync(require('node:path').join(directory, 'keep'), 'existing transaction');
+fs.writeFileSync(process.env.CAPTURE, directory);
+}\n`,
+      );
+      writeFileSync(path.join(f.source, "version"), "new version");
+      const failed = f.run();
+      assert.equal(failed.status, 1, failed.stderr);
+      assert.equal(
+        readFileSync(path.join(readFileSync(f.env.CAPTURE, "utf8"), "keep"), "utf8"),
+        "existing transaction",
+      );
+      assert.equal(readFileSync(path.join(f.app, "version"), "utf8"), "one");
+    } finally {
+      f.clean();
+    }
+  });
+}

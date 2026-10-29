@@ -56,8 +56,8 @@ export function importLinuxProfile(sourceDirectory, configHome) {
     }
     if (failure) throw failure;
   };
+  mkdirSync(staging, { recursive: false, mode: 0o700 });
   try {
-    mkdirSync(staging, { recursive: false, mode: 0o700 });
     for (const name of ["state.v2", "plugins"]) {
       const filename = path.join(source, name);
       if (!existsSync(filename)) continue;

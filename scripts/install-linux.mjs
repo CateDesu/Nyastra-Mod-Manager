@@ -227,13 +227,16 @@ async function install() {
     const previousApp = path.join(installRoot, `.app-previous-${process.pid}`);
     let movedPrevious = false;
     let movedNew = false;
+    let stagingCreated = false;
     let registrationAttempted = false;
     let extensionResult;
     let imported;
     const changedFiles = new Set();
     try {
       if (!selfInstall) {
-        cpSync(source, staging, {
+        mkdirSync(staging, { mode: 0o700 });
+        stagingCreated = true;
+        cpSync(source, path.join(staging, "app"), {
           recursive: true,
           dereference: false,
           verbatimSymlinks: true,
@@ -244,7 +247,7 @@ async function install() {
           renameSync(installedApp, previousApp);
           movedPrevious = true;
         }
-        renameSync(staging, installedApp);
+        renameSync(path.join(staging, "app"), installedApp);
         movedNew = true;
       }
       if (importProfile) {
@@ -313,7 +316,7 @@ StartupNotify=true
       else if (registrationAttempted) recover(() => restoreUnsetMime(previousMime));
       throw error;
     } finally {
-      rmSync(staging, { recursive: true, force: true });
+      if (stagingCreated) rmSync(staging, { recursive: true, force: true });
     }
     if (movedPrevious) rmSync(previousApp, { recursive: true, force: true });
     for (const entry of readdirSync(installRoot, { withFileTypes: true })) {

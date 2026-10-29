@@ -390,6 +390,7 @@ process.exit(Number(process.env.FIXTURE_BUILD_STATUS));
     );
     await put("helper", "fixture helper");
     for (const name of buildNames("2.0.0")) await put(`dist/${name}`, "old build");
+    for (const name of buildNames(version)) await put(`dist/${name}`, `existing ${name}`);
     const run = (status, formats = "zip,AppImage,deb", unsafe = false) =>
       spawnSync(process.execPath, [path.join(root, "src/main/package-linux.mjs")], {
         cwd: root,
@@ -403,15 +404,29 @@ process.exit(Number(process.env.FIXTURE_BUILD_STATUS));
       });
     const failed = run(1);
     assert.equal(failed.status, 1, failed.stderr);
+    for (const name of buildNames(version))
+      assert.equal(await readFile(path.join(root, "dist", name), "utf8"), `existing ${name}`);
     for (const name of buildNames("2.0.0"))
       assert.equal(await readFile(path.join(root, "dist", name), "utf8"), "old build");
     const partial = run(0, "zip");
     assert.equal(partial.status, 0, partial.stderr);
+    assert.equal(
+      await readFile(path.join(root, "dist", buildNames(version)[0]), "utf8"),
+      "new build",
+    );
+    for (const name of buildNames(version).slice(1))
+      assert.equal(await readFile(path.join(root, "dist", name), "utf8"), `existing ${name}`);
     for (const name of buildNames("2.0.0"))
       assert.equal(await readFile(path.join(root, "dist", name), "utf8"), "old build");
     const unsafe = run(0, "zip,AppImage,deb", true);
     assert.equal(unsafe.status, 1, unsafe.stderr);
     assert.match(unsafe.stderr, /safe search path launcher/);
+    assert.equal(
+      await readFile(path.join(root, "dist", buildNames(version)[0]), "utf8"),
+      "new build",
+    );
+    for (const name of buildNames(version).slice(1))
+      assert.equal(await readFile(path.join(root, "dist", name), "utf8"), `existing ${name}`);
     for (const name of buildNames("2.0.0"))
       assert.equal(await readFile(path.join(root, "dist", name), "utf8"), "old build");
     const succeeded = run(0);

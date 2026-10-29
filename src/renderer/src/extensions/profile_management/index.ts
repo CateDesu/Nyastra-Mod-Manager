@@ -132,14 +132,6 @@ function refreshProfile(
             );
           }
         });
-    })
-    .catch((err: Error) => {
-      // why are we catching here at all? shouldn't a failure here cancel the
-      // entire operation?
-      if (err instanceof UserCanceled) {
-        return PromiseBB.reject(err);
-      }
-      showError(store.dispatch, "Failed to set profile", err);
     });
 }
 
@@ -313,10 +305,20 @@ function genOnProfileChange(
     }
   };
 
-  const cancelSwitch = () => {
+  const cancelSwitch = (previousId?: string) => {
     invokeCancel();
-    store.dispatch(setCurrentProfile(undefined, undefined));
-    store.dispatch(setNextProfile(undefined));
+    const candidate = profileById(store.getState(), previousId);
+    const previous =
+      typeof candidate?.id === "string" &&
+      candidate.id.length > 0 &&
+      candidate.id === previousId &&
+      typeof candidate.gameId === "string" &&
+      candidate.gameId.length > 0 &&
+      candidate.pendingRemove !== true
+        ? candidate
+        : undefined;
+    store.dispatch(setCurrentProfile(previous?.gameId, previous?.id));
+    store.dispatch(setNextProfile(previous?.id));
   };
 
   const confirmProfile = (gameId: string, current: string) => {
@@ -334,6 +336,7 @@ function genOnProfileChange(
   };
 
   return (prev: string, current: string) => {
+    let outgoingSaved = false;
     log("debug", "profile change", { from: prev, to: current });
     finishProfileSwitchPromise
       .then(() => {
@@ -403,16 +406,21 @@ function genOnProfileChange(
         // these promises is rejected but that would only work if we could roll back
         // changes that happened.
         const enqueue = (cb: () => PromiseBB<void>) => {
-          queue = queue.then(cb).catch((err) => {
-            const message = getErrorMessageOrDefault(err);
-            log("error", "error in profile-will-change handler", message);
-            PromiseBB.resolve();
-          });
+          queue = queue.then(() =>
+            PromiseBB.try(cb).catch((err) => {
+              const message = getErrorMessageOrDefault(err);
+              log("error", "error in profile-will-change handler", message);
+            }),
+          );
         };
 
         const oldProfile = state.persistent.profiles[prev];
         // changes to profile files are only saved back to the profile at this point
-        queue = queue.then(() => refreshProfile(store, oldProfile, "import"));
+        queue = queue
+          .then(() => refreshProfile(store, oldProfile, "import"))
+          .then(() => {
+            outgoingSaved = true;
+          });
 
         api.events.emit("profile-will-change", current, enqueue);
 
@@ -482,7 +490,7 @@ function genOnProfileChange(
         );
       })
       .catch((err) => {
-        cancelSwitch();
+        cancelSwitch(outgoingSaved ? undefined : prev);
         return PromiseBB.reject(err);
       })
       .catch(ProcessCanceled, (err) => {
@@ -1213,10 +1221,23 @@ function init(context: IExtensionContext): boolean {
               allowReport,
             });
           }
-          store.dispatch(setCurrentProfile(undefined, undefined));
-          store.dispatch(setNextProfile(undefined));
-          if (finishProfileSwitch !== undefined) {
-            finishProfileSwitch();
+          const currentState: IState = store.getState();
+          const owner = currentState.persistent.profiles[initProfile?.id];
+          const validOwner =
+            !(err instanceof CorruptActiveProfile) &&
+            owner?.gameId !== undefined &&
+            owner.gameId === initProfile?.gameId &&
+            owner.pendingRemove !== true;
+          if (validOwner) {
+            if (currentState.settings.profiles.activeProfileId === owner.id) {
+              store.dispatch(setNextProfile(owner.id));
+            }
+          } else {
+            store.dispatch(setCurrentProfile(undefined, undefined));
+            store.dispatch(setNextProfile(undefined));
+            if (finishProfileSwitch !== undefined) {
+              finishProfileSwitch();
+            }
           }
         });
 

@@ -26,6 +26,7 @@ import type {
   IUnavailableReason,
 } from "./types/IDeploymentMethod";
 import type BlacklistSet from "./util/BlacklistSet";
+import { isWindowsGame } from "./util/deploymentNormalize";
 
 export interface IDeployment {
   [relPath: string]: IDeployedFile;
@@ -726,16 +727,7 @@ abstract class LinkingActivator implements IDeploymentMethod {
   }
 
   private isWindowsGame(gameId: string): boolean {
-    if (process.platform !== "linux") return false;
-    const game = getGame(gameId);
-    if (game?.executable) {
-      try {
-        return /\.(exe|bat|cmd)$/i.test(game.executable());
-      } catch {
-        return false;
-      }
-    }
-    return !!this.mNormalize && this.mNormalize("A") === this.mNormalize("a");
+    return isWindowsGame(gameId, this.mNormalize);
   }
 
   private async removeDeployedFile(

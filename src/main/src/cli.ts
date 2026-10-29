@@ -180,12 +180,6 @@ export function updateStartupSettings(updater: (current: IParameters) => IParame
 }
 
 export function parseCommandline(argv: string[], electronIsShitHack: boolean): IParameters {
-  argv = argv.flatMap((argument, index) =>
-    /^nxm:\/\//i.test(argument) &&
-    !["--install", "-i", "--download", "-d"].includes(argv[index - 1] ?? "")
-      ? ["--install", argument]
-      : [argument],
-  );
   // lets look and replace epic stuff?!
   argv = transformEpicArguments(argv);
 
@@ -197,6 +191,13 @@ export function parseCommandline(argv: string[], electronIsShitHack: boolean): I
   if (electronIsShitHack) {
     argv = electronIsShitArgumentSort(argv);
   }
+
+  argv = argv.flatMap((argument, index) =>
+    /^nxm:\/\//i.test(argument) &&
+    !["--install", "-i", "--download", "-d"].includes(argv[index - 1] ?? "")
+      ? ["--install", argument]
+      : [argument],
+  );
 
   let version: string = "1.0.0";
   try {
