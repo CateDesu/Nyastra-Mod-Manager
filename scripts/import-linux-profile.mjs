@@ -16,6 +16,10 @@ export function importLinuxProfile(sourceDirectory, configHome) {
   if (!path.isAbsolute(sourceDirectory)) {
     throw new Error("Choose an absolute profile directory");
   }
+  if (!path.isAbsolute(configHome)) {
+    throw new Error("Choose an absolute configuration directory");
+  }
+  const configRoot = path.resolve(configHome);
   const source = path.resolve(sourceDirectory);
   const destination = path.join(configHome, "NyastraModManager");
   if (existsSync(destination))
@@ -34,7 +38,11 @@ export function importLinuxProfile(sourceDirectory, configHome) {
       throw new Error("Close the program using the source profile before importing it");
   };
   checkClosed();
-  const staging = path.join(configHome, `.nyastra-import-${process.pid}`);
+  const staging = path.resolve(configRoot, `.nyastra-import-${process.pid}`);
+  const prefix = configRoot.endsWith(path.sep) ? configRoot : configRoot + path.sep;
+  if (!staging.startsWith(prefix)) {
+    throw new Error("Profile staging must stay inside the configuration directory");
+  }
   const fluffy = path.join(configHome, "nyastra-mod-manager/fluffy.json");
   const oldFluffy = path.join(configHome, "vortex-native/fluffy.json");
   let copiedFluffy = false;

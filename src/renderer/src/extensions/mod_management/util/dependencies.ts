@@ -1,6 +1,6 @@
 import { unknownToError } from "@vortex/shared";
 import * as _ from "lodash";
-import minimatch from "minimatch";
+import { minimatch } from "minimatch";
 import type { ILookupResult, IReference, IRule } from "modmeta-db";
 import normalizeUrl from "normalize-url";
 import * as semver from "semver";

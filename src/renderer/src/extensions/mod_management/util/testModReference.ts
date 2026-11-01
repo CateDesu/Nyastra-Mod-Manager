@@ -1,7 +1,7 @@
 import * as path from "path";
 
 import * as _ from "lodash";
-import minimatch from "minimatch";
+import { minimatch } from "minimatch";
 import * as semver from "semver";
 
 import { truthy } from "../../../util/util";

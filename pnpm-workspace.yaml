@@ -71,7 +71,6 @@ catalog:
   "@types/json-socket": 0.1.21
   "@types/jsonwebtoken": 9.0.10
   "@types/lodash": 4.17.24
-  "@types/minimatch": 2.0.29
   "@types/minimist": 1.2.5
   "@types/node": 24.12.2
   "@types/node-7z": 2.1.11
@@ -179,7 +178,7 @@ catalog:
   lru-cache: 11.2.7
   markdown-ast: 0.2.1
   memoize-one: 5.2.1
-  minimatch: 3.1.5
+  minimatch: 11.0.3
   minimist: 1.2.8
   mixpanel-browser: 2.79.0
   modmeta-db: github:Nexus-Mods/modmeta-db#daa8935b6e38e255ec192c908adfce35d47c0336
@@ -320,6 +319,8 @@ overrides:
   "smol-toml@>=1 <1.8.1": 1.9.1
   "tinypool@>=2 <2.1.2": 2.1.2
   "zod@>=4 <4.6.6": 4.6.6
+  "minimatch@<11.0.3": 11.0.3
+  "glob@>=9 <14.0.3": 14.0.3
   "@types/react": "18"
   "@types/react-dom": "18"
   node-addon-api: 8.5.0
@@ -353,4 +354,9 @@ allowBuilds:
 patchedDependencies:
   "@nexusmods/fomod-installer-native@0.13.4": patches/@nexusmods__fomod-installer-native@0.13.4.patch
   "@nexusmods/nexus-api@1.7.3": patches/@nexusmods__nexus-api@1.7.3.patch
+  # Keep callback glob consumers compatible with the current matcher.
+  glob@7.2.3: patches/glob@7.2.3.patch
+  # Preserve callable CommonJS imports used by older dependencies.
+  minimatch@11.0.3: patches/minimatch@11.0.3.patch
+  nx@23.2.1: patches/nx@23.2.1.patch
   turbowalk@3.1.1: patches/turbowalk@3.1.1.patch

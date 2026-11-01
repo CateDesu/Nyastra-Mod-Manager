@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import minimatch from "minimatch";
+import { minimatch } from "minimatch";
 import { describe, expect, it } from "vitest";
 
 import { DO_NOT_DEPLOY, IGNORE_CONFLICTS } from "./common";

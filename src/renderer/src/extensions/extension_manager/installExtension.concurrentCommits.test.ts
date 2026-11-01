@@ -168,16 +168,23 @@ function makeApi() {
 
 async function archive(id: string, version: string) {
   const source = await mkdtemp(path.join(directory, "source-"));
-  const witness = JSON.stringify(path.join(directory, "scanned.jsonl"));
+  await writeFile(
+    path.join(source, "witness.json"),
+    JSON.stringify(path.join(directory, "scanned.jsonl")),
+  );
   await writeFile(path.join(source, "info.json"), JSON.stringify({ id, name: id, version }));
   await writeFile(
     path.join(source, "index.js"),
-    `module.exports = () => { require('node:fs').appendFileSync(${witness}, JSON.stringify(require('./info.json')) + '\\n'); return true; };`,
+    `module.exports = () => { require('node:fs').appendFileSync(require('./witness.json'), JSON.stringify(require('./info.json')) + '\\n'); return true; };`,
   );
   const filename = path.join(directory, `${id}-${version}.zip`);
   const original = new SevenZip().add(
     filename,
-    [path.join(source, "index.js"), path.join(source, "info.json")],
+    [
+      path.join(source, "index.js"),
+      path.join(source, "info.json"),
+      path.join(source, "witness.json"),
+    ],
     {},
   );
   const observed = observe(original);

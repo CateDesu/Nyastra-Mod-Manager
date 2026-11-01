@@ -1,5 +1,5 @@
 import { actions, ComponentEx, FormFeedback, More, types, util } from "@nexusmods/vortex-api";
-import minimatch from "minimatch";
+import { minimatch } from "minimatch";
 import { IReference, IRule, RuleType } from "modmeta-db";
 import * as React from "react";
 import { Button, Col, ControlLabel, Form, FormControl, FormGroup, Modal } from "react-bootstrap";

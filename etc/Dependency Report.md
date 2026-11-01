@@ -77,7 +77,7 @@ This is a list of all modules leaked by Vortex to extensions. Any module listed 
 | lodash | 4.18.1 |
 | markdown-ast | 0.2.1 |
 | memoize-one | 5.2.1 |
-| minimatch | 3.1.5 |
+| minimatch | 11.0.3 |
 | mixpanel-browser | 2.79.0 |
 | modmeta-db | 0.9.3 |
 | node-7z | 0.8.1 |

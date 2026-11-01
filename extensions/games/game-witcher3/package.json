@@ -24,7 +24,6 @@
     "@nexusmods/vortex-api": "workspace:*",
     "@types/bluebird": "catalog:",
     "@types/lodash": "catalog:",
-    "@types/minimatch": "catalog:",
     "@types/react": "catalog:",
     "@types/semver": "catalog:",
     "@vortex/extension-test-mocks": "workspace:*",

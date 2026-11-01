@@ -1,4 +1,4 @@
-import minimatch from "minimatch";
+import { minimatch } from "minimatch";
 
 import type { IGame } from "../../../types/IGame";
 import type { Normalize } from "../../../util/getNormalizeFunc";

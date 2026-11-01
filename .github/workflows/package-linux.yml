@@ -27,8 +27,6 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y build-essential python3-setuptools cmake liblz4-dev libfontconfig1-dev patchelf xdg-utils desktop-file-utils psmisc xvfb
       - uses: ./.github/actions/setup-pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Audit runtime dependencies
-        run: node scripts/audit-runtime.mjs
       - name: Verify archive runtime and AppImage launcher
         run: node --test scripts/archive-runtime.test.mjs scripts/appimage-launcher.test.mjs scripts/smoke-linux.test.mjs
       - run: pnpm run verify

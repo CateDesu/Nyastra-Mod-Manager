@@ -1,7 +1,7 @@
 import * as path from "path";
 
 import { types } from "@nexusmods/vortex-api";
-import minimatch from "minimatch";
+import { minimatch } from "minimatch";
 
 const blacklist = [
   path.join("**", "fomod", "*"),

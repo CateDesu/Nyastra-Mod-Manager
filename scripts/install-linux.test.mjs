@@ -125,6 +125,7 @@ else fs.writeFileSync(process.env.HANDLER, value);`,
   return {
     root,
     source,
+    bin,
     env,
     app,
     wrapper,
@@ -239,7 +240,7 @@ test("concurrent installation cannot capture state before owning the lock", asyn
   let finished;
   try {
     writeFileSync(
-      path.join(f.env.PATH.split(path.delimiter)[0], "xdg-mime"),
+      path.join(f.bin, "xdg-mime"),
       `#!${process.execPath}
 const fs = require('node:fs');
 const [operation, value] = process.argv.slice(2);
@@ -435,7 +436,7 @@ test("failed extension adaptation restores the previous installed runtime", () =
 test("an interrupted installer releases its lock without removing the lock file", async (t) => {
   const f = fixture();
   const queryStarted = path.join(f.root, "query-started");
-  const mime = path.join(f.env.PATH.split(path.delimiter)[0], "xdg-mime");
+  const mime = path.join(f.bin, "xdg-mime");
   const original = readFileSync(mime);
   let pending;
   let finished;
@@ -632,7 +633,7 @@ for (const prefix of ["install", "previous"]) {
     const f = fixture();
     try {
       assert.equal(f.run().status, 0);
-      const mime = path.join(f.env.PATH.split(path.delimiter)[0], "xdg-mime");
+      const mime = path.join(f.bin, "xdg-mime");
       const original = readFileSync(mime, "utf8");
       writeFileSync(
         mime,

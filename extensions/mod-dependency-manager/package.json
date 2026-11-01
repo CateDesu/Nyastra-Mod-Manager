@@ -14,7 +14,6 @@
     "@nosferatu500/react-sortable-tree": "catalog:",
     "@nosferatu500/theme-file-explorer": "catalog:",
     "@types/lodash": "catalog:",
-    "@types/minimatch": "catalog:",
     "@types/react": "catalog:",
     "@types/react-bootstrap": "catalog:",
     "@types/react-dom": "catalog:",
