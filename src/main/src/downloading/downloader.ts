@@ -127,12 +127,6 @@ export async function download<T>(
       : [];
   const isChunked = chunks.length > 1;
 
-  const completedRanges = checkpoint?.completedRanges ?? [];
-  const pendingChunks = chunks.filter(
-    (chunk) =>
-      !completedRanges.some((r) => r.start <= chunk.range.start && r.end >= chunk.range.end),
-  );
-
   let handle: FileHandle;
 
   try {
@@ -145,6 +139,20 @@ export async function download<T>(
   }
 
   try {
+    if (checkpoint) {
+      const { size } = await handle.fd.stat();
+      // A shortened partial no longer contains every completed range.
+      if (checkpoint.completedRanges.some((range) => range.end >= size)) {
+        checkpoint = undefined;
+        await handle.fd.truncate(0);
+      }
+    }
+    const completedRanges = checkpoint?.completedRanges ?? [];
+    const pendingChunks = chunks.filter(
+      (chunk) =>
+        !completedRanges.some((r) => r.start <= chunk.range.start && r.end >= chunk.range.end),
+    );
+
     if (checkpoint && probe.size) {
       try {
         await handle.fd.truncate(probe.size);
@@ -402,6 +410,12 @@ async function downloadStream(
   try {
     // Wait for got to finish cookie processing before pulling bytes or validating headers.
     const [response] = (await once(stream, "response")) as [IncomingMessage];
+    if ((response.headers["content-type"] ?? "").toLowerCase().startsWith("text/html")) {
+      throw new VortexError("Server returned an HTML page instead of a file", {
+        kind: "download:is-html",
+        url: endpoint.url.toString(),
+      });
+    }
     if (options.chunk) {
       const range = /^bytes (\d+)-(\d+)\/(\d+|\*)$/.exec(response.headers["content-range"] ?? "");
       if (

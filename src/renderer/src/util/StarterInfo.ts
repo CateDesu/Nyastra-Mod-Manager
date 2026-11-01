@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 
 import { getErrorCode, unknownToError } from "@vortex/shared";
+import Bluebird from "bluebird";
 
 import { setToolRunning, setToolStopped } from "../actions";
 import { ApplicationData } from "../applicationData";
@@ -91,11 +92,16 @@ async function shouldRunWithProton(
     const steamStore = storeLookup.getGameStore(getGameStoresSafe(), "steam") as Steam;
     const games = await steamStore.allGames();
 
-    // Find the game entry that matches this executable's location
+    const isInGame = (target: string, gamePath: string) => {
+      if (!target) return false;
+      const relative = path.relative(gamePath, target);
+      return (
+        relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)
+      );
+    };
+
     return games.find(
-      (g) =>
-        info.workingDirectory?.toLowerCase().startsWith(g.gamePath.toLowerCase()) ||
-        info.exePath.toLowerCase().startsWith(g.gamePath.toLowerCase()),
+      (g) => isInGame(info.workingDirectory, g.gamePath) || isInGame(info.exePath, g.gamePath),
     );
   } catch (err: any) {
     log("debug", "Could not check for Proton execution", {
@@ -261,6 +267,7 @@ class StarterInfo implements IStarterInfo {
 
     // Check if game/tool should run through Proton on Linux
     const protonGameEntry = await shouldRunWithProton(info, api);
+    let execution: PromiseLike<void>;
     if (protonGameEntry?.usesProton) {
       // On Linux with Proton, we can't track when the process exits (ProcessMonitor
       // only works on Windows), so don't set tool as running to avoid stuck spinner
@@ -273,7 +280,7 @@ class StarterInfo implements IStarterInfo {
       };
 
       const steamStore = storeLookup.getGameStore(getGameStoresSafe(), "steam") as Steam;
-      return steamStore.runToolWithProton(
+      execution = steamStore.runToolWithProton(
         api,
         info.exePath,
         info.commandLine,
@@ -287,10 +294,8 @@ class StarterInfo implements IStarterInfo {
         },
         protonGameEntry,
       );
-    }
-
-    return api
-      .runExecutable(info.exePath, info.commandLine, {
+    } else {
+      execution = api.runExecutable(info.exePath, info.commandLine, {
         cwd: info.workingDirectory || path.dirname(info.exePath),
         env: info.environment,
         suggestDeploy: true,
@@ -298,7 +303,10 @@ class StarterInfo implements IStarterInfo {
         detach: info.detach || info.onStart === "close",
         onSpawned: spawned,
         onExit: (code) => recordLaunchExit(info.exePath, code),
-      })
+      });
+    }
+
+    return Bluebird.resolve(execution)
       .catch(ProcessCanceled, () => undefined)
       .catch(UserCanceled, () => undefined)
       .catch(MissingDependency, () => {

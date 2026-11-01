@@ -1,13 +1,19 @@
-# Linux Fluffy Extensions
+# Linux extension adaptations
 
-The native Linux program can adapt two existing game extensions to use an
-existing Fluffy installation and Linux, Wine or Proton runner. Extension code
+The native Linux program adapts the supported game extensions. The Fluffy recipes
+use an existing Fluffy installation and Linux, Wine or Proton runner. Extension code
 and artwork are supplied by their authors and are not included in the release.
 
 ## Supported extensions
 
 - Resident Evil 4 (2023) Vortex Extension 0.4.1 by ChemBoy1.
 - Resident Evil Requiem Vortex Extension 0.1.3 by ChemBoy1.
+- Helldivers 2 Vortex Extension 1.2.2 by ChemBoy1 and Wistipouf.
+
+The Helldivers recipe skips missing-archive warnings for packed installations.
+Their `bundles.nxa` index contains archive names absent from the loose file list.
+The loose-file check still runs for legacy installations. Deployment and patch
+numbering are unchanged.
 
 The installer applies the recipes to these exact installed versions. Other
 versions and missing extensions are skipped. If an extension update replaces
@@ -32,7 +38,7 @@ data directory. The default is `$XDG_CONFIG_HOME/NyastraModManager`, falling bac
 
 `--source-plugins /path/to/original/plugins` uses matching original extension
 sources when replacing a previous local adaptation. The source is read only.
-Only the installed `index.js` and the recipe's `nyastra-fluffy.cjs` helper change.
+Only the installed `index.js` and, for Fluffy, the `nyastra-fluffy.cjs` helper change.
 Original files and receipts remain under `NyastraModManager/extension-backups`. The recipe
 prepares every supported source before writing and restores changed files if
 installation fails.

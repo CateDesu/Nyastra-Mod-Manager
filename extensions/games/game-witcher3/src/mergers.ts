@@ -170,7 +170,7 @@ export const canMergeSettings = (api: types.IExtensionApi) => {
         deployedFiles
           .filter((file) => isSettingsFile(path.basename(file.relPath)))
           .map((file) => ({
-            in: path.join(getDocumentsPath(game), path.basename(file.relPath)),
+            in: path.join(getDocumentsPath(game, api), path.basename(file.relPath)),
             out: path.basename(file.relPath),
           })),
       filter: (filePath) => isSettingsFile(filePath),
@@ -252,7 +252,10 @@ async function readSettingsFile(
   if (!discovery?.path) {
     return Promise.reject({ code: "ENOENT", message: "Game is not discovered" });
   }
-  const gameSettingsFilepath = path.join(getDocumentsPath(discovery), path.basename(modFilePath));
+  const gameSettingsFilepath = path.join(
+    getDocumentsPath(discovery, api),
+    path.basename(modFilePath),
+  );
   const mergedFilePath = path.join(mergeDirPath, path.basename(modFilePath));
   const backupFilePath = gameSettingsFilepath + VORTEX_BACKUP_TAG;
   try {

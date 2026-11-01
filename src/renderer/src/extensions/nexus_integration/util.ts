@@ -19,6 +19,7 @@ import type {
   IGraphUser,
   IModInfo,
   IModFileQuery,
+  IValidateKeyResponse,
 } from "@nexusmods/nexus-api";
 import type Nexus from "@nexusmods/nexus-api";
 import { GraphError, NexusError, TimeoutError } from "@nexusmods/nexus-api";
@@ -70,6 +71,7 @@ import type { RedownloadMode } from "../download_management/types/IDownload";
 import { SITE_ID } from "../gamemode_management/constants";
 import { gameById, knownGames } from "../gamemode_management/selectors";
 import modName from "../mod_management/util/modName";
+import { clearOAuthCredentials } from "./actions/account";
 import { setUserInfo } from "./actions/persistent";
 import { setLoginId, setOauthPending } from "./actions/session";
 import { OAUTH_CLIENT_ID, OAUTH_REDIRECT_URL, OAUTH_URL, getOAuthRedirectUrl } from "./constants";
@@ -89,7 +91,7 @@ import { endorseCollection, endorseMod } from "./util/endorseMod";
 import { FULL_REVISION_INFO, MOD_FILE_INFO } from "./util/graphQueries";
 import type { ITokenReply } from "./util/oauth";
 import OAuth from "./util/oauth";
-import { refuseLogin, tokenProviderFor } from "./util/oauthSession";
+import { tokenProviderFor } from "./util/oauthSession";
 import { makeFileUID } from "./util/UIDs";
 
 const UPDATE_CHECK_DELAY = 60 * 60 * 1000;
@@ -1827,6 +1829,18 @@ export function transformUserInfoFromApi(input: IUserInfo & { preferences: IPref
   return stateUserInfo;
 }
 
+function transformUserInfoFromKey(input: IValidateKeyResponse): IValidateKeyDataV2 {
+  return {
+    email: input.email,
+    name: input.name,
+    profileUrl: input.profile_url,
+    userId: input.user_id,
+    isPremium: input.is_premium,
+    isSupporter: input.is_supporter,
+    isLifetime: false,
+  };
+}
+
 /**
  * Apply a background JWT refresh to the persisted userInfo without clearing it
  * or hitting the network.
@@ -1894,24 +1908,39 @@ export function getUserInfo(
 ): BluebirdPromise<UserInfoRead> {
   log("info", "updateUserInfo()");
 
-  /**
-   * This is where we are primarily updating the user info in the state.
-   * I've added a check for the oauth token in the state, and if it exists, updates
-   * from the nexus api instead of the information that was supplied in
-   * oauth token itself as this could be out of date
-   */
-  //const token = getOAuthTokenFromState(api);
+  const state = api.getState();
+  if (isLoggedIn(state)) {
+    const owner = keyValidationOwner(api);
+    const generation = owner.generation;
+    const validation = owner.operation;
+    const tokenValidation = owner.tokenOperation;
+    const operation = {};
+    owner.readOperation = operation;
+    const isCurrent = () => {
+      owner.sync();
+      return (
+        owner.generation === generation &&
+        owner.operation === validation &&
+        owner.tokenOperation === tokenValidation &&
+        owner.readOperation === operation
+      );
+    };
+    const account = state.confidential.account?.["nexus"];
+    const apiKey = account?.OAuthCredentials === undefined ? account?.APIKey : undefined;
+    const read = BluebirdPromise.try(() =>
+      apiKey !== undefined
+        ? nexus.validateKey(apiKey).then(transformUserInfoFromKey)
+        : nexus.getUserInfo().then(transformUserInfoFromApi),
+    );
 
-  if (isLoggedIn(api.getState())) {
-    // get userinfo from api
-    return BluebirdPromise.resolve(nexus.getUserInfo())
-      .then((apiUserInfo): UserInfoRead => {
-        // update state with new info from endpoint
-        api.store.dispatch(setUserInfo(transformUserInfoFromApi(apiUserInfo)));
-        //log('info', 'getUserInfo() nexus.getUserInfo response', apiUserInfo);
-        return "updated";
+    return BluebirdPromise.resolve(read)
+      .then((accountInfo): UserInfoRead => {
+        if (!isCurrent()) return "failed";
+        api.store.dispatch(setUserInfo(accountInfo));
+        return isCurrent() ? "updated" : "failed";
       })
       .catch((err): UserInfoRead => {
+        if (!isCurrent()) return "failed";
         //log('error', `getUserInfo() nexus.getUserInfo response ${err.message}`, err);
         if (err instanceof ProcessCanceled) {
           // no connection, or the api was switched off; neither is worth a toast for a read
@@ -2010,20 +2039,92 @@ export function updateToken(
 ): BluebirdPromise<boolean> {
   log("info", "updateToken()");
 
-  return BluebirdPromise.resolve(nexus.setTokenProvider(tokenProviderFor(api)))
+  const owner = keyValidationOwner(api);
+  const account = api.getState().confidential.account?.["nexus"];
+  const live = account?.OAuthCredentials;
+  if (
+    live?.token !== credentials.token ||
+    live?.refreshToken !== credentials.refreshToken ||
+    live?.fingerprint !== credentials.fingerprint
+  ) {
+    return BluebirdPromise.resolve(false);
+  }
+  let generation = owner.generation;
+  const operation = {};
+  owner.tokenOperation = operation;
+  const isCurrent = () => {
+    owner.sync();
+    return owner.generation === generation && owner.tokenOperation === operation;
+  };
+
+  const tokenProvider = (rejectedToken?: string): Promise<string | undefined> => {
+    owner.sync();
+    let requestGeneration = owner.generation;
+    const ownsRequest = () => {
+      owner.sync();
+      return owner.generation === requestGeneration && owner.tokenOperation === operation;
+    };
+    const sessionApi = Object.create(api) as IExtensionApi;
+    sessionApi.store = {
+      ...api.store,
+      dispatch: ((action) => {
+        if (!ownsRequest()) throw new ProcessCanceled("OAuth session changed");
+        const result = api.store.dispatch(action);
+        owner.sync();
+        if (
+          owner.generation === requestGeneration + 1 &&
+          owner.tokenOperation === operation &&
+          [String(setOAuthCredentials), String(clearOAuthCredentials)].includes(action.type)
+        ) {
+          // Accept only transitions made by this token refresh.
+          if (generation === requestGeneration) generation = owner.generation;
+          requestGeneration = owner.generation;
+        }
+        return result;
+      }) as typeof api.store.dispatch,
+    };
+    sessionApi.showErrorNotification = (...args) => {
+      if (ownsRequest()) api.showErrorNotification(...args);
+    };
+    sessionApi.events = Object.assign(Object.create(api.events), {
+      emit: (event: string, ...args: unknown[]) => ownsRequest() && api.events.emit(event, ...args),
+    });
+    return Promise.resolve(tokenProviderFor(sessionApi)(rejectedToken)).then((token) => {
+      if (!ownsRequest()) throw new ProcessCanceled("OAuth session changed");
+      return token;
+    });
+  };
+
+  return BluebirdPromise.try(() => nexus.setTokenProvider(tokenProvider))
     .then(() => {
-      if (!isLoggedIn(api.getState())) {
-        // priming the provider refreshed the token, the site refused, and the session is gone
-        return false;
-      }
+      if (!isCurrent() || !isLoggedIn(api.getState())) return false;
       return BluebirdPromise.resolve(nexus.getUserInfo()).then((apiUserInfo) => {
+        if (!isCurrent()) return false;
+        owner.readOperation = {};
         api.store.dispatch(setUserInfo(transformUserInfoFromApi(apiUserInfo)));
-        return true;
+        return isCurrent();
       });
     })
     .catch((err: unknown) => {
+      if (!isCurrent() || !isLoggedIn(api.getState())) return false;
       if (isLoginRefused(err)) {
-        refuseLogin(api, err);
+        api.showErrorNotification("Authentication failed, please log in again", err, {
+          allowReport: false,
+        });
+        if (!isCurrent()) return false;
+        api.store.dispatch(clearOAuthCredentials(null));
+        const isCleared = () => {
+          owner.sync();
+          const current = api.getState().confidential.account?.["nexus"];
+          return (
+            owner.generation === generation + 1 &&
+            owner.tokenOperation === operation &&
+            current?.OAuthCredentials === undefined &&
+            current?.APIKey === account?.APIKey
+          );
+        };
+        if (isCleared()) api.store.dispatch(setUserInfo(undefined));
+        if (isCleared()) api.events.emit("did-login", err);
         return false;
       }
 
@@ -2041,51 +2142,108 @@ export function updateToken(
           api.store.dispatch(setUserInfo(fromToken));
         }
       }
-      api.events.emit("did-login", err);
+      if (isCurrent()) api.events.emit("did-login", err);
       return false;
     });
 }
 
+const keyValidationOwners = new WeakMap<
+  object,
+  {
+    generation: number;
+    operation: object;
+    readOperation: object;
+    tokenOperation: object;
+    sync: () => void;
+  }
+>();
+
+function keyValidationOwner(api: IExtensionApi) {
+  let owner = keyValidationOwners.get(api.store);
+  if (owner === undefined) {
+    let key = api.getState().confidential.account?.["nexus"]?.APIKey;
+    let oauth = api.getState().confidential.account?.["nexus"]?.OAuthCredentials;
+    const current = {
+      generation: 0,
+      operation: {},
+      readOperation: {},
+      tokenOperation: {},
+      sync: () => {
+        const account = api.getState().confidential.account?.["nexus"];
+        if (account?.APIKey !== key || account?.OAuthCredentials !== oauth) {
+          key = account?.APIKey;
+          oauth = account?.OAuthCredentials;
+          current.generation++;
+        }
+      },
+    };
+    // Observe intermediate changes too, so reusing a key cannot revive an old request.
+    api.store.subscribe(current.sync);
+    keyValidationOwners.set(api.store, current);
+    owner = current;
+  }
+  owner.sync();
+  return owner;
+}
+
 export function updateKey(api: IExtensionApi, nexus: Nexus, key: string): BluebirdPromise<boolean> {
+  const owner = keyValidationOwner(api);
+  const account = api.getState().confidential.account?.["nexus"];
+  if (account?.APIKey !== key || account?.OAuthCredentials !== undefined) {
+    return BluebirdPromise.resolve(false);
+  }
+  const generation = owner.generation;
+  const operation = {};
+  owner.operation = operation;
+  const isCurrent = () => {
+    owner.sync();
+    const live = api.getState().confidential.account?.["nexus"];
+    return (
+      owner.generation === generation &&
+      owner.operation === operation &&
+      live?.APIKey === key &&
+      live?.OAuthCredentials === undefined
+    );
+  };
+  const retry = (dismiss: () => void) => {
+    if (!isCurrent()) return;
+    dismiss();
+    if (isCurrent()) void updateKey(api, nexus, key);
+  };
+  const failed = (err: unknown) => {
+    if (isCurrent()) owner.readOperation = {};
+    if (isCurrent()) api.store.dispatch(setUserInfo(undefined));
+    if (isCurrent()) api.events.emit("did-login", err);
+    return false;
+  };
   return (
-    BluebirdPromise.resolve(nexus.setKey(key))
+    BluebirdPromise.try(() => nexus.setKey(key, isCurrent))
       .then((userInfo) => {
-        if (api.getState().confidential.account?.["nexus"]?.["APIKey"] !== key) return false;
-        api.store.dispatch(
-          setUserInfo({
-            email: userInfo.email,
-            name: userInfo.name,
-            profileUrl: userInfo.profile_url,
-            userId: userInfo.user_id,
-            isPremium: userInfo.is_premium,
-            isSupporter: userInfo.is_supporter,
-            isLifetime: false,
-          }),
-        );
+        if (!isCurrent()) return false;
+        owner.readOperation = {};
+        api.store.dispatch(setUserInfo(transformUserInfoFromKey(userInfo)));
+        if (!isCurrent()) return false;
         api.events.emit("did-login", null);
         return true;
       })
       // don't stop the login just because the github rate limit is exceeded
-      .catch(RateLimitExceeded, () => BluebirdPromise.resolve(true))
+      .catch(RateLimitExceeded, () => isCurrent())
       .catch(TimeoutError, (err) => {
+        if (!isCurrent()) return false;
         api.sendNotification({
           type: "error",
           message: "API Key validation timed out",
           actions: [
             {
               title: "Retry",
-              action: (dismiss) => {
-                updateKey(api, nexus, key);
-                dismiss();
-              },
+              action: retry,
             },
           ],
         });
-        api.store.dispatch(setUserInfo(undefined));
-        api.events.emit("did-login", err);
-        return false;
+        return failed(err);
       })
       .catch(NexusError, (err) => {
+        if (!isCurrent()) return false;
         api.sendNotification({
           id: "nexus-login-failed",
           type: "error",
@@ -2094,18 +2252,14 @@ export function updateKey(api: IExtensionApi, nexus: Nexus, key: string): Bluebi
           actions: [
             {
               title: "Try again",
-              action: (dismiss) => {
-                updateKey(api, nexus, key);
-                dismiss();
-              },
+              action: retry,
             },
           ],
         });
-        api.store.dispatch(setUserInfo(undefined));
-        api.events.emit("did-login", err);
-        return false;
+        return failed(err);
       })
       .catch(ProcessCanceled, (err) => {
+        if (!isCurrent()) return false;
         log("debug", "login canceled", err.message);
         api.sendNotification({
           id: "nexus-login-failed",
@@ -2115,19 +2269,14 @@ export function updateKey(api: IExtensionApi, nexus: Nexus, key: string): Bluebi
           actions: [
             {
               title: "Try again",
-              action: (dismiss) => {
-                updateKey(api, nexus, key);
-                dismiss();
-              },
+              action: retry,
             },
           ],
         });
-        api.store.dispatch(setUserInfo(undefined));
-        api.events.emit("did-login", err);
-        return false;
+        return failed(err);
       })
       .catch((err) => {
-        const t = api.translate;
+        if (!isCurrent()) return false;
         api.showErrorNotification(
           err.code === "ESOCKETTIMEDOUT"
             ? "Connection to nexusmods.com timed out, please check your internet connection"
@@ -2137,17 +2286,12 @@ export function updateKey(api: IExtensionApi, nexus: Nexus, key: string): Bluebi
             actions: [
               {
                 title: "Retry",
-                action: (dismiss) => {
-                  updateKey(api, nexus, key);
-                  dismiss();
-                },
+                action: retry,
               },
             ],
           },
         );
-        api.store.dispatch(setUserInfo(undefined));
-        api.events.emit("did-login", err);
-        return false;
+        return failed(err);
       })
   );
 }

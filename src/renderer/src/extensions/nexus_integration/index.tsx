@@ -105,6 +105,7 @@ import {
   processErrorMessage,
   requestLogin,
   retrieveNexusGames,
+  updateKey,
   updateToken,
 } from "./util";
 import { checkModVersion } from "./util/checkModsVersion";
@@ -318,6 +319,23 @@ function framePos(frame: any) {
   return `${frame.getFileName()}:${frame.getLineNumber()}:${frame.getColumnNumber()}`;
 }
 
+function redactKeyError(err: Error, key: unknown): Error {
+  if (typeof key !== "string" || key.length === 0) {
+    return err;
+  }
+  const properties = Object.getOwnPropertyDescriptors(err);
+  properties.stack = { value: err.stack, writable: true, configurable: true };
+  let changed = false;
+  for (const property of Object.values(properties)) {
+    if (typeof property.value === "string" && property.value.includes(key)) {
+      property.value = property.value.replaceAll(key, "<redacted>");
+      changed = true;
+    }
+  }
+  // Preserve SDK error types and status codes, including frozen errors.
+  return changed ? Object.create(Object.getPrototypeOf(err), properties) : err;
+}
+
 const requestLog = {
   requests: [],
   logPath: path.join(getVortexPath("userData"), "network.log"),
@@ -353,7 +371,7 @@ const requestLog = {
           }
           return prom
             .then((res) => {
-              if (prop === "setKey") {
+              if (prop === "setKey" || prop === "validateKey") {
                 // don't log sensitive data
                 this.log(prop, [], caller);
               } else {
@@ -365,8 +383,8 @@ const requestLog = {
               if (typeof err === "string") {
                 err = new Error(err);
               }
-              if (prop === "setKey") {
-                // don't log sensitive data
+              if (prop === "setKey" || prop === "validateKey") {
+                err = redactKeyError(err, args[0]);
                 this.logErr(prop, [], caller, err);
               } else {
                 this.logErr(prop, args || [], caller, err);
@@ -1075,8 +1093,8 @@ function once(api: IExtensionApi, callbacks: Array<(nexus: NexusT) => void>) {
             (): UserInfoRead => "failed",
           ),
         );
-      } else {
-        //updateKey(api, nexus, apiKey);
+      } else if (apiKey !== undefined) {
+        updateKey(api, nexus, apiKey);
       }
     }
 

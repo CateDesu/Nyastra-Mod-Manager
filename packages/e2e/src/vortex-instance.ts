@@ -38,15 +38,17 @@ export function prepareVortexInstance(rootDir?: string): VortexInstanceSetup {
 
   const appDataDir = path.join(userDataDir, "appData");
   const userDataSubDir = path.join(userDataDir, "userData");
-  // Pre-create the app name subdirectory that Vortex expects for startup.json.
-  // The app name comes from src/main/package.json ('@vortex/main').
-  const appNameDir = path.join(appDataDir, "@vortex", "main");
+  // Match the profile name set by the main process.
+  const appNameDir = path.join(appDataDir, "NyastraModManager");
   fs.mkdirSync(appNameDir, { recursive: true });
   fs.mkdirSync(userDataSubDir, { recursive: true });
 
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (key !== "ELECTRON_RUN_AS_NODE" && value !== undefined) {
+    if (
+      !["ELECTRON_RUN_AS_NODE", "APPIMAGE", "APPDIR", "IS_FLATPAK"].includes(key) &&
+      value !== undefined
+    ) {
       env[key] = value;
     }
   }
@@ -55,6 +57,16 @@ export function prepareVortexInstance(rootDir?: string): VortexInstanceSetup {
   // instances share no data at all.
   env.ELECTRON_USERDATA = userDataSubDir;
   env.ELECTRON_APPDATA = appDataDir;
+  for (const [variable, name] of Object.entries({
+    XDG_DATA_HOME: "data",
+    XDG_CONFIG_HOME: "config",
+    XDG_CACHE_HOME: "cache",
+    XDG_STATE_HOME: "state",
+  })) {
+    env[variable] = path.join(userDataDir, name);
+    fs.mkdirSync(env[variable], { recursive: true });
+  }
+  env.XDG_CURRENT_DESKTOP = "X-Generic";
   // Always set — disables single-instance lock so parallel instances can run.
   env.VORTEX_E2E = "1";
   // Hide window unless debugging.

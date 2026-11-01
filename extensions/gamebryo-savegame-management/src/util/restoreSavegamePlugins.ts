@@ -33,8 +33,12 @@ function restoreSavegamePlugins(
   api: types.IExtensionApi,
   modPath: string,
   save: ISavegame,
+  isCurrent: () => boolean,
 ): Promise<void> {
   return fs.readdirAsync(modPath).then((files: string[]) => {
+    if (!isCurrent()) {
+      return Promise.resolve();
+    }
     const plugins = new Set(
       files
         .map((fileName) => fileName.toLowerCase())

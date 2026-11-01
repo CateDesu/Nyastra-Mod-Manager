@@ -125,7 +125,7 @@ describe.skipIf(process.platform !== "linux")("Linux FOMOD packaging", () => {
     for (const [source, target] of [
       ["modinstaller.napi.node", "modinstaller.node"],
       ["ModInstaller.Native.so", "ModInstaller.Native.so"],
-    ]) {
+    ] as const) {
       await copyFile(
         join(installedPackageRoot, "prebuilds", `linux-${process.arch}`, source),
         join(releaseDir, target),

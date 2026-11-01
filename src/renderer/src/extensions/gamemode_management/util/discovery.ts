@@ -54,6 +54,10 @@ export async function quickDiscoveryTools(
     try {
       // TODO: Bluebird to native
       const toolPath = await Promise.resolve(tool.queryPath());
+      if (toolPath === undefined) {
+        log("debug", "tool not found", { gameId, toolId: tool.id, toolName: tool.name });
+        return;
+      }
       if (typeof toolPath !== "string") throw new Error("Invalid return type");
 
       if (toolPath) {
@@ -85,6 +89,10 @@ export async function quickDiscoveryTools(
         });
       }
     } catch (err) {
+      if (err instanceof GameEntryNotFound) {
+        log("debug", "tool not found", { gameId, toolId: tool.id, toolName: tool.name });
+        return;
+      }
       log("error", "failed to determine tool setup", {
         err,
         gameId,
@@ -153,20 +161,9 @@ async function queryByArgs(
 }
 
 async function queryByCB(game: IGame): Promise<Partial<IGameStoreEntry> | undefined> {
-  let gamePath: string | Bluebird<string | IGameStoreEntry>;
-
-  try {
-    gamePath = game.queryPath();
-    if (typeof gamePath === "function") {
-      throw new SetupError("queryPath must be a string or a promise that resolves to a string");
-    }
-  } catch (err) {
-    log("warn", "failed to query game location", {
-      game: game.id,
-      error: getErrorMessageOrDefault(err),
-    });
-
-    return undefined;
+  const gamePath = game.queryPath();
+  if (typeof gamePath === "function") {
+    throw new SetupError("queryPath must be a string or a promise that resolves to a string");
   }
 
   // TODO: Bluebird to native
@@ -174,7 +171,8 @@ async function queryByCB(game: IGame): Promise<Partial<IGameStoreEntry> | undefi
     typeof gamePath === "string" ? gamePath : await Promise.resolve(gamePath);
 
   if (resolvedInfo === undefined) {
-    throw new GameEntryNotFound(game.id, "unknown");
+    log("debug", "game not found", { id: game.id });
+    return undefined;
   }
 
   let resolvedPath: string;
@@ -319,6 +317,10 @@ export async function quickDiscovery(
         return undefined;
       }
     } catch (err) {
+      if (err instanceof GameEntryNotFound) {
+        log("debug", "game not found", { id: game.id });
+        return undefined;
+      }
       const error = unknownToError(err);
 
       log("error", "failed to use game support plugin", {

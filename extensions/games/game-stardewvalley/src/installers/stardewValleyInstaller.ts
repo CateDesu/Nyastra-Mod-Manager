@@ -41,15 +41,11 @@ export async function installStardewValley(
   const scannedMods = await Promise.all(
     manifestFiles.map(async (manifestFile) => {
       const rootFolder = path.dirname(manifestFile);
-      const rootSegments = rootFolder.toLowerCase().split(path.sep);
-      const manifestIndex = manifestFile.toLowerCase().indexOf(MOD_MANIFEST);
+      const rootPrefix = rootFolder === "." ? "" : rootFolder + path.sep;
+      const manifestIndex = rootPrefix.length;
       const filterFunc = (file: string) => {
-        const isFile = !file.endsWith(path.sep) && path.extname(path.basename(file)) !== "";
-        const fileSegments = file.toLowerCase().split(path.sep);
-        const isInRootFolder =
-          rootSegments.length > 0
-            ? fileSegments?.[rootSegments.length - 1] === rootSegments[rootSegments.length - 1]
-            : true;
+        const isFile = !file.endsWith(path.sep);
+        const isInRootFolder = file.toLowerCase().startsWith(rootPrefix.toLowerCase());
         return isInRootFolder && isFile;
       };
       try {

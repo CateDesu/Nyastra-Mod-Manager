@@ -56,11 +56,14 @@ export async function parser(
   api: types.IExtensionApi,
   gameId: string,
   collection: ICollection,
+  ownerProfileId?: string,
+  isCurrent: () => boolean = () => true,
 ): Promise<void> {
+  if (!isCurrent()) return;
   const state = api.getState();
 
-  const profileId = selectors.lastActiveProfileForGame(state, gameId);
-  if (profileId === undefined) {
+  const profileId = ownerProfileId ?? selectors.lastActiveProfileForGame(state, gameId);
+  if (profileId === undefined || selectors.profileById(state, profileId)?.gameId !== gameId) {
     return Promise.reject(new CollectionParseError(collection, "Invalid profile id"));
   }
 

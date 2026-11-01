@@ -111,14 +111,16 @@ class Editor extends ComponentEx<IProps, IComponentState> {
 
   private apply = () => {
     const { mods, onSetModEnabled, profiles } = this.props;
-    const { dialog } = this.state;
-    Object.keys(mods || {}).forEach((modId) => {
-      onSetModEnabled(
-        dialog.target,
-        modId,
-        getSafe(profiles, [dialog.source, "modState", modId, "enabled"], false),
-      );
-    });
+    const { dialog, transferEnabledMods } = this.state;
+    if (transferEnabledMods) {
+      Object.keys(mods || {}).forEach((modId) => {
+        onSetModEnabled(
+          dialog.target,
+          modId,
+          getSafe(profiles, [dialog.source, "modState", modId, "enabled"], false),
+        );
+      });
+    }
     this.close();
   };
 

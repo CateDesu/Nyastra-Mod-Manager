@@ -73,7 +73,7 @@ import { cloneCollection } from "./util/cloneCollection";
 import { collectionsByMod } from "./util/collectionsByMod";
 import { createCollection } from "./util/createCollection";
 import { genDefaultsAction } from "./util/defaults";
-import { addExtension } from "./util/extension";
+import { addExtension, type IExtensionFeature } from "./util/extension";
 import InstallDriver from "./util/InstallDriver";
 import { canLinkProfile, findLinkedCollection, linkProfileToCollection } from "./util/profileLink";
 import { readCollection } from "./util/readCollection";
@@ -927,12 +927,20 @@ function register(context: IExtensionContext, collectionsCB: ICallbackMap) {
       const gameId = selectors.activeGameId(state);
       const mods = state.persistent.mods[gameId];
       const stagingPath = selectors.installPathForGame(context.api.getState(), gameId);
+      const profileId = selectors.activeProfile(state)?.id;
       const mod = mods[modIds[0]];
       if (mod !== undefined && mod.type === MOD_TYPE) {
         readCollection(context.api, path.join(stagingPath, mod.installationPath, "collection.json"))
           .then(async (collectionInfo: ICollection) => {
             try {
-              await postprocessCollection(context.api, gameId, mod, collectionInfo, mods);
+              await postprocessCollection(
+                context.api,
+                gameId,
+                mod,
+                collectionInfo,
+                mods,
+                profileId,
+              );
             } catch (err) {
               context.api.showErrorNotification(
                 "Failed to apply collection rules",
@@ -1093,7 +1101,7 @@ function register(context: IExtensionContext, collectionsCB: ICallbackMap) {
   context["registerCollectionFeature"] = (
     id: string,
     generate: (gameId: string, includedMods: string[]) => Promise<any>,
-    parse: (gameId: string, collection: ICollection) => Promise<void>,
+    parse: IExtensionFeature["parse"],
     clone: (gameId: string, collection: ICollection, from: IMod, to: IMod) => Promise<void>,
     title: (t: TFunction) => string,
     condition?: (state: IState, gameId: string) => boolean,

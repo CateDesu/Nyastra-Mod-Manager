@@ -46,18 +46,21 @@ class InfoCache {
       return;
     }
     const collections = this.mApi.getState().persistent.collections?.collections ?? {};
+    const cached = Object.values(collections).find((entry) => entry.info?.slug === slug);
     if (
       forceFetch ||
-      collections[slug]?.timestamp === undefined ||
-      Date.now() - collections[slug].timestamp > CACHE_EXPIRE_MS
+      cached?.timestamp === undefined ||
+      Date.now() - cached.timestamp > CACHE_EXPIRE_MS
     ) {
       if (this.mCacheColRequests[slug] === undefined) {
-        this.mCacheColRequests[slug] = this.cacheCollectionInfo(slug);
+        this.mCacheColRequests[slug] = this.cacheCollectionInfo(slug).finally(() => {
+          delete this.mCacheColRequests[slug];
+        });
       }
       return this.mCacheColRequests[slug];
     }
 
-    return collections[slug].info;
+    return cached.info;
   }
 
   public async clearCache() {
@@ -148,7 +151,9 @@ class InfoCache {
         revisionId,
         collectionSlug,
         revisionNumber,
-      );
+      ).finally(() => {
+        delete this.mCacheRevRequests[revisionId];
+      });
     }
   }
 
@@ -198,7 +203,6 @@ class InfoCache {
       store.dispatch(
         updateCollectionInfo(collectionInfo.id.toString(), collectionInfo, Date.now()),
       );
-      delete this.mCacheColRequests[collectionInfo.id.toString()];
     }
     return collectionInfo;
   }
@@ -254,9 +258,7 @@ class InfoCache {
     } else {
       store.dispatch(updateRevisionInfo(revisionId, null, now));
     }
-    const result: IRevision = await revisionInfo;
-    delete this.mCacheRevRequests[revisionId];
-    return result ?? null;
+    return revisionInfo ?? null;
   }
 }
 

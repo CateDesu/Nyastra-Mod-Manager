@@ -51,6 +51,7 @@ import {
   modPathsForGame,
   profileById,
 } from "../../util/selectors";
+import { cleanFailedStagingTransfer } from "../../util/transferPath";
 import { emitModsDeployed } from "../analytics/mixpanel/deployAnalytics";
 import { emitModStateChanged } from "../analytics/mixpanel/modChangeAnalytics";
 import { emitModListSnapshot } from "../analytics/utils/modListSnapshot";
@@ -122,6 +123,7 @@ import {
   getSupportedActivators,
   registerDeploymentMethod,
 } from "./util/deploymentMethods";
+import { normalizeDeployment } from "./util/deploymentNormalize";
 import { NoDeployment } from "./util/exceptions";
 import extendApi from "./util/extendAPI";
 import { dealWithExternalChanges } from "./util/externalChanges";
@@ -285,7 +287,11 @@ async function deployModType(
     activator,
     lastDeployment,
     typeId,
-    new BlacklistSet(mergeResult[typeId]?.usedInMerge ?? [], game, normalize),
+    new BlacklistSet(
+      mergeResult[typeId]?.usedInMerge ?? [],
+      game,
+      normalizeDeployment(game.id, normalize),
+    ),
     genSubDirFunc(game, getModType(typeId)),
     onProgress,
   );
@@ -666,7 +672,8 @@ function genUpdateModDeployment(installManager: InstallManager) {
       api.store.dispatch(setProgress("mods", "deployment", step, percent));
     };
     const state: IState = api.store.getState();
-    let profile: IProfile = state.persistent.profiles?.[profileId] ?? activeProfile(state);
+    let profile: IProfile =
+      profileId === undefined ? activeProfile(state) : state.persistent.profiles?.[profileId];
 
     if (Object.keys(getSafe(state, ["session", "base", "toolsRunning"], {})).length > 0) {
       api.sendNotification({
@@ -796,7 +803,6 @@ function genUpdateModDeployment(installManager: InstallManager) {
 
               let mergeResult: { [modType: string]: IMergeResultByType };
               const lastDeployment: { [typeId: string]: IDeployedFile[] } = {};
-              const mods: Record<string, IMod> = state.persistent.mods?.[profile?.gameId] ?? {};
               notification.message = t("Deploying mods");
               if (showNotification) {
                 api.sendNotification(notification);
@@ -824,6 +830,8 @@ function genUpdateModDeployment(installManager: InstallManager) {
               // need to update the profile so that if a will-deploy handler disables a mod, that
               // actually has an affect on this deployment
               const updatedState = api.getState();
+              const mods: Record<string, IMod> =
+                updatedState.persistent.mods?.[profile.gameId] ?? {};
               const updatedProfile = updatedState.persistent.profiles[profile.id];
               if (updatedProfile !== undefined) {
                 profile = updatedProfile;
@@ -1285,7 +1293,7 @@ function onDeploySingleMod(api: IExtensionApi) {
     const subdir = genSubDirFunc(game, getModType(mod.type));
     await withActivationLock(async () => {
       try {
-        const normalize = await getNormalizeFunc(dataPath);
+        const normalize = normalizeDeployment(gameId, await getNormalizeFunc(dataPath));
         const lastActivation = await loadActivation(
           api,
           gameId,
@@ -1527,7 +1535,7 @@ function once(api: IExtensionApi) {
   });
 
   api.events.on("purge-mods", (allowFallback: boolean, callback: (err: Error) => void) => {
-    purgeMods(api)
+    return purgeMods(api)
       .catch((err) => (allowFallback ? fallbackPurge(api) : Promise.reject(err)))
       .then(() => callback(null))
       .catch((err) => callback(unknownToError(err)));
@@ -1797,24 +1805,14 @@ function checkPendingTransfer(api: IExtensionApi): Promise<ITestResult> {
         "An attempt to move the staging folder was interrupted. You should let " +
         "Vortex clean up now, otherwise you may be left with unnecessary copies of files.",
     },
-    automaticFix: () =>
-      new Promise<void>((fixResolve, fixReject) => {
-        return fs
-          .removeAsync(transferDestination)
-          .then(() => {
-            api.store.dispatch(setTransferMods(gameMode, undefined));
-            fixResolve();
-          })
-          .catch((err) => {
-            if (err.code === "ENOENT") {
-              // Destination is already gone, that's fine.
-              api.store.dispatch(setTransferMods(gameMode, undefined));
-              fixResolve();
-            } else {
-              fixReject(err);
-            }
-          });
-      }),
+    automaticFix: async () => {
+      const current = api.getState();
+      if (getSafe(current, pendingTransfer, undefined) !== transferDestination) return;
+      await cleanFailedStagingTransfer(installPathForGame(current, gameMode), transferDestination);
+      if (getSafe(api.getState(), pendingTransfer, undefined) === transferDestination) {
+        api.store.dispatch(setTransferMods(gameMode, undefined));
+      }
+    },
   };
 
   return Promise.resolve(result);

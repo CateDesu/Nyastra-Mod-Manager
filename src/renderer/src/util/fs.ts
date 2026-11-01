@@ -478,7 +478,7 @@ function ensureDir(targetDir: string, onDirCreatedCB: (created: string) => Promi
   );
 }
 
-function selfCopyCheck(src: string, dest: string) {
+export function selfCopyCheck(src: string, dest: string) {
   return PromiseBB.all([
     (fs.stat as any)(src, { bigint: true }),
     (fs.stat as any)(dest, { bigint: true }).catch((err) =>

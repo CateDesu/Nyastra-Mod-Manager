@@ -22,6 +22,33 @@ describe("pollUploadAvailable", () => {
     vi.useFakeTimers();
   });
 
+  afterEach(() => vi.useRealTimers());
+
+  it("rejects an already canceled poll without requesting status", async () => {
+    const getUpload = vi.fn().mockResolvedValue({ state: "available" });
+    await expect(
+      pollUploadAvailable(makeClient({ getUpload }), "upload-123", AbortSignal.abort()),
+    ).rejects.toMatchObject({ data: { kind: "user-canceled" } });
+    expect(getUpload).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("releases its timer on cancellation and never polls again", async () => {
+    const controller = new AbortController();
+    const getUpload = vi.fn().mockResolvedValue({ state: "created" });
+    const promise = pollUploadAvailable(makeClient({ getUpload }), "upload-123", controller.signal);
+    const settled = promise.catch((err: unknown) => err);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vi.getTimerCount()).toBe(1);
+
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(await settled).toMatchObject({ data: { kind: "user-canceled" } });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(getUpload).toHaveBeenCalledOnce();
+  });
+
   it("resolves immediately when state is available", async () => {
     const getUpload = vi.fn().mockResolvedValue({ state: "available" });
     const client = makeClient({ getUpload });
@@ -266,19 +293,44 @@ describe("transfer hand-off to main", () => {
     await expect(promise).rejects.toThrow(/canceled/);
   });
 
-  it("cancels immediately when handed a signal that has already aborted", async () => {
-    const controller = new AbortController();
-    controller.abort();
-    const settle = pendingUpload();
+  it.each([
+    { progress: false, multipart: false },
+    { progress: true, multipart: false },
+    { progress: false, multipart: true },
+    { progress: true, multipart: true },
+  ])(
+    "never starts an already canceled upload with progress=$progress multipart=$multipart",
+    async ({ progress, multipart }) => {
+      const onProgress = progress ? vi.fn() : undefined;
+      const options = { abortSignal: AbortSignal.abort(), onProgress };
 
-    const promise = uploadFile("https://s3.example.com/upload", "/tmp/file.zip", 1024, {
-      abortSignal: controller.signal,
-    });
+      const upload = multipart
+        ? uploadS3Multipart(
+            {
+              part_size_bytes: 1024,
+              part_presigned_urls: ["https://s3.example.com/part1"],
+              complete_presigned_url: "https://s3.example.com/complete",
+            },
+            "/tmp/file.zip",
+            1024,
+            options,
+          )
+        : uploadFile("https://s3.example.com/upload", "/tmp/file.zip", 1024, options);
+      await expect(upload).rejects.toMatchObject({ data: { kind: "user-canceled" } });
 
-    expect(cancel).toHaveBeenCalledTimes(1);
-    settle()(new Error("Upload canceled"));
-    await expect(promise).rejects.toThrow();
-  });
+      await vi.advanceTimersByTimeAsync(POLL_TICK * 5);
+      expect(file).not.toHaveBeenCalled();
+      expect(s3Multipart).not.toHaveBeenCalled();
+      expect(cancel).not.toHaveBeenCalled();
+      expect(getProgress).not.toHaveBeenCalled();
+      if (onProgress) expect(onProgress).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+
+      await uploadFile("https://s3.example.com/upload", "/tmp/file.zip", 1024);
+      expect(file).toHaveBeenCalledOnce();
+      expect(cancel).not.toHaveBeenCalled();
+    },
+  );
 
   it("stops listening to the signal once the upload settles", async () => {
     const controller = new AbortController();

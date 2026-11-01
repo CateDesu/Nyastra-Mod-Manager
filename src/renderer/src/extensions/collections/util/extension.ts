@@ -7,7 +7,13 @@ import type { IExtendedInterfaceProps } from "../types/IExtendedInterfaceProps";
 export interface IExtensionFeature {
   id: string;
   generate: (gameId: string, includedMods: string[], mod: IMod) => Promise<any>;
-  parse: (gameId: string, collection: ICollection, mod: IMod) => Promise<void>;
+  parse: (
+    gameId: string,
+    collection: ICollection,
+    mod: IMod,
+    profileId?: string,
+    isCurrent?: () => boolean,
+  ) => Promise<void>;
   clone: (gameId: string, collection: ICollection, from: IMod, to: IMod) => Promise<void>;
   title: (t: TFunction) => string;
   condition?: (state: IState, gameId: string) => boolean;

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { log } from "../../../logging";
 import type { IExtensionApi } from "../../../types/IExtensionContext";
 import type { IMod } from "../../mod_management/types/IMod";
-import { lastActiveProfileForGame } from "../../profile_management/selectors";
+import { lastActiveProfileForGame, profileById } from "../../profile_management/selectors";
 import { setFBLoadOrder } from "../actions/loadOrder";
 import { legacyOrderOwner } from "../adoption";
 import type {
@@ -82,10 +82,13 @@ export function parser(
   gameEntries: IRegisteredLoadOrder[],
   gameId: string,
   collection: ICollection,
+  ownerProfileId?: string,
+  isCurrent: () => boolean = () => true,
 ): Promise<void> {
+  const profileId = ownerProfileId ?? lastActiveProfileForGame(api.getState(), gameId);
   return Promise.resolve().then(() => {
-    const profileId = lastActiveProfileForGame(api.getState(), gameId);
-    if (profileId === undefined) {
+    if (!isCurrent()) return;
+    if (profileId === undefined || profileById(api.getState(), profileId)?.gameId !== gameId) {
       throw new CollectionParseError(collection, "Invalid profile id");
     }
     const named = namedLoadOrdersOf(collection);

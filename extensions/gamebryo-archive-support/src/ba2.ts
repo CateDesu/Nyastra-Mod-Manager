@@ -3,6 +3,8 @@ import * as fs from "fs";
 import * as path from "path";
 import { inflateSync } from "zlib";
 
+import { archiveOutputPath } from "./archivePath";
+
 const BA2_MAGIC = "BTDX";
 const HEADER_SIZE = 24;
 const GNRL_ENTRY_SIZE = 36;
@@ -135,7 +137,7 @@ export class BA2Archive {
     for (let i = 0; i < entries.length; i++) {
       const entry = entries[i];
       const name = this.fileList[i];
-      const outFile = path.join(outputPath, name);
+      const outFile = archiveOutputPath(outputPath, name);
 
       await fs.promises.mkdir(path.dirname(outFile), { recursive: true });
 
@@ -166,7 +168,7 @@ export class BA2Archive {
     for (let i = 0; i < entries.length; i++) {
       const tex = entries[i];
       const name = this.fileList[i];
-      const outFile = path.join(outputPath, name);
+      const outFile = archiveOutputPath(outputPath, name);
 
       await fs.promises.mkdir(path.dirname(outFile), { recursive: true });
 

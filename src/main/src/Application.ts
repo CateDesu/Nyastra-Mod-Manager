@@ -1,4 +1,4 @@
-import { mkdirSync, statSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { readFile, writeFile, rm, stat } from "node:fs/promises";
 import path from "node:path";
 
@@ -770,48 +770,30 @@ class Application {
     ipcMain.removeHandler("app:getInitMetadata");
     betterIpcMain.handle("app:getInitMetadata", () => this.mAppMetadata!);
 
-    // 1. Create LevelPersist for the base path
-    const levelPersistor = await LevelPersist.create(
-      path.join(this.mBasePath, currentStatePath),
+    const dataPath = this.mArgs.userData ?? app.getPath("userData");
+    mkdirSync(dataPath, { recursive: true });
+
+    const finalPersistor = await LevelPersist.create(
+      path.join(dataPath, currentStatePath),
       undefined,
       repair ?? false,
     );
 
     try {
-      this.mLevelPersistors.push(levelPersistor);
+      this.mLevelPersistors.push(finalPersistor);
 
-      // Use the current user profile or an explicit Linux path.
-      let dataPath = app.getPath("userData");
-      if (this.mArgs.userData !== undefined) {
-        dataPath = this.mArgs.userData;
-      }
       setVortexPath("userData", dataPath);
       this.mBasePath = dataPath;
 
-      try {
-        statSync(dataPath);
-      } catch {
-        mkdirSync(dataPath, { recursive: true });
-      }
       mkdirSync(path.join(dataPath, "temp"), { recursive: true });
 
       log("info", `using ${dataPath} as the storage directory`);
 
-      // 4. If custom userData, create new LevelPersist for actual data path
-      let finalPersistor = levelPersistor;
       if (this.mArgs.userData !== undefined) {
         log("info", "all further logging will happen in", path.join(dataPath, "vortex.log"));
         changeLogPath(dataPath);
         log("info", "--------------------------");
         log("info", "Vortex Version", app.getVersion());
-
-        const newLevelPersistor = await LevelPersist.create(
-          path.join(dataPath, currentStatePath),
-          undefined,
-          repair ?? false,
-        );
-        this.mLevelPersistors.push(newLevelPersistor);
-        finalPersistor = newLevelPersistor;
       }
 
       // 5. Restore or merge state backup if requested

@@ -10,6 +10,7 @@ import { applyExtensions } from "./apply.mjs";
 
 const outputRoot = import.meta.dirname;
 const manifest = JSON.parse(fs.readFileSync(path.join(outputRoot, "manifest.json"), "utf8"));
+manifest.plugins = manifest.plugins.filter((plugin) => plugin.game !== "helldivers2");
 const sourceFlag = process.argv.indexOf("--source-plugins");
 const sourceRoot = path.resolve(
   sourceFlag < 0 ? path.join(outputRoot, "local", "originals") : process.argv[sourceFlag + 1],

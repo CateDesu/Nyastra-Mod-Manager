@@ -1,6 +1,6 @@
 import type { IReducerSpec } from "../../types/IExtensionContext";
 import { addReducer } from "../../types/IExtensionContext";
-import { getSafe, pushSafe, setDefaultArray, setSafe } from "../../util/storeHelper";
+import { setSafe } from "../../util/storeHelper";
 import * as actions from "./actions";
 import type { IHistoryEvent } from "./types";
 
@@ -11,24 +11,40 @@ export interface IHistoryPersistent {
 const persistentReducer: IReducerSpec<IHistoryPersistent> = {
   reducers: {
     ...addReducer(actions.addHistoryEvent, (state, payload) => {
-      const path = ["historyStacks", payload.stack];
-      const copy = getSafe(state, path, []).slice(payload.limit * -1 - 1);
-      copy.push(payload.event);
-      return setSafe(state, path, copy);
+      const events = [...(state.historyStacks[payload.stack] ?? []), payload.event];
+      return {
+        ...state,
+        historyStacks: {
+          ...state.historyStacks,
+          [payload.stack]: payload.limit > 0 ? events.slice(-payload.limit) : [],
+        },
+      };
     }),
     ...addReducer(actions.setHistoryEvent, (state, payload) => {
-      const idx = state.historyStacks[payload.stack].findIndex(
-        (evt) => evt.id === payload.event.id,
-      );
-      const copy = setSafe(state, ["historyStacks", payload.stack, idx], payload.event);
-      return copy;
+      const events = state.historyStacks[payload.stack];
+      const idx = events?.findIndex((evt) => evt.id === payload.event.id) ?? -1;
+      if (idx === -1) return state;
+      return {
+        ...state,
+        historyStacks: {
+          ...state.historyStacks,
+          [payload.stack]: events.map((evt, index) => (index === idx ? payload.event : evt)),
+        },
+      };
     }),
     ...addReducer(actions.markHistoryReverted, (state, payload) => {
-      const idx = state.historyStacks[payload.stack].findIndex(
-        (evt) => evt.id === payload.event.id,
-      );
-      const copy = setSafe(state, ["historyStacks", payload.stack, idx, "reverted"], true);
-      return copy;
+      const events = state.historyStacks[payload.stack];
+      const idx = events?.findIndex((evt) => evt.id === payload.event.id) ?? -1;
+      if (idx === -1) return state;
+      return {
+        ...state,
+        historyStacks: {
+          ...state.historyStacks,
+          [payload.stack]: events.map((evt, index) =>
+            index === idx ? { ...evt, reverted: true } : evt,
+          ),
+        },
+      };
     }),
   },
   defaults: {

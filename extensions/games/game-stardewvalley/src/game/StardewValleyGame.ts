@@ -109,7 +109,7 @@ export default class StardewValleyGame implements types.IGame {
       }
     }
 
-    throw new Error("Stardew Valley install path not found");
+    return undefined;
   }) as unknown as QueryPath;
 
   public executable() {

@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -15,8 +16,69 @@ import path from "node:path";
 import { test } from "node:test";
 import { setTimeout } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import vm from "node:vm";
+
+import { adapt, helldiversMarker, helperName } from "../linux/extension-adaptations/adapt.mjs";
+import { applyExtensions } from "../linux/extension-adaptations/apply.mjs";
 
 const installer = fileURLToPath(new URL("./install-linux.mjs", import.meta.url));
+
+// Synthetic extension source with the supported archive scan boundary.
+const helldiversSource = `
+const BASE_ARCHIVE_RE = /^([0-9a-f]{16})(?:\\.gpu_resources|\\.stream)?$/i;
+async function scanBaseArchives() {
+  const result = new Set();
+  const entries = await fsp.readdir();
+  for (const entry of entries) {
+    const match = BASE_ARCHIVE_RE.exec(entry);
+    if (match !== null) result.add(match[1].toLowerCase());
+  }
+  return result;
+}
+`;
+
+test("Helldivers archive checks distinguish loose and packed installations", async () => {
+  const source = adapt(helldiversSource, "helldivers2");
+  const sandbox = { fsp: { readdir: async () => [] } };
+  vm.runInNewContext(source, sandbox);
+  const archive = "0123456789abcdef";
+  sandbox.fsp.readdir = async () => [archive, `${archive}.stream`, "fedcba9876543210.patch_0"];
+  assert.deepEqual(Array.from(await sandbox.scanBaseArchives()), [archive]);
+  for (const bundle of ["bundles.nxa", "bundles.00.nxa", "BUNDLES.NXA"]) {
+    sandbox.fsp.readdir = async () => [archive, bundle];
+    assert.equal((await sandbox.scanBaseArchives()).size, 0);
+  }
+  assert.equal(adapt(source, "helldivers2"), source);
+  assert.ok(adapt(helldiversSource.replaceAll("\n", "\r\n"), "helldivers2").includes("\r\n"));
+  assert.throws(() => adapt("changed upstream source", "helldivers2"), /Extension source changed/);
+});
+
+test("Helldivers adaptation preserves a backup and needs no Fluffy helper", async () => {
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), "nyastra-helldivers-")));
+  try {
+    const plugin = path.join(root, "plugins", "helldivers2");
+    mkdirSync(plugin, { recursive: true });
+    writeFileSync(path.join(plugin, "index.js"), helldiversSource);
+    writeFileSync(
+      path.join(plugin, "info.json"),
+      JSON.stringify({ name: "Game: Helldivers 2", version: "1.2.2" }),
+    );
+    const preview = await applyExtensions({ userData: root, dryRun: true });
+    assert.deepEqual(preview.adapted, ["Game: Helldivers 2"]);
+    assert.equal(readFileSync(path.join(plugin, "index.js"), "utf8"), helldiversSource);
+    const result = await applyExtensions({ userData: root });
+    assert.deepEqual(result.adapted, preview.adapted);
+    assert.equal(
+      readFileSync(path.join(result.backupRoot, "helldivers2", "index.js"), "utf8"),
+      helldiversSource,
+    );
+    assert.ok(readFileSync(path.join(plugin, "index.js"), "utf8").includes(helldiversMarker));
+    assert.equal(existsSync(path.join(plugin, helperName)), false);
+    assert.deepEqual((await applyExtensions({ userData: root })).adapted, []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 function fixture(homeName = "Home with ' apostrophe") {
   const root = mkdtempSync(path.join(tmpdir(), "vortex-install-"));
@@ -246,6 +308,92 @@ test("failed desktop registration restores the prior runtime and launcher", () =
   }
 });
 
+for (const launcher of ["wrapper", "desktop"]) {
+  void test(`a read-only ${launcher} directory preserves the previous installation on failure`, () => {
+    const f = fixture();
+    let directory;
+    try {
+      assert.equal(f.run().status, 0);
+      writeFileSync(f.wrapper, "previous wrapper");
+      writeFileSync(f.desktop, "previous desktop");
+      const wrapper = readFileSync(f.wrapper);
+      const desktop = readFileSync(f.desktop);
+      writeFileSync(path.join(f.source, "version"), "failed update");
+      directory = path.dirname(f[launcher]);
+      chmodSync(directory, 0o555);
+
+      const failed = f.run();
+
+      assert.equal(failed.status, 1, failed.stderr);
+      assert.match(failed.stderr, /EACCES/);
+      assert.equal(readFileSync(path.join(f.app, "version"), "utf8"), "one");
+      assert.deepEqual(readFileSync(f.wrapper), wrapper);
+      assert.deepEqual(readFileSync(f.desktop), desktop);
+      chmodSync(directory, 0o755);
+      assert.equal(f.run().status, 0, "The failed installer releases its lock for retry");
+      assert.equal(readFileSync(path.join(f.app, "version"), "utf8"), "failed update");
+    } finally {
+      if (directory) chmodSync(directory, 0o755);
+      f.clean();
+    }
+  });
+}
+
+void test("failed imported-profile cleanup does not block runtime and launcher recovery", () => {
+  const f = fixture();
+  const imported = path.join(f.env.XDG_CONFIG_HOME, "NyastraModManager");
+  try {
+    assert.equal(f.run().status, 0);
+    writeFileSync(f.wrapper, "previous wrapper");
+    writeFileSync(f.desktop, "previous desktop");
+    writeFileSync(f.env.HANDLER, "prior-custom.desktop");
+    const wrapper = readFileSync(f.wrapper);
+    const desktop = readFileSync(f.desktop);
+    const sourceProfile = path.join(f.root, "Vortex");
+    mkdirSync(path.join(sourceProfile, "state.v2"), { recursive: true });
+    writeFileSync(path.join(sourceProfile, "state.v2/CURRENT"), "MANIFEST-000001\n");
+    writeFileSync(path.join(sourceProfile, "state.v2/LOCK"), "");
+    writeFileSync(path.join(sourceProfile, "state.v2/MANIFEST-000001"), "source state");
+    const oldFluffy = path.join(f.env.XDG_CONFIG_HOME, "vortex-native/fluffy.json");
+    const copiedFluffy = path.join(f.env.XDG_CONFIG_HOME, "nyastra-mod-manager/fluffy.json");
+    mkdirSync(path.dirname(oldFluffy), { recursive: true });
+    writeFileSync(oldFluffy, '{"sharedFluffyRoot":"/fixture/Fluffy"}');
+    writeFileSync(path.join(f.source, "version"), "failed import update");
+    mkdirSync(path.join(f.source, "linux-extensions"));
+    writeFileSync(
+      path.join(f.source, "linux-extensions/apply.mjs"),
+      `import { chmodSync } from 'node:fs';
+export async function applyExtensions({ userData }) {
+  chmodSync(userData, 0o500);
+  throw new Error('fixture adaptation failed after import');
+}`,
+    );
+
+    const failed = spawnSync(
+      process.execPath,
+      [installer, f.source, "--import-profile", sourceProfile],
+      { env: f.env, encoding: "utf8", timeout: 20000 },
+    );
+
+    assert.equal(failed.status, 1, failed.stderr);
+    assert.equal(readFileSync(path.join(f.app, "version"), "utf8"), "one");
+    assert.deepEqual(readFileSync(f.wrapper), wrapper);
+    assert.deepEqual(readFileSync(f.desktop), desktop);
+    assert.equal(readFileSync(f.env.HANDLER, "utf8"), "prior-custom.desktop");
+    assert.ok(!existsSync(copiedFluffy), "Independent Fluffy cleanup still completes");
+    assert.equal(readFileSync(oldFluffy, "utf8"), '{"sharedFluffyRoot":"/fixture/Fluffy"}');
+    assert.match(failed.stderr, /fixture adaptation failed after import/);
+    assert.match(failed.stderr, /EACCES/);
+    assert.equal(
+      readFileSync(path.join(sourceProfile, "state.v2/MANIFEST-000001"), "utf8"),
+      "source state",
+    );
+  } finally {
+    if (existsSync(imported)) chmodSync(imported, 0o700);
+    f.clean();
+  }
+});
+
 test("failed first registration restores existing external launchers", () => {
   const f = fixture();
   try {
@@ -284,13 +432,21 @@ test("failed extension adaptation restores the previous installed runtime", () =
   }
 });
 
-test("an interrupted installer releases its lock without removing the lock file", async () => {
+test("an interrupted installer releases its lock without removing the lock file", async (t) => {
   const f = fixture();
   const queryStarted = path.join(f.root, "query-started");
   const mime = path.join(f.env.PATH.split(path.delimiter)[0], "xdg-mime");
   const original = readFileSync(mime);
   let pending;
   let finished;
+  const failures = [];
+  const attempt = async (operation) => {
+    try {
+      await operation();
+    } catch (error) {
+      failures.push(error);
+    }
+  };
   try {
     writeFileSync(
       mime,
@@ -303,7 +459,11 @@ setTimeout(() => process.exit(0), 10000);
       env: { ...f.env, QUERY_STARTED: queryStarted },
       stdio: "ignore",
     });
-    finished = new Promise((resolve) => pending.once("close", resolve));
+    finished = new Promise((resolve, reject) => {
+      pending.once("error", reject);
+      pending.once("close", resolve);
+    });
+    void finished.catch(() => undefined);
     const deadline = Date.now() + 5000;
     while (!existsSync(queryStarted) && Date.now() < deadline) await setTimeout(10);
     assert.ok(existsSync(queryStarted));
@@ -313,18 +473,49 @@ setTimeout(() => process.exit(0), 10000);
     writeFileSync(mime, original);
     const restarted = f.run();
     assert.equal(restarted.status, 0, restarted.stderr);
+  } catch (error) {
+    failures.push(error);
   } finally {
-    pending?.kill("SIGKILL");
-    await finished;
-    if (existsSync(queryStarted)) {
-      try {
-        process.kill(Number(readFileSync(queryStarted, "utf8")), "SIGKILL");
-      } catch (error) {
-        if (error.code !== "ESRCH") throw error;
+    await attempt(() => pending?.kill("SIGKILL"));
+    await attempt(() => finished);
+    let pid;
+    await attempt(() => {
+      if (existsSync(queryStarted)) {
+        const value = Number(readFileSync(queryStarted, "utf8"));
+        assert.ok(Number.isSafeInteger(value) && value > 0, "The query PID must be valid");
+        pid = value;
       }
+    });
+    if (pid !== undefined) {
+      await attempt(() => {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch (error) {
+          if (error.code !== "ESRCH") throw error;
+        }
+      });
+      await attempt(async () => {
+        const deadline = Date.now() + 15000;
+        while (true) {
+          try {
+            const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+            if (stat.slice(stat.lastIndexOf(")") + 2).startsWith("Z")) break;
+          } catch (error) {
+            if (error.code === "ENOENT") break;
+            throw error;
+          }
+          assert.ok(
+            Date.now() < deadline,
+            "The installer query process must settle before cleanup",
+          );
+          await setTimeout(10);
+        }
+      });
     }
-    f.clean();
+    await attempt(() => f.clean());
   }
+  for (const error of failures.slice(1)) t.diagnostic(String(error));
+  if (failures.length > 0) throw failures[0];
 });
 
 for (const failRegistration of [false, true]) {
@@ -435,3 +626,33 @@ test("installer refuses to replace a symlink or unrelated installation folder", 
     f.clean();
   }
 });
+
+for (const prefix of ["install", "previous"]) {
+  test(`installer preserves an existing ${prefix} transaction directory`, () => {
+    const f = fixture();
+    try {
+      assert.equal(f.run().status, 0);
+      const mime = path.join(f.env.PATH.split(path.delimiter)[0], "xdg-mime");
+      const original = readFileSync(mime, "utf8");
+      writeFileSync(
+        mime,
+        `${original}\nif (operation === 'query') {
+const directory = require('node:path').join(process.env.XDG_DATA_HOME, 'nyastra-mod-manager', '.app-${prefix}-' + process.ppid);
+fs.mkdirSync(directory);
+fs.writeFileSync(require('node:path').join(directory, 'keep'), 'existing transaction');
+fs.writeFileSync(process.env.CAPTURE, directory);
+}\n`,
+      );
+      writeFileSync(path.join(f.source, "version"), "new version");
+      const failed = f.run();
+      assert.equal(failed.status, 1, failed.stderr);
+      assert.equal(
+        readFileSync(path.join(readFileSync(f.env.CAPTURE, "utf8"), "keep"), "utf8"),
+        "existing transaction",
+      );
+      assert.equal(readFileSync(path.join(f.app, "version"), "utf8"), "one");
+    } finally {
+      f.clean();
+    }
+  });
+}

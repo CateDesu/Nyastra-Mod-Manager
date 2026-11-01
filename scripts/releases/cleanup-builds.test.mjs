@@ -378,7 +378,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 for (const ext of process.env.FIXTURE_BUILD_FORMATS.split(','))
   fs.writeFileSync(path.resolve('../../dist/nyastra-${version}-linux-x64.' + ext),
-    ext === 'AppImage' ? ${JSON.stringify(imageStub)} : 'new build', { mode: 0o755 });
+    process.env.FIXTURE_EMPTY_FORMAT === ext ? '' : ext === 'AppImage' ? ${JSON.stringify(imageStub)} : 'new build', { mode: 0o755 });
 process.exit(Number(process.env.FIXTURE_BUILD_STATUS));
 `,
     );
@@ -390,7 +390,8 @@ process.exit(Number(process.env.FIXTURE_BUILD_STATUS));
     );
     await put("helper", "fixture helper");
     for (const name of buildNames("2.0.0")) await put(`dist/${name}`, "old build");
-    const run = (status, formats = "zip,AppImage,deb", unsafe = false) =>
+    for (const name of buildNames(version)) await put(`dist/${name}`, `existing ${name}`);
+    const run = (status, formats = "zip,AppImage,deb", unsafe = false, emptyFormat = "") =>
       spawnSync(process.execPath, [path.join(root, "src/main/package-linux.mjs")], {
         cwd: root,
         env: {
@@ -398,20 +399,44 @@ process.exit(Number(process.env.FIXTURE_BUILD_STATUS));
           FIXTURE_BUILD_STATUS: String(status),
           FIXTURE_BUILD_FORMATS: formats,
           FIXTURE_UNSAFE_APPIMAGE: String(unsafe),
+          FIXTURE_EMPTY_FORMAT: emptyFormat,
         },
         encoding: "utf8",
       });
     const failed = run(1);
     assert.equal(failed.status, 1, failed.stderr);
+    for (const name of buildNames(version))
+      assert.equal(await readFile(path.join(root, "dist", name), "utf8"), `existing ${name}`);
     for (const name of buildNames("2.0.0"))
       assert.equal(await readFile(path.join(root, "dist", name), "utf8"), "old build");
+    for (const format of ["zip", "deb"]) {
+      const empty = run(0, format, false, format);
+      assert.equal(empty.status, 1, empty.stderr);
+      assert.match(empty.stderr, /Package output is not a nonempty file/);
+      for (const name of buildNames(version))
+        assert.equal(await readFile(path.join(root, "dist", name), "utf8"), `existing ${name}`);
+      for (const name of buildNames("2.0.0"))
+        assert.equal(await readFile(path.join(root, "dist", name), "utf8"), "old build");
+    }
     const partial = run(0, "zip");
     assert.equal(partial.status, 0, partial.stderr);
+    assert.equal(
+      await readFile(path.join(root, "dist", buildNames(version)[0]), "utf8"),
+      "new build",
+    );
+    for (const name of buildNames(version).slice(1))
+      assert.equal(await readFile(path.join(root, "dist", name), "utf8"), `existing ${name}`);
     for (const name of buildNames("2.0.0"))
       assert.equal(await readFile(path.join(root, "dist", name), "utf8"), "old build");
     const unsafe = run(0, "zip,AppImage,deb", true);
     assert.equal(unsafe.status, 1, unsafe.stderr);
     assert.match(unsafe.stderr, /safe search path launcher/);
+    assert.equal(
+      await readFile(path.join(root, "dist", buildNames(version)[0]), "utf8"),
+      "new build",
+    );
+    for (const name of buildNames(version).slice(1))
+      assert.equal(await readFile(path.join(root, "dist", name), "utf8"), `existing ${name}`);
     for (const name of buildNames("2.0.0"))
       assert.equal(await readFile(path.join(root, "dist", name), "utf8"), "old build");
     const succeeded = run(0);

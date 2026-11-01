@@ -4,7 +4,7 @@ import { describe, expect, vi } from "vitest";
 import { test } from "@/test-utils/harnessTest";
 import { UserCanceled } from "@/util/CustomErrors";
 
-import { setUserAPIKey } from "./actions/account";
+import { clearOAuthCredentials, setUserAPIKey } from "./actions/account";
 import { userInfo } from "./selectors";
 import { onCancelLoginImpl, requestLogin, updateKey } from "./util";
 
@@ -26,6 +26,7 @@ describe("personal key registration testing", () => {
     };
     await requestLogin(nexus as never, api, callback);
     expect(callback).not.toHaveBeenCalled();
+    api.store.dispatch(clearOAuthCredentials(null));
     api.store.dispatch(setUserAPIKey("personal-test-key"));
     expect(await updateKey(api, nexus as never, "personal-test-key")).toBe(true);
     expect(userInfo(getState())).toMatchObject({
@@ -52,6 +53,7 @@ describe("personal key registration testing", () => {
     const nexus = { setKey: vi.fn().mockRejectedValue(error) };
     const callback = vi.fn();
     await requestLogin(nexus as never, api, callback);
+    api.store.dispatch(clearOAuthCredentials(null));
     api.store.dispatch(setUserAPIKey("refused-test-key"));
     expect(await updateKey(api, nexus as never, "refused-test-key")).toBe(false);
     expect(userInfo(getState())).toBeUndefined();
@@ -61,8 +63,10 @@ describe("personal key registration testing", () => {
   test("does not restore an account after logout during validation", async ({ makeApi }) => {
     const { api, getState } = makeApi();
     const nexus = { setKey: vi.fn().mockResolvedValue({ user_id: 7, name: "Astra" }) };
+    api.store.dispatch(clearOAuthCredentials(null));
     api.store.dispatch(setUserAPIKey("previous-test-key"));
     const pending = updateKey(api, nexus as never, "previous-test-key");
+    api.store.dispatch(clearOAuthCredentials(null));
     api.store.dispatch(setUserAPIKey(undefined));
     expect(await pending).toBe(false);
     expect(userInfo(getState())).toBeUndefined();

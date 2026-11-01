@@ -3,19 +3,24 @@ import * as path from "path";
 import type { ICollection, IDownloadURL, IRevision } from "@nexusmods/nexus-api";
 import { unknownToError } from "@vortex/shared";
 import Bluebird from "bluebird";
+import isEqual from "lodash/isEqual";
 import SevenZip from "node-7z";
 
 import * as actions from "../../actions";
 import { emitModStateChanged } from "../../extensions/analytics/mixpanel/modChangeAnalytics";
-import type { IModRule } from "../../extensions/mod_management/types/IMod";
+import type { IMod, IModRule } from "../../extensions/mod_management/types/IMod";
 import renderModName from "../../extensions/mod_management/util/modName";
 import type { IDialogResult } from "../../types/IDialog";
 import type { IExtensionApi } from "../../types/IExtensionContext";
+import type { IProfile, IState } from "../../types/IState";
 import { ProcessCanceled, UserCanceled } from "../../util/CustomErrors";
 import * as fs from "../../util/fs";
 import getVortexPath from "../../util/getVortexPath";
 import * as selectors from "../../util/selectors";
 import { batchDispatch, sanitizeFilename, toPromise } from "../../util/util";
+import getDownloadGames from "../download_management/util/getDownloadGames";
+import { convertGameIdReverse } from "../nexus_integration/util/convertGameId";
+import { MOD_TYPE } from "./constants";
 import {
   findEnabledOptionalMembers,
   findInstalledDependencyMembers,
@@ -29,14 +34,39 @@ import { readCollection } from "./util/readCollection";
 import { collectionModToRule } from "./util/transformCollection";
 import showChangelog from "./views/InstallDialog/InstallChangelogDialog";
 
+function acceptsDownload(state: IState, owner: string, downloadGame: string): boolean {
+  const storageGame = convertGameIdReverse(selectors.knownGames(state), downloadGame);
+  return (
+    owner !== undefined &&
+    storageGame !== undefined &&
+    (owner === storageGame ||
+      (selectors.gameById(state, owner)?.details?.compatibleDownloads ?? []).includes(storageGame))
+  );
+}
+
 async function collectionUpdate(
   api: IExtensionApi,
   downloadGameId: string,
   collectionSlug: string,
   revisionNumber: string,
   oldModId: string,
+  gameMode: string,
+  profileId: string | undefined,
+  capturedMod: IMod,
+  capturedProfile: IProfile,
 ) {
   try {
+    const oldMod = api.getState().persistent.mods[gameMode]?.[oldModId];
+    if (
+      oldMod !== capturedMod ||
+      oldMod?.type !== MOD_TYPE ||
+      oldMod.attributes?.collectionSlug !== collectionSlug
+    ) {
+      throw new ProcessCanceled("The original collection is no longer available");
+    }
+    if (!acceptsDownload(api.getState(), gameMode, downloadGameId)) {
+      throw new ProcessCanceled("Collection update archive is not compatible with this game");
+    }
     const latest = (
       await api.emitAndAwait<"get-nexus-collection-revision">(
         "get-nexus-collection-revision",
@@ -53,13 +83,6 @@ async function collectionUpdate(
     if (collectionSlug !== collection.slug) {
       throw new Error(`Invalid collection "${collectionSlug}"`);
     }
-
-    const state = api.getState();
-    const gameMode = selectors.activeGameId(state);
-
-    const oldMod = state.persistent.mods[gameMode][oldModId];
-    // oldMod might be undefined if the user manually removed the collection in the time
-    // it took us to download the new revision
 
     if (!!latest.collectionChangelog?.description && oldMod !== undefined) {
       await showChangelog(oldMod, gameMode, latest);
@@ -101,10 +124,29 @@ async function collectionUpdate(
         ),
       );
     } catch (err) {
-      const e = err as Error & { fileName?: string };
+      const e = err as Error & { fileName?: string; downloadId?: string };
       if (e.name === "AlreadyDownloaded") {
-        const { files } = api.getState().persistent.downloads;
-        dlId = Object.keys(files).find((iter) => files[iter].localPath === e.fileName);
+        const state = api.getState();
+        const { files } = state.persistent.downloads;
+        const knownGames = selectors.knownGames(state);
+        const targetPath = selectors.downloadPathForGame(
+          state,
+          convertGameIdReverse(knownGames, downloadGameId),
+        );
+        const compatible = Object.keys(files).filter(
+          (id) =>
+            files[id].localPath === e.fileName &&
+            acceptsDownload(state, gameMode, getDownloadGames(files[id])[0]),
+        );
+        const exact = compatible.filter(
+          (id) =>
+            selectors.downloadPathForGame(
+              state,
+              convertGameIdReverse(knownGames, getDownloadGames(files[id])[0]),
+            ) === targetPath,
+        );
+        const candidates = exact.length > 0 ? exact : compatible;
+        dlId = e.downloadId ?? (candidates.length === 1 ? candidates[0] : undefined);
       }
       if (dlId === undefined) {
         throw err;
@@ -119,8 +161,20 @@ async function collectionUpdate(
 
     // Extract collection.json from the downloaded archive to get the new revision's
     // full mod list (including tags, external and bundled mods).
-    const dlPath = selectors.downloadPathForGame(api.getState(), downloadGameId);
-    const localPath = api.getState().persistent.downloads.files[dlId]?.localPath;
+    const downloadState = api.getState();
+    const download = downloadState.persistent.downloads.files[dlId];
+    if (download?.localPath === undefined) {
+      throw new ProcessCanceled("Collection update archive is no longer available");
+    }
+    const archiveGameId = convertGameIdReverse(
+      selectors.knownGames(downloadState),
+      getDownloadGames(download)[0],
+    );
+    if (!acceptsDownload(downloadState, gameMode, archiveGameId)) {
+      throw new ProcessCanceled("Collection update archive is not compatible with this game");
+    }
+    const dlPath = selectors.downloadPathForGame(downloadState, archiveGameId);
+    const localPath = download?.localPath;
     const archivePath = path.join(dlPath, localPath);
     const tempDir = path.join(getVortexPath("temp"), "collection-update-" + oldModId);
 
@@ -205,17 +259,47 @@ async function collectionUpdate(
       }
     }
 
-    // mark kept mods as manually installed, otherwise this will be queried again
+    // Snapshot which optional mods are enabled before removing the old collection
+    const profile = selectors.profileById(api.getState(), profileId);
+    const currentMod = api.getState().persistent.mods[gameMode]?.[oldModId];
+    const currentDownloadState = api.getState();
+    const currentDownload = currentDownloadState.persistent.downloads.files[dlId];
+    const currentArchiveGameId =
+      currentDownload === undefined
+        ? undefined
+        : convertGameIdReverse(
+            selectors.knownGames(currentDownloadState),
+            getDownloadGames(currentDownload)[0],
+          );
+    if (
+      currentDownload?.localPath !== localPath ||
+      currentArchiveGameId !== archiveGameId ||
+      !acceptsDownload(currentDownloadState, gameMode, currentArchiveGameId) ||
+      !isEqual(
+        { ...currentDownload, game: currentArchiveGameId },
+        { ...download, game: archiveGameId },
+      ) ||
+      selectors.downloadPathForGame(currentDownloadState, currentArchiveGameId) !== dlPath
+    ) {
+      throw new ProcessCanceled("Collection update archive is no longer available");
+    }
+    if (
+      profile !== capturedProfile ||
+      profile?.gameId !== gameMode ||
+      currentMod !== capturedMod ||
+      currentMod?.type !== MOD_TYPE ||
+      currentMod.attributes?.collectionSlug !== collectionSlug
+    ) {
+      throw new ProcessCanceled("The original collection or profile is no longer available");
+    }
+    const enabledOptionalMods = findEnabledOptionalMembers(candidates, oldRules, profile?.modState);
+
     batchDispatch(
       api.store,
       ops.keep.map((modId) =>
         actions.setModAttribute(gameMode, modId, "installedAsDependency", false),
       ),
     );
-
-    // Snapshot which optional mods are enabled before removing the old collection
-    const profile = selectors.activeProfile(api.getState());
-    const enabledOptionalMods = findEnabledOptionalMembers(candidates, oldRules, profile?.modState);
 
     // Remove old collection and obsolete mods
     await toPromise((cb) =>
@@ -229,7 +313,7 @@ async function collectionUpdate(
     // Install the new revision — did-install-mod will start the driver
     // cleanly since cleanup is already done
     const newModId = await toPromise<string | undefined>((cb) =>
-      api.events.emit("start-install-download", dlId, undefined, cb),
+      api.events.emit("start-install-download", dlId, { profileId }, cb),
     );
 
     if (newModId === undefined) {
@@ -275,9 +359,32 @@ export function onCollectionUpdate(
       return;
     }
 
+    const state = api.getState();
+    const activeProfile = selectors.activeProfile(state);
+    const activeGame = activeProfile?.gameId;
+    const activeMod = state.persistent.mods[activeGame]?.[oldModId];
+    const gameMode =
+      activeMod?.type === MOD_TYPE && activeMod.attributes?.collectionSlug === collectionSlug
+        ? activeGame
+        : convertGameIdReverse(selectors.knownGames(state), gameId);
+    const profileId =
+      activeProfile?.gameId === gameMode
+        ? activeProfile.id
+        : selectors.lastActiveProfileForGame(state, gameMode);
+
     driver.prepare(() =>
       Bluebird.resolve(
-        collectionUpdate(api, gameId, collectionSlug, revisionNumber.toString(), oldModId),
+        collectionUpdate(
+          api,
+          gameId,
+          collectionSlug,
+          revisionNumber.toString(),
+          oldModId,
+          gameMode,
+          profileId,
+          state.persistent.mods[gameMode]?.[oldModId],
+          selectors.profileById(state, profileId),
+        ),
       )
         .then(() => {
           cb?.(null);

@@ -367,7 +367,11 @@ class ProcessMonitor {
 
       // Step 6f: Attempt exact path match (preferred - most reliable)
       const pathMatch = candidatesWithPath.find(
-        (entry) => entry.path !== undefined && entry.path.toLowerCase() === exePathLower,
+        (entry) =>
+          entry.path !== undefined &&
+          (process.platform === "linux"
+            ? entry.path === exePath
+            : entry.path.toLowerCase() === exePathLower),
       );
 
       if (pathMatch !== undefined) {

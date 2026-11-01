@@ -243,7 +243,7 @@ async function handleMergedScripts(props: IBaseProps, opType: OpType, dest?: str
   try {
     const mergerToolDir = path.dirname(scriptMergerTool.path);
     const profilePath: string = dest === undefined ? path.join(mergerToolDir, profile.id) : dest;
-    const loarOrderFilepath: string = getLoadOrderFilePath();
+    const loarOrderFilepath: string = getLoadOrderFilePath(props.api);
     const mergedModName = await getMergedModName(mergerToolDir);
     const mergedScriptsPath = path.join(gamePath, "Mods", mergedModName);
 

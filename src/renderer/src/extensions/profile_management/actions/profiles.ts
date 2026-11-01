@@ -56,6 +56,8 @@ export interface IEnableOptions {
   installed?: boolean;
   allowAutoDeploy?: boolean;
   willBeReplaced?: boolean;
+  // Recheck operation ownership after the public enable hook.
+  isCurrent?: () => boolean;
 
   // why the mods are being enabled/disabled, for the mods_state_changed analytics event.
   // Defaults to user_manual when unset. Programmatic callers should set it.
@@ -85,6 +87,9 @@ const setModsEnabled = (() => {
       ppFunc = api.withPrePost(
         "enable-mods",
         (profileId: string, modIds: string[], enable: boolean, options: IEnableOptions) => {
+          if (options?.isCurrent && !options.isCurrent()) {
+            return Bluebird.resolve();
+          }
           if (modIds.length > 0) {
             const profile: IProfile = profileById(api.getState(), profileId);
             if (profile !== undefined) {

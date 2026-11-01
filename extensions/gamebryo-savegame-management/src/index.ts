@@ -373,10 +373,24 @@ function onLoadSaves(api: types.IExtensionApi, profileId: string): Promise<ISave
   ).then(() => savegames);
 }
 
+const restoreRequests = new WeakMap<types.IExtensionApi, object>();
+
 function onRestorePlugins(api: types.IExtensionApi, savegame: ISavegame) {
+  const request = {};
+  restoreRequests.set(api, request);
   const state = api.getState();
   const { dispatch } = api.store;
+  const profileId = selectors.activeProfile(state)?.id;
   const gameMode = selectors.activeGameId(state);
+  const isCurrent = () => {
+    const profile = selectors.activeProfile(api.getState());
+    return (
+      restoreRequests.get(api) === request &&
+      profileId !== undefined &&
+      profile?.id === profileId &&
+      profile?.gameId === gameMode
+    );
+  };
   const game = util.getGame(gameMode);
   const t = api.translate;
   const { discovered } = state.settings.gameMode;
@@ -393,7 +407,7 @@ function onRestorePlugins(api: types.IExtensionApi, savegame: ISavegame) {
         "scan on the games page.",
       { allowReport: true },
     );
-    return;
+    return Promise.resolve();
   }
 
   const modPath = game.getModPaths(discovery.path)[""];
@@ -401,13 +415,17 @@ function onRestorePlugins(api: types.IExtensionApi, savegame: ISavegame) {
   const notificationId = "restore-plugins-id";
   util.showActivity(dispatch, "Restoring plugins", notificationId);
 
-  restoreSavegamePlugins(api, modPath, savegame)
+  return restoreSavegamePlugins(api, modPath, savegame, isCurrent)
     .then(() => {
-      util.showSuccess(dispatch, "Restoring plugins complete", notificationId);
+      if (isCurrent()) {
+        util.showSuccess(dispatch, "Restoring plugins complete", notificationId);
+      }
     })
     .catch(MissingPluginsError, (err: MissingPluginsError) => {
-      let restorePlugins = true;
-      api
+      if (!isCurrent()) {
+        return Promise.resolve();
+      }
+      return api
         .showDialog(
           "question",
           t("Restore plugins"),
@@ -424,19 +442,25 @@ function onRestorePlugins(api: types.IExtensionApi, savegame: ISavegame) {
           [{ label: "Cancel" }, { label: "Continue" }],
         )
         .then((result: types.IDialogResult) => {
-          restorePlugins = result.action === "Continue";
-          if (restorePlugins) {
+          if (!isCurrent()) {
+            return;
+          }
+          if (result.action === "Continue") {
             api.events.emit("set-plugin-list", savegame.attributes.plugins);
-            util.showSuccess(dispatch, "Restored plugins for savegame", notificationId);
+            if (isCurrent()) {
+              util.showSuccess(dispatch, "Restored plugins for savegame", notificationId);
+            }
           } else {
             api.dismissNotification(notificationId);
           }
         });
     })
     .catch((err: Error) => {
-      util.showError(dispatch, "Failed to restore plugins", err, {
-        id: notificationId,
-      });
+      if (isCurrent()) {
+        util.showError(dispatch, "Failed to restore plugins", err, {
+          id: notificationId,
+        });
+      }
     });
 }
 

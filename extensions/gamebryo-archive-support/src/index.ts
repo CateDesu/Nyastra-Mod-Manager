@@ -1,5 +1,5 @@
 import * as path from "path";
-import { PassThrough } from "stream";
+import { PassThrough, pipeline } from "stream";
 
 import { fs, types, util } from "@nexusmods/vortex-api";
 import PromiseBB from "bluebird";
@@ -18,7 +18,7 @@ class BA2Handler implements types.IArchiveHandler {
   public readDir(archPath: string): PromiseBB<string[]> {
     return new PromiseBB<string[]>((resolve) => {
       let query = archPath.toLowerCase().replace(/\//g, "\\");
-      if (!query.endsWith("\\")) {
+      if (query && !query.endsWith("\\")) {
         query = query + "\\";
       }
       const files: string[] = [];
@@ -98,7 +98,7 @@ class BSAHandler implements types.IArchiveHandler {
     const pass = new PassThrough();
 
     if (this.mBSA === undefined) {
-      pass.emit("error", new Error("Archive opened in create mode"));
+      queueMicrotask(() => pass.destroy(new Error("Archive opened in create mode")));
       return pass;
     }
 
@@ -106,28 +106,33 @@ class BSAHandler implements types.IArchiveHandler {
       (f) => f.fullPath.toLowerCase() === filePath.toLowerCase().replace(/\//g, "\\"),
     );
     if (!file) {
-      pass.emit("error", new Error("file not found " + filePath));
+      queueMicrotask(() => pass.destroy(new Error("file not found " + filePath)));
       return pass;
     }
 
     const tmpDir = require("tmp").dir as (cb: (err: any, name: string) => void) => void;
     tmpDir((tmpErr: any, tmpPath: string) => {
       if (tmpErr !== null) {
-        return pass.emit("error", tmpErr);
+        pass.destroy(tmpErr);
+        return;
       }
+      const cleanup = () => fs.removeAsync(tmpPath).catch(() => null);
       this.mBSA
         .extractFile(file, tmpPath)
         .then(() => {
-          const fileStream = fs.createReadStream(path.join(tmpPath, path.basename(filePath)));
-          fileStream.on("data", (data: Buffer) => pass.write(data));
-          fileStream.on("end", () => {
-            pass.end();
-            fs.removeAsync(tmpPath).catch(() => null);
+          if (pass.destroyed) {
+            return cleanup();
+          }
+          const fileStream = fs.createReadStream(path.join(tmpPath, file.name));
+          pipeline(fileStream, pass, () => {
+            void cleanup();
           });
-          fileStream.on("error", (err: Error) => pass.emit("error", err));
-          fileStream.on("readable", () => pass.emit("readable"));
+          return undefined;
         })
-        .catch((err: Error) => pass.emit("error", err));
+        .catch((err: Error) => {
+          pass.destroy(err);
+          void cleanup();
+        });
     });
 
     return pass;

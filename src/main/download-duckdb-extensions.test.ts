@@ -108,7 +108,7 @@ describe("extension downloads", () => {
         callback(response);
         response.end(body);
       });
-      return request as ReturnType<typeof https.get>;
+      return request as unknown as ReturnType<typeof https.get>;
     });
   }
 

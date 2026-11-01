@@ -1,6 +1,7 @@
+import { realpath } from "node:fs/promises";
 import * as path from "path";
 
-import { getErrorMessageOrDefault } from "@vortex/shared";
+import { getErrorCode, getErrorMessageOrDefault } from "@vortex/shared";
 import PromiseBB from "bluebird";
 import * as React from "react";
 import {
@@ -15,8 +16,10 @@ import {
   ProgressBar,
 } from "react-bootstrap";
 import type * as Redux from "redux";
+import { batch } from "redux-act";
 import type { ThunkDispatch } from "redux-thunk";
 
+import { setDownloadCheckpoint } from "../../../actions/downloads";
 import { showDialog } from "../../../actions/notifications";
 import { ComponentEx, connect, translate } from "../../../controls/ComponentEx";
 import FlexLayout from "../../../controls/FlexLayout";
@@ -50,9 +53,16 @@ import getVortexPath from "../../../util/getVortexPath";
 import { log } from "../../../util/log";
 import { showError } from "../../../util/message";
 import opn from "../../../util/opn";
+import { resolveWinePath } from "../../../util/resolvePathCase";
 import * as selectors from "../../../util/selectors";
 import { getSafe } from "../../../util/storeHelper";
-import { cleanFailedTransfer, testPathTransfer, transferPath } from "../../../util/transferPath";
+import {
+  cleanFailedStagingTransfer,
+  prepareStagingTransfer,
+  STAGING_TRANSFER_TAG,
+  testPathTransfer,
+  transferPath,
+} from "../../../util/transferPath";
 import {
   Campaign,
   ciEqual,
@@ -74,6 +84,7 @@ import {
 } from "../actions/settings";
 import { setTransferDownloads } from "../actions/transactions";
 import getText from "../texts";
+import { hasPendingArchiveAdmission, withArchiveMutation } from "../util/archiveOwnership";
 import { DOWNLOADS_DIR_TAG, writeDownloadsTag } from "../util/downloadDirectory";
 import getDownloadPath, { getDownloadPathPattern } from "../util/getDownloadPath";
 
@@ -92,7 +103,6 @@ interface IConnectedProps {
 }
 
 interface IActionProps {
-  onSetDownloadPath: (newPath: string) => void;
   onSetTransfer: (dest: string) => void;
   onSetMaxDownloads: (value: number) => void;
   onShowDialog: (
@@ -153,8 +163,9 @@ class Settings extends ComponentEx<IProps, IComponentState> {
     const pathValid = validationState.state !== "error";
     const electricBoltIconPath = "assets/icons/electric-bolt.svg";
 
-    const hasActivity =
-      Object.keys(downloads).find((dlId) => downloads[dlId].state === "started") !== undefined;
+    const hasActivity = Object.values(downloads).some((download) =>
+      ["init", "started", "finalizing"].includes(download.state),
+    );
 
     return (
       // Supressing default form submission event.
@@ -379,7 +390,7 @@ class Settings extends ComponentEx<IProps, IComponentState> {
   };
 
   private onApply = () => {
-    getNormalizeFunc(getDownloadPath(this.state.downloadPath)).then((normalize) =>
+    return getNormalizeFunc(getDownloadPath(this.state.downloadPath)).then((normalize) =>
       this.apply(normalize),
     );
   };
@@ -421,7 +432,8 @@ class Settings extends ComponentEx<IProps, IComponentState> {
   };
 
   private apply = (normalize: (input: string) => string) => {
-    const { t, onSetDownloadPath, onShowDialog, onShowError, onSetTransfer } = this.props;
+    const { t, onShowDialog, onShowError, onSetTransfer } = this.props;
+    const newPattern = this.state.downloadPath;
     const newPath: string = getDownloadPath(this.state.downloadPath);
     const oldPath: string = getDownloadPath(this.props.downloadPath);
 
@@ -501,7 +513,16 @@ class Settings extends ComponentEx<IProps, IComponentState> {
       );
     };
 
-    let deleteOldDestination = true;
+    let deleteOldDestination = false;
+    let preserveDestinationTag = false;
+    const move = {};
+    let moving = false;
+    let checkpointActions: Redux.Action[] = [];
+    const publish = () => {
+      this.context.api.store.dispatch(batch([...checkpointActions, setDownloadPath(newPattern)]));
+      onSetTransfer(undefined);
+      this.context.api.events.emit("did-move-downloads");
+    };
     this.nextState.progress = 0;
     this.nextState.busy = t("Moving");
     return withTrackedActivity(
@@ -512,147 +533,232 @@ class Settings extends ComponentEx<IProps, IComponentState> {
         "downloads.transfer.to": newPath,
       },
       (_setAttribute, _setError) =>
-        testPathTransfer(oldPath, newPath)
-          .then(() => fs.ensureDirWritableAsync(newPath, this.confirmElevate))
-          .then(() => this.checkTargetEmpty(oldPath, newPath))
-          .then(() => {
-            if (oldPath !== newPath) {
-              this.nextState.busy = t("Moving download folder");
-              return this.transferPath().then(() => writeDownloadsTag(this.context.api, newPath));
-            } else {
-              return PromiseBB.resolve();
-            }
-          })
-          .then(() => {
-            onSetTransfer(undefined);
-            onSetDownloadPath(this.state.downloadPath);
-            this.context.api.events.emit("did-move-downloads");
-          })
-          .catch(UserCanceled, () => null)
-          .catch(CleanupFailedException, (err) => {
-            deleteOldDestination = false;
-            onSetTransfer(undefined);
-            onSetDownloadPath(this.state.downloadPath);
-            this.context.api.events.emit("did-move-downloads");
-            onShowDialog(
-              "info",
-              "Cleanup failed",
-              {
-                bbcode: t(
-                  "The downloads folder has been copied [b]successfully[/b] to " +
-                    "your chosen destination!<br />" +
-                    "Clean-up of the old downloads folder has been cancelled.<br /><br />" +
-                    `Old downloads folder: [url]{{thePath}}[/url]`,
-                  { replace: { thePath: oldPath } },
-                ),
-              },
-              [{ label: "Close", action: () => PromiseBB.resolve() }],
-            );
-
-            if (!(err.errorObject instanceof UserCanceled)) {
-              this.context.api.showErrorNotification("Clean-up failed", err.errorObject);
-            }
-          })
-          .catch(InsufficientDiskSpace, () => notEnoughDiskSpace())
-          .catch(UnsupportedOperatingSystem, () =>
-            onShowError(
-              "Unsupported operating system",
-              "This functionality is currently unavailable for your operating system!",
-              false,
-            ),
-          )
-          .catch(NotFound, () =>
-            onShowError(
-              "Invalid destination",
-              "The destination partition you selected is invalid - please choose a different " +
-                "destination",
-              false,
-            ),
-          )
-          .catch((err) => {
-            if (err !== null) {
-              if (err.code === "EPERM") {
-                onShowError("Directories are locked", err, false);
-              } else if (err.code === "EINVAL") {
-                onShowError("Invalid path", err.message, false);
-              } else if (err.code === "EIO") {
-                // Input/Output file operations have been interrupted.
-                //  this is not a bug in Vortex but rather a hardware/networking
-                //  issue (depending on the user's setup).
-                onShowError(
-                  "File operations interrupted",
-                  "Input/Output file operations have been interrupted. This is not a bug in Vortex, " +
-                    "but rather a problem with your environment!<br /><br />" +
-                    "Possible reasons behind this issue:<br />" +
-                    "1. Your HDD/Removable drive has become unseated during transfer.<br />" +
-                    "2. File operations were running on a network drive and said drive has become " +
-                    "disconnected for some reason (Network hiccup?)<br />" +
-                    "3. An overzealous third party tool (possibly Anti-Virus or virus) " +
-                    "which is blocking Vortex from completing its operations.<br />" +
-                    "4. A faulty HDD/Removable drive.<br /><br />" +
-                    "Please test your environment and try again once you've confirmed it's fixed.",
-                  false,
-                  true,
-                );
-              } else if (err.code === "UNKNOWN" && err?.["nativeCode"] === 1392) {
-                // The file or directory is corrupted and unreadable.
-                onShowError(
-                  "Failed to move directories",
-                  t(
-                    "Vortex has encountered a corrupted and unreadable file/directory " +
-                      "and is unable to complete the transfer. Vortex was attempting " +
-                      'to move the following file/directory: "{{culprit}}" when your operating system ' +
-                      "raised the error. Please test your environment and try again once you've confirmed it's fixed.",
-                    { replace: { culprit: err.path } },
-                  ),
-                  false,
-                );
-              } else {
-                onShowError("Failed to move directories", err, !(err instanceof ProcessCanceled));
+        PromiseBB.resolve(
+          withArchiveMutation(this.context.api, () =>
+            PromiseBB.try(async () => {
+              const state = this.context.api.getState();
+              if (
+                getDownloadPath(state.settings.downloads.path) !== oldPath ||
+                hasPendingArchiveAdmission(this.context.api) ||
+                Object.values(state.persistent.downloads.files).some((download) =>
+                  ["init", "started", "finalizing"].includes(download.state),
+                )
+              ) {
+                throw new ProcessCanceled("Pause downloads before moving the downloads folder");
               }
-            }
-          })
-          .finally(() => {
-            const state = this.context.api.store.getState();
-            // Any transfers would've completed at this point.
-            //  Check if we still have the transfer state populated,
-            //  if it is - that means that the user has cancelled the transfer,
-            //  we need to cleanup.
-            const pendingTransfer: string[] = [
-              "persistent",
-              "transactions",
-              "transfer",
-              "downloads",
-            ];
-            if (getSafe(state, pendingTransfer, undefined) !== undefined && deleteOldDestination) {
-              return cleanFailedTransfer(newPath)
-                .then(() => {
-                  onSetTransfer(undefined);
-                  this.nextState.busy = undefined;
-                })
-                .catch(UserCanceled, () => {
-                  this.nextState.busy = undefined;
-                })
-                .catch((err) => {
-                  this.nextState.busy = undefined;
-                  if (err.code === "ENOENT") {
-                    // Folder is already gone, that's fine.
-                    onSetTransfer(undefined);
-                  } else if (err.code === "EPERM") {
+              moving = true;
+              this.context.api.events.emit("will-move-downloads", move);
+              const root = await realpath(await resolveWinePath(oldPath)).catch((err) => {
+                if (getErrorCode(err) !== "ENOENT") throw err;
+                return oldPath;
+              });
+              checkpointActions = (
+                await Promise.all(
+                  Object.entries(state.persistent.downloads.checkpoints ?? {}).map(
+                    async ([id, checkpoint]) => {
+                      const entry = await resolveWinePath(checkpoint.dest);
+                      const owned = (relative: string) =>
+                        !path.isAbsolute(relative) &&
+                        relative !== ".." &&
+                        !relative.startsWith(`..${path.sep}`);
+                      let relative = path.relative(oldPath, entry);
+                      if (!owned(relative)) {
+                        const resolved = await realpath(entry).catch((err) => {
+                          if (!["ENOENT", "ENOTDIR", "EACCES", "EPERM"].includes(getErrorCode(err)))
+                            throw err;
+                          return undefined;
+                        });
+                        if (resolved === undefined) return undefined;
+                        relative = path.relative(root, resolved);
+                        if (!owned(relative)) return undefined;
+                      }
+                      return setDownloadCheckpoint(id, {
+                        ...checkpoint,
+                        dest: path.join(newPath, relative),
+                      });
+                    },
+                  ),
+                )
+              ).filter((action) => action !== undefined);
+            })
+              .then(() => testPathTransfer(oldPath, newPath))
+              .then(() => fs.ensureDirWritableAsync(newPath, this.confirmElevate))
+              .then(() => this.checkTargetEmpty(oldPath, newPath))
+              .then(() => {
+                if (oldPath !== newPath) {
+                  this.nextState.busy = t("Moving download folder");
+                  return this.transferPath(
+                    oldPath,
+                    newPath,
+                    () =>
+                      prepareStagingTransfer(oldPath, newPath).then((owned) => {
+                        deleteOldDestination = owned;
+                        preserveDestinationTag = !owned;
+                      }),
+                    () =>
+                      // Finish metadata and disarm rollback before removing source bytes.
+                      (preserveDestinationTag
+                        ? PromiseBB.resolve()
+                        : writeDownloadsTag(this.context.api, newPath)
+                      ).then(() =>
+                        deleteOldDestination
+                          ? fs.removeAsync(path.join(newPath, STAGING_TRANSFER_TAG)).then(() => {
+                              deleteOldDestination = false;
+                            })
+                          : undefined,
+                      ),
+                  );
+                } else {
+                  return PromiseBB.resolve();
+                }
+              })
+              .then(() => {
+                publish();
+              })
+              .catch(UserCanceled, () => null)
+              .catch(CleanupFailedException, (err) => {
+                deleteOldDestination = false;
+                publish();
+                onShowDialog(
+                  "info",
+                  "Cleanup failed",
+                  {
+                    bbcode: t(
+                      "The downloads folder has been copied [b]successfully[/b] to " +
+                        "your chosen destination!<br />" +
+                        "Clean-up of the old downloads folder has been cancelled.<br /><br />" +
+                        `Old downloads folder: [url]{{thePath}}[/url]`,
+                      { replace: { thePath: oldPath } },
+                    ),
+                  },
+                  [{ label: "Close", action: () => PromiseBB.resolve() }],
+                );
+
+                if (!(err.errorObject instanceof UserCanceled)) {
+                  this.context.api.showErrorNotification("Clean-up failed", err.errorObject);
+                }
+              })
+              .catch(InsufficientDiskSpace, () => notEnoughDiskSpace())
+              .catch(UnsupportedOperatingSystem, () =>
+                onShowError(
+                  "Unsupported operating system",
+                  "This functionality is currently unavailable for your operating system!",
+                  false,
+                ),
+              )
+              .catch(NotFound, () =>
+                onShowError(
+                  "Invalid destination",
+                  "The destination partition you selected is invalid - please choose a different " +
+                    "destination",
+                  false,
+                ),
+              )
+              .catch((err) => {
+                if (err !== null) {
+                  if (err.code === "EPERM") {
+                    onShowError("Directories are locked", err, false);
+                  } else if (err.code === "EINVAL") {
+                    onShowError("Invalid path", err.message, false);
+                  } else if (err.code === "EIO") {
+                    // Input/Output file operations have been interrupted.
+                    //  this is not a bug in Vortex but rather a hardware/networking
+                    //  issue (depending on the user's setup).
                     onShowError(
-                      "Destination folder is not writable",
-                      "Vortex is unable to clean up " +
-                        "the destination folder due to a permissions issue.",
+                      "File operations interrupted",
+                      "Input/Output file operations have been interrupted. This is not a bug in Vortex, " +
+                        "but rather a problem with your environment!<br /><br />" +
+                        "Possible reasons behind this issue:<br />" +
+                        "1. Your HDD/Removable drive has become unseated during transfer.<br />" +
+                        "2. File operations were running on a network drive and said drive has become " +
+                        "disconnected for some reason (Network hiccup?)<br />" +
+                        "3. An overzealous third party tool (possibly Anti-Virus or virus) " +
+                        "which is blocking Vortex from completing its operations.<br />" +
+                        "4. A faulty HDD/Removable drive.<br /><br />" +
+                        "Please test your environment and try again once you've confirmed it's fixed.",
+                      false,
+                      true,
+                    );
+                  } else if (err.code === "UNKNOWN" && err?.["nativeCode"] === 1392) {
+                    // The file or directory is corrupted and unreadable.
+                    onShowError(
+                      "Failed to move directories",
+                      t(
+                        "Vortex has encountered a corrupted and unreadable file/directory " +
+                          "and is unable to complete the transfer. Vortex was attempting " +
+                          'to move the following file/directory: "{{culprit}}" when your operating system ' +
+                          "raised the error. Please test your environment and try again once you've confirmed it's fixed.",
+                        { replace: { culprit: err.path } },
+                      ),
                       false,
                     );
                   } else {
-                    onShowError("Transfer clean-up failed", err, true);
+                    onShowError(
+                      "Failed to move directories",
+                      err,
+                      !(err instanceof ProcessCanceled),
+                    );
                   }
-                });
-            } else {
-              this.nextState.busy = undefined;
-            }
-          }),
+                }
+              })
+              .finally(() => {
+                const state = this.context.api.store.getState();
+                // Any transfers would've completed at this point.
+                //  Check if we still have the transfer state populated,
+                //  if it is - that means that the user has cancelled the transfer,
+                //  we need to cleanup.
+                const pendingTransfer: string[] = [
+                  "persistent",
+                  "transactions",
+                  "transfer",
+                  "downloads",
+                ];
+                if (deleteOldDestination) {
+                  return cleanFailedStagingTransfer(oldPath, newPath)
+                    .then(() => {
+                      if (
+                        getSafe(this.context.api.getState(), pendingTransfer, undefined) === newPath
+                      ) {
+                        onSetTransfer(undefined);
+                      }
+                      this.nextState.busy = undefined;
+                    })
+                    .catch(UserCanceled, () => {
+                      this.nextState.busy = undefined;
+                    })
+                    .catch((err) => {
+                      this.nextState.busy = undefined;
+                      if (err.code === "ENOENT") {
+                        // Folder is already gone, that's fine.
+                        if (
+                          getSafe(this.context.api.getState(), pendingTransfer, undefined) ===
+                          newPath
+                        ) {
+                          onSetTransfer(undefined);
+                        }
+                      } else if (err.code === "EPERM") {
+                        onShowError(
+                          "Destination folder is not writable",
+                          "Vortex is unable to clean up " +
+                            "the destination folder due to a permissions issue.",
+                          false,
+                        );
+                      } else {
+                        onShowError("Transfer clean-up failed", err, true);
+                      }
+                    });
+                } else {
+                  if (getSafe(state, pendingTransfer, undefined) === newPath) {
+                    onSetTransfer(undefined);
+                  }
+                  this.nextState.busy = undefined;
+                }
+              }),
+          ),
+        ).finally(() => {
+          this.nextState.busy = undefined;
+          if (moving) this.context.api.events.emit("downloads-move-finished", move);
+        }),
       {},
     );
   };
@@ -755,12 +861,14 @@ class Settings extends ComponentEx<IProps, IComponentState> {
     );
   }
 
-  private transferPath() {
+  private transferPath(
+    oldPath: string,
+    newPath: string,
+    beforeTransfer: () => PromiseLike<void>,
+    beforeRemoveSource: () => PromiseLike<void>,
+  ) {
     const { t, onSetTransfer, onShowDialog } = this.props;
-    const oldPath = getDownloadPath(this.props.downloadPath);
-    const newPath = getDownloadPath(this.state.downloadPath);
 
-    this.context.api.events.emit("will-move-downloads");
     let sourceIsMissing = false;
     return fs
       .statAsync(oldPath)
@@ -806,18 +914,23 @@ class Settings extends ComponentEx<IProps, IComponentState> {
                   : PromiseBB.resolve(),
               );
 
-        return queryReset.then(() => {
+        return queryReset.then(beforeTransfer).then(() => {
           onSetTransfer(newPath);
-          return transferPath(oldPath, newPath, (from: string, to: string, progress: number) => {
-            log("debug", "transfer downloads", { from, to });
-            if (progress > this.state.progress) {
-              this.nextState.progress = progress;
-            }
-            if (this.state.progressFile !== from && Date.now() - this.mLastFileUpdate > 1000) {
-              this.nextState.progressFile = path.basename(from);
-            }
-          }).catch((err) =>
-            sourceIsMissing && err.path === oldPath ? PromiseBB.resolve() : PromiseBB.reject(err),
+          return transferPath(
+            oldPath,
+            newPath,
+            (from: string, to: string, progress: number) => {
+              log("debug", "transfer downloads", { from, to });
+              if (progress > this.state.progress) {
+                this.nextState.progress = progress;
+              }
+              if (this.state.progressFile !== from && Date.now() - this.mLastFileUpdate > 1000) {
+                this.nextState.progressFile = path.basename(from);
+              }
+            },
+            beforeRemoveSource,
+          ).catch((err) =>
+            sourceIsMissing && err.path === oldPath ? beforeRemoveSource() : PromiseBB.reject(err),
           );
         });
       });
@@ -843,7 +956,6 @@ function mapStateToProps(state: IState): IConnectedProps {
 
 function mapDispatchToProps(dispatch: ThunkDispatch<any, null, Redux.Action>): IActionProps {
   return {
-    onSetDownloadPath: (newPath: string) => dispatch(setDownloadPath(newPath)),
     onSetMaxDownloads: (value: number) => dispatch(setMaxDownloads(value)),
     onSetTransfer: (dest: string) => dispatch(setTransferDownloads(dest)),
     onShowDialog: (type, title, content, actions) =>

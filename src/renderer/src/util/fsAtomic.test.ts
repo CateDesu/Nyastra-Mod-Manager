@@ -39,8 +39,31 @@ describe("copyFileAtomic", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
     nodeFs.rmSync(dir, { recursive: true, force: true });
   });
+
+  it.each(["copy", "write"])(
+    "replaces files outside the system temp folder with %s",
+    async (operation) => {
+      const temp = path.join(dir, "system-temp");
+      const staging = path.join(dir, "mod staging");
+      nodeFs.mkdirSync(temp);
+      nodeFs.mkdirSync(staging);
+      for (const name of ["TMPDIR", "TMP", "TEMP"]) vi.stubEnv(name, temp);
+      const src = path.join(staging, "source.patch_0");
+      const dest = path.join(staging, "dest.patch_0");
+      nodeFs.writeFileSync(src, "new content");
+      nodeFs.writeFileSync(dest, "old content");
+
+      if (operation === "copy") await copyFileAtomic(src, dest);
+      else await writeFileAtomic(dest, "new content");
+
+      expect(nodeFs.readFileSync(dest, "utf8")).toBe("new content");
+      expect(nodeFs.readdirSync(staging).sort()).toEqual(["dest.patch_0", "source.patch_0"]);
+      expect(nodeFs.readdirSync(temp)).toEqual([]);
+    },
+  );
 
   it("closes the temporary descriptor and removes the file after a write failure", async () => {
     const dest = path.join(dir, "dest.txt");

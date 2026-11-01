@@ -135,6 +135,7 @@ export function findUpdatableExtensions(
     [];
 
   for (const [key, installed] of Object.entries(installedExtensions)) {
+    if (installed.remove || installed.enabled === false) continue;
     const available = findInCatalog(catalog, { modId: installed.modId });
     if (available === undefined) continue;
 

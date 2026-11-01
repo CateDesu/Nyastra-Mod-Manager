@@ -26,6 +26,7 @@ import type {
   IUnavailableReason,
 } from "./types/IDeploymentMethod";
 import type BlacklistSet from "./util/BlacklistSet";
+import { isWindowsGame } from "./util/deploymentNormalize";
 
 export interface IDeployment {
   [relPath: string]: IDeployedFile;
@@ -134,9 +135,9 @@ abstract class LinkingActivator implements IDeploymentMethod {
 
     const queue = this.mQueue;
     this.mQueue = this.mQueue.then(() => queueProm);
-    this.mNormalize = normalize;
 
     return queue.then(() => {
+      this.mNormalize = normalize;
       this.mContext = {
         newDeployment: {},
         previousDeployment: {},
@@ -294,7 +295,7 @@ abstract class LinkingActivator implements IDeploymentMethod {
             100,
           ),
         )
-        .then(() => {
+        .then(async () => {
           if (failures.length > 0) {
             this.mApi.store.dispatch(addDeploymentFailures(gameId, failures));
           }
@@ -304,7 +305,7 @@ abstract class LinkingActivator implements IDeploymentMethod {
           const gameRequiresCleanup =
             game.requiresCleanup === undefined ? game.mergeMods !== true : game.requiresCleanup;
           if (removed.length > 0 && (gameRequiresCleanup || cleanupOnDeploy)) {
-            this.postLinkPurge(dataPath, false, false, directoryCleaning).catch((err) => {
+            await this.postLinkPurge(dataPath, false, false, directoryCleaning).catch((err) => {
               if (err instanceof UserCanceled) {
                 return null;
               }
@@ -678,7 +679,7 @@ abstract class LinkingActivator implements IDeploymentMethod {
     // that the same file may show up with different change types. This can cause an error
     // since the same action can not be applied
 
-    const changeMap: { [filePath: string]: IFileChange } = {};
+    const changeMap = new Map<string, IFileChange>();
 
     // if one of the files is deleted that's the more important change, otherwise we
     // take the later one, assuming there is a chronological order to the changes
@@ -687,15 +688,14 @@ abstract class LinkingActivator implements IDeploymentMethod {
     };
 
     for (const change of input) {
-      if (
-        changeMap[change.filePath] === undefined ||
-        moreImportant(change, changeMap[change.filePath])
-      ) {
-        changeMap[change.filePath] = change;
+      const key = JSON.stringify([change.source, change.filePath]);
+      const previous = changeMap.get(key);
+      if (previous === undefined || moreImportant(change, previous)) {
+        changeMap.set(key, change);
       }
     }
 
-    return Object.values(changeMap);
+    return Array.from(changeMap.values());
   }
 
   /**
@@ -727,16 +727,7 @@ abstract class LinkingActivator implements IDeploymentMethod {
   }
 
   private isWindowsGame(gameId: string): boolean {
-    if (process.platform !== "linux") return false;
-    const game = getGame(gameId);
-    if (game?.executable) {
-      try {
-        return /\.(exe|bat|cmd)$/i.test(game.executable());
-      } catch {
-        return false;
-      }
-    }
-    return !!this.mNormalize && this.mNormalize("A") === this.mNormalize("a");
+    return isWindowsGame(gameId, this.mNormalize);
   }
 
   private async removeDeployedFile(
@@ -835,7 +826,22 @@ abstract class LinkingActivator implements IDeploymentMethod {
           );
 
     return backupProm
-      .then(() => this.linkFile(fullOutputPath, fullPath, dirTags))
+      .then(() =>
+        Promise.resolve(this.linkFile(fullOutputPath, fullPath, dirTags)).catch(async (err) => {
+          // A failed link must not leave the original game file missing.
+          await moveFileNoReplace(fullOutputPath + BACKUP_TAG, fullOutputPath).catch(
+            (restoreError: unknown) => {
+              if (getErrorCode(restoreError) !== "ENOENT") {
+                log("warn", "failed to restore backup after deployment failure", {
+                  path: fullOutputPath,
+                  error: getErrorMessageOrDefault(restoreError),
+                });
+              }
+            },
+          );
+          throw err;
+        }),
+      )
       .then(() => {
         this.mContext.previousDeployment[key] = this.mContext.newDeployment[key];
         return this.mContext.newDeployment[key];

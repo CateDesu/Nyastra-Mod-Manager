@@ -5,6 +5,8 @@
     "src/**/*",
     "../../typings.custom/electron.d.ts",
     "../../typings.custom/promise.d.ts",
+    "./*.test.ts",
+    "./prepare-linux-native.mjs",
     "./download-duckdb-extensions.ts"
   ],
   "compilerOptions": {

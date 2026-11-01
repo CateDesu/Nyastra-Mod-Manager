@@ -1,5 +1,6 @@
 export const marker = "// Nyastra Linux Fluffy adaptation v3";
 export const helperName = "nyastra-fluffy.cjs";
+export const helldiversMarker = "// Nyastra packed Helldivers archives v1";
 
 function replaceOnce(source, before, after) {
   const parts = source.split(before);
@@ -9,6 +10,19 @@ function replaceOnce(source, before, after) {
 }
 
 export function adapt(source, game) {
+  if (game === "helldivers2") {
+    if (source.includes(helldiversMarker)) return source;
+    const newline = source.includes("\r\n") ? "\r\n" : "\n";
+    return replaceOnce(
+      source.replaceAll("\r\n", "\n"),
+      "  for (const entry of entries) {\n    const match = BASE_ARCHIVE_RE.exec(entry);",
+      `  ${helldiversMarker}
+  // Loose files cannot prove an archive is absent from packed game data.
+  if (entries.some((entry) => /^bundles(?:\\.\\d+)?\\.nxa$/i.test(entry))) return result;
+  for (const entry of entries) {
+    const match = BASE_ARCHIVE_RE.exec(entry);`,
+    ).replaceAll("\n", newline);
+  }
   if (source.includes(marker)) return source;
   const newline = source.includes("\r\n") ? "\r\n" : "\n";
   let updated = source.replaceAll("\r\n", "\n");

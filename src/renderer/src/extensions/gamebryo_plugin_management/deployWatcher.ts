@@ -8,7 +8,8 @@ export interface IDeployWatcher {
 /**
  * Tracks deployment activity for the plugin-management extension. While a deployment runs, a
  * loadOrder change queues the plugins-changed health-test trigger instead of emitting it; the
- * queue drains once on did-deploy. did-deploy and did-purge hand off to the given onDidDeploy,
+ * queue drains on did-deploy or when deployment activity ends after an abort.
+ * did-deploy and did-purge hand off to the given onDidDeploy,
  * except deployments belonging to a collection session, which collection-postprocess-complete
  * finishes later.
  */
@@ -18,6 +19,20 @@ export function startDeployWatcher(
 ): IDeployWatcher {
   let deploying = false;
   let pluginsChangedQueued = false;
+
+  const finishDeployment = () => {
+    deploying = false;
+    if (pluginsChangedQueued) {
+      pluginsChangedQueued = false;
+      api.events.emit("trigger-test-run", "plugins-changed", 500);
+    }
+  };
+
+  api.onStateChange(["session", "base", "activity", "mods"], (_previous, current: string[]) => {
+    if (deploying && !current?.includes("deployment")) {
+      finishDeployment();
+    }
+  });
 
   api.onAsync("will-deploy", () => {
     deploying = true;
@@ -33,11 +48,7 @@ export function startDeployWatcher(
       _progressCB,
       deployOptions?: { isCollectionPostprocessCall?: boolean },
     ) => {
-      deploying = false;
-      if (pluginsChangedQueued) {
-        pluginsChangedQueued = false;
-        api.events.emit("trigger-test-run", "plugins-changed", 500);
-      }
+      finishDeployment();
       if (
         deployOptions?.isCollectionPostprocessCall ||
         getCollectionActiveSession(api.getState()) !== undefined

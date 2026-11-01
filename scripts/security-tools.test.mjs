@@ -7,6 +7,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -17,7 +18,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 function fixture(t) {
-  const directory = mkdtempSync(path.join(tmpdir(), "nyastra-security-tools-"));
+  const directory = realpathSync(mkdtempSync(path.join(tmpdir(), "nyastra-security-tools-")));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const root = path.join(directory, "repo");
   const bin = path.join(directory, "bin");

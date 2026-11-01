@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
@@ -18,7 +18,7 @@ vi.mock("./views/layout/ToastContainer", () => ({ isToastSystemDisabled: () => t
 
 let root: string;
 beforeEach(async () => {
-  root = await mkdtemp(path.join(os.tmpdir(), "nyastra-launch-"));
+  root = await realpath(await mkdtemp(path.join(os.tmpdir(), "nyastra-launch-")));
   const prototype = ExtensionManager.prototype as unknown as {
     prepareExtensions: () => [];
     initExtensions: () => void;

@@ -132,14 +132,6 @@ function refreshProfile(
             );
           }
         });
-    })
-    .catch((err: Error) => {
-      // why are we catching here at all? shouldn't a failure here cancel the
-      // entire operation?
-      if (err instanceof UserCanceled) {
-        return PromiseBB.reject(err);
-      }
-      showError(store.dispatch, "Failed to set profile", err);
     });
 }
 
@@ -299,8 +291,9 @@ function deploy(api: IExtensionApi, profileId: string | undefined, what: string)
 function genOnProfileChange(
   api: IExtensionApi,
   onFinishProfileSwitch: (callback: () => void) => void,
+  startupSync: PromiseBB<void>,
 ) {
-  let finishProfileSwitchPromise: PromiseBB<void> = PromiseBB.resolve();
+  let finishProfileSwitchPromise: PromiseBB<void> = startupSync;
   const { store } = api;
 
   let cancelPromise: () => void;
@@ -313,10 +306,20 @@ function genOnProfileChange(
     }
   };
 
-  const cancelSwitch = () => {
+  const cancelSwitch = (previousId?: string) => {
     invokeCancel();
-    store.dispatch(setCurrentProfile(undefined, undefined));
-    store.dispatch(setNextProfile(undefined));
+    const candidate = profileById(store.getState(), previousId);
+    const previous =
+      typeof candidate?.id === "string" &&
+      candidate.id.length > 0 &&
+      candidate.id === previousId &&
+      typeof candidate.gameId === "string" &&
+      candidate.gameId.length > 0 &&
+      candidate.pendingRemove !== true
+        ? candidate
+        : undefined;
+    store.dispatch(setCurrentProfile(previous?.gameId, previous?.id));
+    store.dispatch(setNextProfile(previous?.id));
   };
 
   const confirmProfile = (gameId: string, current: string) => {
@@ -333,11 +336,16 @@ function genOnProfileChange(
     }, 2000);
   };
 
+  let changeQueue = startupSync;
   return (prev: string, current: string) => {
-    log("debug", "profile change", { from: prev, to: current });
-    finishProfileSwitchPromise
+    let outgoingSaved = false;
+    const snapshotCleanup: Array<() => void> = [];
+    const change = changeQueue
+      .then(() => finishProfileSwitchPromise)
       .then(() => {
         const state: IState = store.getState();
+        prev = state.settings.profiles.activeProfileId;
+        log("debug", "profile change", { from: prev, to: current });
         if (state.settings.profiles.nextProfileId !== current) {
           // cancel if there was another profile switch while we waited
           return null;
@@ -403,23 +411,36 @@ function genOnProfileChange(
         // these promises is rejected but that would only work if we could roll back
         // changes that happened.
         const enqueue = (cb: () => PromiseBB<void>) => {
-          queue = queue.then(cb).catch((err) => {
-            const message = getErrorMessageOrDefault(err);
-            log("error", "error in profile-will-change handler", message);
-            PromiseBB.resolve();
-          });
+          queue = queue.then(() =>
+            PromiseBB.try(cb).catch((err) => {
+              const message = getErrorMessageOrDefault(err);
+              log("error", "error in profile-will-change handler", message);
+            }),
+          );
         };
 
         const oldProfile = state.persistent.profiles[prev];
+        let snapshot = () => refreshProfile(store, oldProfile, "import");
+        const guardSnapshot = (
+          guard: (save: () => PromiseLike<void>) => PromiseLike<void>,
+          cleanup: () => void,
+        ) => {
+          const save = snapshot;
+          snapshot = () => PromiseBB.resolve(guard(save));
+          snapshotCleanup.push(cleanup);
+        };
         // changes to profile files are only saved back to the profile at this point
-        queue = queue.then(() => refreshProfile(store, oldProfile, "import"));
+        queue = queue
+          .then(() => snapshot())
+          .then(() => {
+            outgoingSaved = true;
+          });
 
-        api.events.emit("profile-will-change", current, enqueue);
+        api.events.emit("profile-will-change", current, enqueue, guardSnapshot);
 
         if (current === undefined) {
           log("info", "switched to no profile");
-          confirmProfile(undefined, undefined);
-          return queue;
+          return queue.then(() => confirmProfile(undefined, undefined));
         }
 
         sanitizeProfile(store, profile);
@@ -483,7 +504,7 @@ function genOnProfileChange(
         );
       })
       .catch((err) => {
-        cancelSwitch();
+        cancelSwitch(outgoingSaved ? undefined : prev);
         return PromiseBB.reject(err);
       })
       .catch(ProcessCanceled, (err) => {
@@ -509,7 +530,12 @@ function genOnProfileChange(
       .catch(UserCanceled, () => null)
       .catch((err) => {
         showError(store.dispatch, "Failed to set profile", err);
+      })
+      .finally(() => {
+        snapshotCleanup.forEach((cleanup) => cleanup());
       });
+    changeQueue = change;
+    return change;
   };
 }
 
@@ -706,13 +732,17 @@ function removeProfileImpl(api: IExtensionApi, profileId: string) {
     .catch((err) => (err.code === "ENOENT" ? PromiseBB.resolve() : PromiseBB.reject(err)))
     .then(() => {
       const gameMode = profiles[profileId].gameId;
-      const lastProfileId = lastActiveProfileForGame(state, gameMode);
+      const lastProfileId = lastActiveProfileForGame(api.getState(), gameMode);
       if (profileId === lastProfileId) {
         store.dispatch(clearLastActiveProfile(gameMode));
       }
       store.dispatch(removeProfile(profileId));
     })
     .catch((err) => {
+      const remaining = api.getState().persistent.profiles[profileId];
+      if (remaining !== undefined) {
+        store.dispatch(setProfile({ ...remaining, pendingRemove: false }));
+      }
       api.showErrorNotification("Failed to remove profile", err, {
         allowReport: err.code !== "EPERM",
       });
@@ -1057,10 +1087,15 @@ function init(context: IExtensionContext): boolean {
     // promise used to ensure a new profile switch can't be started before the last one
     // is complete
     let finishProfileSwitch: () => void;
+    const startupSync = PromiseBB.defer<void>();
 
     context.api.onStateChange(
       ["settings", "profiles", "nextProfileId"],
-      genOnProfileChange(context.api, (callback: () => void) => (finishProfileSwitch = callback)),
+      genOnProfileChange(
+        context.api,
+        (callback: () => void) => (finishProfileSwitch = callback),
+        startupSync.promise,
+      ),
     );
 
     context.api.onStateChange(
@@ -1072,6 +1107,142 @@ function init(context: IExtensionContext): boolean {
         }
       },
     );
+
+    context.api.onStateChange(
+      ["persistent", "profiles"],
+      (prev: { [profileId: string]: IProfile }, current: { [profileId: string]: IProfile }) => {
+        Object.keys(current).forEach((profileId) => {
+          if (prev[profileId] === current[profileId]) {
+            return;
+          }
+
+          const profile = current[profileId];
+
+          const prevState = getSafe(prev, [profileId, "modState"], {});
+          const currentState = getSafe(current, [profileId, "modState"], {});
+
+          if (prevState !== currentState) {
+            const mods = context.api.getState().persistent.mods[profile.gameId];
+            Object.keys(currentState).forEach((modId) => {
+              const isEnabled = getSafe(currentState, [modId, "enabled"], false);
+              const wasEnabled = getSafe(prevState, [modId, "enabled"], false);
+
+              if (isEnabled !== wasEnabled && mods[modId] !== undefined) {
+                context.api.events.emit(
+                  isEnabled ? "mod-enabled" : "mod-disabled",
+                  profileId,
+                  modId,
+                );
+              }
+            });
+          }
+        });
+      },
+    );
+    {
+      const state: IState = store.getState();
+
+      const initProfile = activeProfile(state);
+      refreshProfile(store, initProfile, "import")
+        .then(() => {
+          const { commandLine } = state.session.base;
+          if (
+            initProfile !== undefined &&
+            commandLine?.profile === undefined &&
+            commandLine?.game === undefined
+          ) {
+            // Re-read state: gamemode_management's startup discovery pass
+            // (startQuickDiscovery → removeDisappearedGames) runs in parallel
+            // and may have just cleared the active game's discovery if its
+            // folder is no longer on disk. Emitting profile-did-change for a
+            // game with no discovery causes downstream handlers to call into
+            // path.join(undefined, ...). The manual-switch path already
+            // refuses this state in genOnProfileChange; do the same here.
+            const currentState: IState = store.getState();
+            if (
+              currentState.settings.profiles.activeProfileId !== initProfile.id ||
+              currentState.settings.profiles.nextProfileId !== initProfile.id
+            ) {
+              return null;
+            }
+            const discovery = currentState.settings.gameMode.discovered[initProfile.gameId];
+            if (discovery?.path === undefined) {
+              showError(
+                store.dispatch,
+                "Game is no longer discoverable, please go to the games page and scan for, or " +
+                  "manually select the game folder.",
+                initProfile.gameId,
+                { allowReport: false },
+              );
+              store.dispatch(setCurrentProfile(undefined, undefined));
+              store.dispatch(setNextProfile(undefined));
+              if (finishProfileSwitch !== undefined) {
+                finishProfileSwitch();
+              }
+              return null;
+            }
+            context.api.events.emit("profile-did-change", initProfile.id);
+          }
+          return null;
+        })
+        .catch((err: Error) => {
+          if (!(err instanceof UserCanceled)) {
+            const allowReport = !(err instanceof CorruptActiveProfile);
+            showError(store.dispatch, "Failed to set profile", err, {
+              allowReport,
+            });
+          }
+          const currentState: IState = store.getState();
+          const owner = currentState.persistent.profiles[initProfile?.id];
+          const validOwner =
+            !(err instanceof CorruptActiveProfile) &&
+            owner?.gameId !== undefined &&
+            owner.gameId === initProfile?.gameId &&
+            owner.pendingRemove !== true;
+          if (validOwner) {
+            if (currentState.settings.profiles.activeProfileId === owner.id) {
+              store.dispatch(setNextProfile(owner.id));
+            }
+          } else {
+            store.dispatch(setCurrentProfile(undefined, undefined));
+            store.dispatch(setNextProfile(undefined));
+            if (finishProfileSwitch !== undefined) {
+              finishProfileSwitch();
+            }
+          }
+        })
+        .finally(() => startupSync.resolve());
+
+      const { activeProfileId, nextProfileId } = state.settings.profiles;
+      if (nextProfileId !== activeProfileId) {
+        log("warn", "started with a profile change in progress");
+
+        // ensure the new profile is valid and the corresponding game is
+        // discovered
+        if (truthy(activeProfileId) && state.persistent.profiles[activeProfileId] !== undefined) {
+          const profile = state.persistent.profiles[activeProfileId];
+          const discovery = discoveryByGame(state, profile.gameId);
+          if (discovery?.path !== undefined) {
+            store.dispatch(setNextProfile(activeProfileId));
+          } else {
+            store.dispatch(setNextProfile(undefined));
+          }
+        } else {
+          store.dispatch(setNextProfile(undefined));
+        }
+      }
+
+      // it's important we stop managing a game if it's no longer discovered
+      // because that can cause problems all over the application
+      if (truthy(activeProfileId)) {
+        const profile = state.persistent.profiles[activeProfileId];
+        const discovery = state.settings.gameMode.discovered[profile?.gameId];
+        if (profile !== undefined && discovery?.path === undefined) {
+          log("info", "active game no longer discovered, deactivate");
+          store.dispatch(setNextProfile(undefined));
+        }
+      }
+    }
 
     // Handle --profile and --game command line arguments.
     // This runs directly in once() rather than via onStateChange because
@@ -1128,125 +1299,6 @@ function init(context: IExtensionContext): boolean {
           log("warn", "game specified on command line not found", {
             game: commandLine.game,
           });
-        }
-      }
-    }
-
-    context.api.onStateChange(
-      ["persistent", "profiles"],
-      (prev: { [profileId: string]: IProfile }, current: { [profileId: string]: IProfile }) => {
-        Object.keys(current).forEach((profileId) => {
-          if (prev[profileId] === current[profileId]) {
-            return;
-          }
-
-          const profile = current[profileId];
-
-          const prevState = getSafe(prev, [profileId, "modState"], {});
-          const currentState = getSafe(current, [profileId, "modState"], {});
-
-          if (prevState !== currentState) {
-            const mods = context.api.getState().persistent.mods[profile.gameId];
-            Object.keys(currentState).forEach((modId) => {
-              const isEnabled = getSafe(currentState, [modId, "enabled"], false);
-              const wasEnabled = getSafe(prevState, [modId, "enabled"], false);
-
-              if (isEnabled !== wasEnabled && mods[modId] !== undefined) {
-                context.api.events.emit(
-                  isEnabled ? "mod-enabled" : "mod-disabled",
-                  profileId,
-                  modId,
-                );
-              }
-            });
-          }
-        });
-      },
-    );
-    {
-      const state: IState = store.getState();
-
-      const initProfile = activeProfile(state);
-      refreshProfile(store, initProfile, "import")
-        .then(() => {
-          const { commandLine } = state.session.base;
-          if (
-            initProfile !== undefined &&
-            commandLine?.profile === undefined &&
-            commandLine?.game === undefined
-          ) {
-            // Re-read state: gamemode_management's startup discovery pass
-            // (startQuickDiscovery → removeDisappearedGames) runs in parallel
-            // and may have just cleared the active game's discovery if its
-            // folder is no longer on disk. Emitting profile-did-change for a
-            // game with no discovery causes downstream handlers to call into
-            // path.join(undefined, ...). The manual-switch path already
-            // refuses this state in genOnProfileChange; do the same here.
-            const currentState: IState = store.getState();
-            const discovery = currentState.settings.gameMode.discovered[initProfile.gameId];
-            if (discovery?.path === undefined) {
-              showError(
-                store.dispatch,
-                "Game is no longer discoverable, please go to the games page and scan for, or " +
-                  "manually select the game folder.",
-                initProfile.gameId,
-                { allowReport: false },
-              );
-              store.dispatch(setCurrentProfile(undefined, undefined));
-              store.dispatch(setNextProfile(undefined));
-              if (finishProfileSwitch !== undefined) {
-                finishProfileSwitch();
-              }
-              return null;
-            }
-            context.api.events.emit("profile-did-change", initProfile.id);
-          }
-          return null;
-        })
-        .catch((err: Error) => {
-          if (!(err instanceof UserCanceled)) {
-            const allowReport = !(err instanceof CorruptActiveProfile);
-            showError(store.dispatch, "Failed to set profile", err, {
-              allowReport,
-            });
-          }
-          store.dispatch(setCurrentProfile(undefined, undefined));
-          store.dispatch(setNextProfile(undefined));
-          if (finishProfileSwitch !== undefined) {
-            finishProfileSwitch();
-          }
-        });
-
-      const { activeProfileId, nextProfileId } = state.settings.profiles;
-      if (nextProfileId !== activeProfileId) {
-        log("warn", "started with a profile change in progress");
-
-        // ensure the new profile is valid and the corresponding game is
-        // discovered
-        if (truthy(activeProfileId) && state.persistent.profiles[activeProfileId] !== undefined) {
-          const profile = state.persistent.profiles[activeProfileId];
-          const discovery = discoveryByGame(state, profile.gameId);
-          if (discovery?.path !== undefined) {
-            store.dispatch(setNextProfile(activeProfileId));
-          } else {
-            store.dispatch(setNextProfile(undefined));
-          }
-        } else {
-          store.dispatch(setNextProfile(undefined));
-        }
-      }
-
-      // it's important we stop managing a game if it's no longer discovered
-      // because that can cause problems all over the application
-      if (truthy(activeProfileId)) {
-        const profile = state.persistent.profiles[activeProfileId];
-        if (profile === undefined) {
-          return;
-        }
-        const discovery = state.settings.gameMode.discovered[profile.gameId];
-        if (discovery === undefined || discovery.path === undefined) {
-          log("info", "active game no longer discovered, deactivate");
-          store.dispatch(setNextProfile(undefined));
         }
       }
     }

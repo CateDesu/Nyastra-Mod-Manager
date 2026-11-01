@@ -254,3 +254,24 @@ describe("runtime restore", () => {
     expect(h.dispatched).toContainEqual(finishDownload(h.downloadId, "failed", expect.anything()));
   });
 });
+
+test("startup preserves native resume admission for an empty checkpoint", async ({
+  makeDownloadAdapter,
+}) => {
+  const h = makeDownloadAdapter({
+    download: { state: "started" },
+    checkpoint: {
+      downloadId: "",
+      resource: "http://127.0.0.1/unused",
+      dest: "unused",
+      completedRanges: [],
+      etag: "retained",
+    },
+  });
+  await h.adapter.hydrateFromState();
+  expect(h.resume).toHaveBeenCalledOnce();
+  expect(h.resume).toHaveBeenCalledWith(
+    expect.objectContaining({ completedRanges: [], etag: "retained" }),
+  );
+  expect(h.start).not.toHaveBeenCalled();
+});

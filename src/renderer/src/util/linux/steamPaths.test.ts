@@ -18,7 +18,7 @@ function install(directory: string): void {
   );
 }
 beforeEach(() => {
-  home = fs.mkdtempSync(path.join(os.tmpdir(), "nyastra-steam-"));
+  home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "nyastra-steam-")));
   data = path.join(home, "Custom Data");
   vi.mocked(getVortexPath).mockReturnValue(home);
   vi.stubEnv("XDG_DATA_HOME", data);

@@ -7,10 +7,35 @@ import { batchDispatch, toPromise } from "../../util/util";
 import type { IMod, IModRule } from "../mod_management/types/IMod";
 import { findModByRef } from "../mod_management/util/findModByRef";
 import testModReference from "../mod_management/util/testModReference";
+import {
+  activeProfile,
+  lastActiveProfileForGame,
+  profileById,
+} from "../profile_management/selectors";
 import type { ICollection } from "./types/ICollection";
 import type { IExtensionFeature } from "./util/extension";
 import { findExtensions } from "./util/extension";
-import { parseGameSpecifics } from "./util/gameSupport";
+import { isGamebryoGame, parseGameSpecifics } from "./util/gameSupport";
+
+const pendingGameSpecifics = new WeakMap<IExtensionApi, Map<string, () => Promise<void>>>();
+
+function gameSpecificQueue(api: IExtensionApi): Map<string, () => Promise<void>> {
+  let pending = pendingGameSpecifics.get(api);
+  if (pending === undefined) {
+    pending = new Map();
+    pendingGameSpecifics.set(api, pending);
+    api.events.on("profile-did-change", async () => {
+      for (const finish of [...pending.values()]) {
+        try {
+          await finish();
+        } catch (err) {
+          api.showErrorNotification("Failed to apply collection rules", err);
+        }
+      }
+    });
+  }
+  return pending;
+}
 
 function applyCollectionRules(
   api: IExtensionApi,
@@ -79,26 +104,68 @@ export async function postprocessCollection(
   collectionMod: IMod,
   collection: ICollection,
   mods: { [modId: string]: IMod },
+  ownerProfileId?: string,
+  isCurrent: () => boolean = () => true,
 ) {
   log("info", "postprocess collection");
+  const profileId = ownerProfileId ?? lastActiveProfileForGame(api.getState(), gameId);
+  const ownsProfile = () =>
+    isCurrent() &&
+    profileId !== undefined &&
+    profileById(api.getState(), profileId)?.gameId === gameId;
+  if (!ownsProfile()) return;
   applyCollectionRules(api, gameId, collection, mods);
   try {
     // TODO: replace this with a call to the awaitModsDeployment API extension method
     await toPromise((cb) =>
-      api.events.emit("deploy-mods", cb, undefined, undefined, {
+      api.events.emit("deploy-mods", cb, profileId, undefined, {
         isCollectionPostprocessCall: true,
       }),
     );
   } catch (err) {
     log("warn", "Failed to deploy during collection post processing");
   }
+  if (!ownsProfile()) return;
 
   const exts: IExtensionFeature[] = findExtensions(api.getState(), gameId);
 
   for (const ext of exts) {
-    await ext.parse(gameId, collection, collectionMod);
+    if (!ownsProfile()) return;
+    await ext.parse(gameId, collection, collectionMod, profileId, ownsProfile);
+    if (!ownsProfile()) return;
   }
 
-  await parseGameSpecifics(api, gameId, collection, collectionMod);
-  api.events.emit("collection-postprocess-complete", gameId, collectionMod.id);
+  const pending = gameSpecificQueue(api);
+  const key = JSON.stringify([profileId, collectionMod.id]);
+  let running = false;
+  const finish = async () => {
+    if (pending.get(key) !== finish || running) return;
+    if (!ownsProfile()) {
+      pending.delete(key);
+      return;
+    }
+    const canFinish = () =>
+      activeProfile(api.getState())?.id === profileId ||
+      !isGamebryoGame(gameId) ||
+      api.getState()["userlist"] === undefined;
+    if (!canFinish()) return;
+    running = true;
+    try {
+      await parseGameSpecifics(
+        api,
+        gameId,
+        collection,
+        collectionMod,
+        profileId,
+        () => ownsProfile() && pending.get(key) === finish && canFinish(),
+      );
+      if (!ownsProfile() || !canFinish() || pending.get(key) !== finish) return;
+      pending.delete(key);
+      api.events.emit("collection-postprocess-complete", gameId, collectionMod.id, profileId);
+    } finally {
+      running = false;
+    }
+  };
+  pending.set(key, finish);
+  await finish();
 }

@@ -1,9 +1,12 @@
-import { mkdir, readdir, rename, rmdir, stat } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { constants, createReadStream } from "node:fs";
+import { copyFile, lstat, mkdir, readdir, rename, rmdir, stat, unlink } from "node:fs/promises";
 import * as path from "path";
 
 import { getErrorCode } from "@vortex/shared";
 import PromiseBB from "bluebird";
 import type * as Redux from "redux";
+import { batch } from "redux-act";
 import * as semver from "semver";
 import format from "string-template";
 
@@ -18,7 +21,12 @@ import {
   setUserAPIKey,
   setUserInfo,
 } from "../actions";
-import { setCompatibleGames } from "../extensions/download_management/actions/state";
+import { clearDownloadCheckpoint, setDownloadCheckpoint } from "../actions/downloads";
+import {
+  setCompatibleGames,
+  setDownloadFilePath,
+  setDownloadInterrupted,
+} from "../extensions/download_management/actions/state";
 import { downloadPathForGame } from "../extensions/download_management/selectors";
 import getDownloadPath from "../extensions/download_management/util/getDownloadPath";
 import { knownGames } from "../extensions/gamemode_management/selectors";
@@ -212,7 +220,7 @@ function enableModernLayout_2_0(store: Redux.Store<IState>): PromiseBB<void> {
 
 async function moveDomainFile(src: string, dest: string): Promise<boolean> {
   try {
-    await stat(dest);
+    await lstat(dest);
     // Destination already exists; leave both in place rather than overwrite.
     return false;
   } catch (err) {
@@ -231,6 +239,54 @@ async function moveDomainFile(src: string, dest: string): Promise<boolean> {
   await mkdir(path.dirname(dest), { recursive: true });
   await rename(src, dest);
   return true;
+}
+
+async function moveDownloadArchive(src: string, dest: string): Promise<string | undefined> {
+  try {
+    await stat(src);
+  } catch (err) {
+    if (getErrorCode(err) === "ENOENT") return undefined;
+    throw err;
+  }
+
+  await mkdir(path.dirname(dest), { recursive: true });
+  const { name, ext } = path.parse(dest);
+  for (let count = 0; ; count++) {
+    const target = count === 0 ? dest : path.join(path.dirname(dest), `${name}.${count}${ext}`);
+    try {
+      await copyFile(src, target, constants.COPYFILE_EXCL);
+    } catch (err) {
+      if (getErrorCode(err) === "EEXIST") continue;
+      throw err;
+    }
+    return target;
+  }
+}
+
+async function matchesMissingArchive(dest: string, md5: string | undefined): Promise<boolean> {
+  if (md5 === undefined || !/^[a-f0-9]{32}$/i.test(md5)) return false;
+  try {
+    if (!(await lstat(dest)).isFile()) return false;
+    const hash = createHash("md5");
+    for await (const chunk of createReadStream(dest)) hash.update(chunk);
+    return hash.digest("hex") === md5.toLowerCase();
+  } catch (err) {
+    if (getErrorCode(err) === "ENOENT") return false;
+    throw err;
+  }
+}
+
+async function unusedArchiveName(dest: string): Promise<string> {
+  let target = dest;
+  for (;;) {
+    try {
+      await lstat(target);
+      target = path.join(path.dirname(dest), `${randomUUID()}${path.extname(dest)}`);
+    } catch (err) {
+      if (getErrorCode(err) === "ENOENT") return path.basename(target);
+      throw err;
+    }
+  }
 }
 
 // Ordered list of loaded game ids that share the same nexusPageId as `domain`.
@@ -273,8 +329,7 @@ async function tryMoveAndLog(
       log("info", "migration: moved download archive", { ...context, src, dest });
     }
   } catch (err) {
-    // Keep going: state still gets rewritten so the install handler points
-    // at the right folder once the user re-downloads.
+    // Orphan failures do not discard completed download progress.
     log("warn", "migration: failed to move download archive", {
       ...context,
       src,
@@ -296,7 +351,9 @@ async function moveDomainFolders_2_1(store: Redux.Store<IState>): Promise<void> 
   const activeId = activeGameId(state);
 
   const candidatesByDomain = new Map<string, string[]>();
-  const stateActions: Redux.AnyAction[] = [];
+  const movedArchives = new Map<string, string>();
+  const removeSources = new Set<string>();
+  let rewroteDownloads = 0;
 
   for (const dlId of Object.keys(downloads)) {
     const dl = downloads[dlId];
@@ -310,19 +367,52 @@ async function moveDomainFolders_2_1(store: Redux.Store<IState>): Promise<void> 
     if (candidates === undefined || candidates.length === 0) continue;
     const internal = candidates[0];
 
+    const stateActions: Redux.AnyAction[] = [];
     if (dl.localPath) {
-      await tryMoveAndLog(
-        path.join(downloadPathForGame(state, first), dl.localPath),
-        path.join(downloadPathForGame(state, internal), dl.localPath),
-        { dlId },
-      );
+      const src = path.join(downloadPathForGame(state, first), dl.localPath);
+      const checkpoint = state.persistent.downloads.checkpoints?.[dlId];
+      let localPath = movedArchives.get(src);
+      let invalidated = false;
+      if (localPath === undefined) {
+        const dest = path.join(downloadPathForGame(state, internal), dl.localPath);
+        const moved = await moveDownloadArchive(src, dest);
+        if (moved === undefined) {
+          const matches = await matchesMissingArchive(dest, dl.fileMD5);
+          // Removal and retry must not claim an unrelated archive.
+          localPath = matches ? dl.localPath : await unusedArchiveName(dest);
+          if (!matches) {
+            invalidated = true;
+            stateActions.push(setDownloadInterrupted(dlId, 0), clearDownloadCheckpoint(dlId));
+          }
+        } else {
+          localPath = path.basename(moved);
+          movedArchives.set(src, localPath);
+        }
+        if (moved === dest) removeSources.add(src);
+      }
+      stateActions.push(setDownloadFilePath(dlId, localPath));
+      if (
+        !invalidated &&
+        checkpoint !== undefined &&
+        path.resolve(checkpoint.dest) === path.resolve(src)
+      ) {
+        stateActions.push(
+          setDownloadCheckpoint(dlId, {
+            ...checkpoint,
+            dest: path.join(downloadPathForGame(state, internal), localPath),
+          }),
+        );
+      }
     }
 
-    // All loaded candidates land in download.game so the install handler can
-    // pick the right one regardless of which game the user is on at install
-    // time. `Set` collapses any overlap with dl.game while preserving order.
+    // Publish each completed archive before starting another fallible move.
     stateActions.push(setCompatibleGames(dlId, Array.from(new Set([...candidates, ...dl.game]))));
+    store.dispatch(batch(stateActions));
+    rewroteDownloads += 1;
   }
+
+  // Finish copying shared sources and relative aliases before removing any entry.
+  for (const src of removeSources) await unlink(src);
 
   // Sweep orphan files left in domain folders (downloads dropped from state
   // earlier but still present on disk). Only run for domains we actually
@@ -357,11 +447,8 @@ async function moveDomainFolders_2_1(store: Redux.Store<IState>): Promise<void> 
     }
   }
 
-  if (stateActions.length > 0) {
-    batchDispatch(store, stateActions);
-  }
   log("info", "migration: domain folders normalized", {
-    rewroteDownloads: stateActions.length,
+    rewroteDownloads,
     folderPairs,
   });
 }

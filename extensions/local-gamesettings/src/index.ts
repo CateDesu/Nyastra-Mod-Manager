@@ -1,18 +1,28 @@
 import * as path from "path";
 
-import { fs, log, selectors, types, util } from "@nexusmods/vortex-api";
+import { fs, log, selectors, type types, util } from "@nexusmods/vortex-api";
 import PromiseBB from "bluebird";
-import * as Redux from "redux";
+import type * as Redux from "redux";
 
 import {
   backupPath,
   gameSettingsFiles,
   gameSupported,
   initGameSupport,
-  ISettingsFile,
+  type ISettingsFile,
   mygamesPath,
   profilePath,
 } from "./util/gameSupport";
+
+function isMissingSource(source: string, error: { code?: string }): PromiseBB<boolean> {
+  if (error.code !== "ENOENT") {
+    return PromiseBB.resolve(false);
+  }
+  return fs
+    .statAsync(source)
+    .then(() => false)
+    .catch({ code: "ENOENT" }, () => true);
+}
 
 function copyGameSettings(
   sourcePath: string,
@@ -20,6 +30,7 @@ function copyGameSettings(
   files: ISettingsFile[],
   copyType: string,
 ): PromiseBB<void> {
+  let firstFailure: PromiseBB.Inspection<void> | undefined;
   return PromiseBB.map(files, (gameSetting) => {
     let source = path.join(sourcePath, gameSetting.name);
     let destination = path.join(destinationPath, path.basename(gameSetting.name));
@@ -35,22 +46,31 @@ function copyGameSettings(
 
     return fs
       .copyAsync(source, destination, { noSelfCopy: true })
-      .catch((err) => {
-        if (gameSetting.optional) {
-          return PromiseBB.resolve();
-        }
-        switch (copyType) {
-          // backup missing, create it now from global file
-          case "BacGlo":
-            return fs.copyAsync(destination, source, { noSelfCopy: true });
-          // profile ini missing, create it now from global file
-          case "ProGlo":
-            return fs.copyAsync(destination, source, { noSelfCopy: true });
-          // fatal error
-          default:
+      .catch((err) =>
+        isMissingSource(source, err).then((missing) => {
+          if (!missing) {
             return PromiseBB.reject(err);
-        }
-      })
+          }
+          if (gameSetting.optional) {
+            const destinations = copyType.endsWith("Glo")
+              ? [destination, destinationOrig, destinationOrig + ".baked"]
+              : [destination];
+            return PromiseBB.mapSeries(destinations, (file) =>
+              fs.unlinkAsync(file).catch((error: NodeJS.ErrnoException) => {
+                if (error?.code !== "ENOENT") throw error;
+              }),
+            ).then(() => undefined);
+          }
+          switch (copyType) {
+            // Seed missing settings from the global file.
+            case "BacGlo":
+            case "ProGlo":
+              return fs.copyAsync(destination, source, { noSelfCopy: true });
+            default:
+              return PromiseBB.reject(err);
+          }
+        }),
+      )
       .then(() =>
         copyType.endsWith("Glo")
           ? fs
@@ -61,11 +81,21 @@ function copyGameSettings(
                 }),
               )
               .catch({ code: "ENOENT" }, (err) =>
-                gameSetting.optional ? PromiseBB.resolve() : PromiseBB.reject(err),
+                isMissingSource(source, err).then((missing) =>
+                  gameSetting.optional && missing ? PromiseBB.resolve() : PromiseBB.reject(err),
+                ),
               )
           : PromiseBB.resolve(),
-      );
-  }).then(() => undefined);
+      )
+      .reflect()
+      .then((result) => {
+        if (result.isRejected()) firstFailure ??= result;
+        return undefined;
+      });
+  }).then(() => {
+    if (firstFailure !== undefined) throw firstFailure.reason();
+    return undefined;
+  });
 }
 
 function checkGlobalFiles(

@@ -8,7 +8,10 @@ import type { Action } from "redux";
 import { setDownloadModInfo } from "../../actions";
 import { log } from "../../logging";
 import type { IExtensionApi } from "../../types/IExtensionContext";
-import { getCollectionActiveSession } from "../../util/collectionInstallSessionSelectors";
+import {
+  getCollectionActiveSession,
+  getCollectionSessionHistory,
+} from "../../util/collectionInstallSessionSelectors";
 import { markCollectionMemberSkipped } from "../../util/collectionSkip";
 import {
   DataInvalid,
@@ -65,7 +68,7 @@ interface IFoundDownload {
 export interface IFreeUserDialogHandlers {
   onUpdated: () => void;
   onDownload: (inputUrl: string) => void;
-  onSkip: (inputUrl: string) => void;
+  onSkip: (inputUrl: string) => void | Promise<void>;
   onCancel: (inputUrl: string) => boolean;
   onRetry: () => void;
 }
@@ -255,12 +258,12 @@ export class NxmProtocol {
       ).catch(() => null);
     },
 
-    onSkip: (inputUrl: string) => {
+    onSkip: (inputUrl: string): Promise<void> | undefined => {
       const queued = this.#queuedFor(inputUrl);
       if (queued === undefined) {
-        return;
+        return undefined;
       }
-      void this.#skipQueued(queued);
+      return this.#skipQueued(queued);
     },
 
     /** Cancels every queued download, not just this one. Returns whether there was any. */
@@ -421,6 +424,29 @@ export class NxmProtocol {
   }
 
   async #skipQueued(queued: IQueuedDownload): Promise<void> {
+    const state = this.#api.getState();
+    const session = getCollectionActiveSession(state);
+    const previous = session && getCollectionSessionHistory(state)[session.sessionId];
+    let retired = false;
+    const checkOwner = () => {
+      const currentState = this.#api.getState();
+      const current = getCollectionActiveSession(currentState);
+      // Session IDs survive retries. History also reveals retirement inside a batched restart.
+      if (
+        current?.sessionId !== session?.sessionId ||
+        current?.collectionId !== session?.collectionId ||
+        current?.profileId !== session?.profileId ||
+        current?.gameId !== session?.gameId ||
+        (session && getCollectionSessionHistory(currentState)[session.sessionId] !== previous)
+      ) {
+        retired = true;
+      }
+    };
+    const unsubscribe = this.#api.store.subscribe(checkOwner);
+    const onStart = () => {
+      retired = true;
+    };
+    this.#api.events.on("will-install-collection", onStart);
     const fileIds = new Set<string>([queued.url.fileId.toString()]);
     const fileNames = new Set<string>();
     try {
@@ -436,18 +462,23 @@ export class NxmProtocol {
         }
       });
 
-      // the skip dispatches the ignore directly against the active install session
-      markCollectionMemberSkipped(this.#api, {
-        identifiers: {
-          ...queued.url.identifiers,
-          fileNames: Array.from(fileNames),
-          fileIds: Array.from(fileIds),
-        },
-      });
+      checkOwner();
+      if (!retired && this.#freeQueue.includes(queued)) {
+        markCollectionMemberSkipped(this.#api, {
+          identifiers: {
+            ...queued.url.identifiers,
+            fileNames: Array.from(fileNames),
+            fileIds: Array.from(fileIds),
+          },
+        });
+      }
     } catch (err) {
       log("warn", "failed to query relevant updates on skip", {
         error: getErrorMessageOrDefault(err),
       });
+    } finally {
+      unsubscribe();
+      this.#api.events.removeListener("will-install-collection", onStart);
     }
     queued.reject(new UserCanceled(true));
   }

@@ -10,13 +10,13 @@ class NuGetPathTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name) / "repo"
+        self.root = Path(self.temp.name).resolve() / "repo"
         self.root.mkdir()
         self.source = self.root / "extensions"
         self.source.mkdir()
         self.project = self.source / "fixture.csproj"
         self.project.write_text("<Project/>")
-        self.outside = Path(self.temp.name) / "outside"
+        self.outside = self.root.parent / "outside"
         self.outside.mkdir()
         (self.outside / "external.csproj").write_text("<Project/>")
         patcher = patch("_flatpak_nuget_hash.repo_root", return_value=self.root)

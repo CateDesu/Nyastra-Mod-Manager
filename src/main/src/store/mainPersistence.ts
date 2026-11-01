@@ -70,7 +70,7 @@ async function initQuerySystem(levelPersistor: LevelPersist): Promise<void> {
   const queriesDir = path.join(getVortexPath("base"), "queries");
   let queries: ParsedQuery[];
   try {
-    queries = parseAllQueries(queriesDir);
+    queries = parseAllQueries(queriesDir, levelPersistor.alias);
   } catch (err) {
     log("warn", "No query files found or parse error", {
       dir: queriesDir,

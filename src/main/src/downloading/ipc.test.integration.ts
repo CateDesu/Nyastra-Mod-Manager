@@ -1,4 +1,13 @@
-import { access, mkdtemp, readFile, readdir, readlink, rm, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdtemp,
+  readFile,
+  readdir,
+  readlink,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -27,7 +36,7 @@ const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> =>
 
 it("cancels a queued transfer without waiting for another transfer's slot", async () => {
   const server = await createTestServer();
-  const directory = await mkdtemp(path.join(tmpdir(), "nyastra-queued-cancel-"));
+  const directory = await realpath(await mkdtemp(path.join(tmpdir(), "nyastra-queued-cancel-")));
   let release: () => void = () => undefined;
   const gate = new Promise<void>((resolve) => {
     release = resolve;
@@ -69,7 +78,7 @@ it("cancels a queued transfer without waiting for another transfer's slot", asyn
 
 it("waits for a paused transfer to close its real file before cancellation responds", async () => {
   const server = await createTestServer();
-  const directory = await mkdtemp(path.join(tmpdir(), "nyastra-pausing-cancel-"));
+  const directory = await realpath(await mkdtemp(path.join(tmpdir(), "nyastra-pausing-cancel-")));
   const destination = path.join(directory, "partial");
   const route = server.route(serveFile({ body: Buffer.alloc(4096), acceptRanges: true }));
   const manager = new DownloadManager({ concurrency: 1, bytesPerSecond: 1024 });
@@ -116,7 +125,7 @@ it("waits for a paused transfer to close its real file before cancellation respo
 for (const paused of [false, true]) {
   it(`cancellation releases only an active transfer's partial file with paused=${paused}`, async () => {
     const server = await createTestServer();
-    const directory = await mkdtemp(path.join(tmpdir(), "nyastra-cancel-ipc-"));
+    const directory = await realpath(await mkdtemp(path.join(tmpdir(), "nyastra-cancel-ipc-")));
     const destination = path.join(directory, "partial");
     const body = Buffer.alloc(256 * 1024, 0x61);
     let release: () => void = () => undefined;
@@ -163,7 +172,7 @@ for (const paused of [false, true]) {
 for (const chunked of [false, true]) {
   it(`preserves resolved headers and endpoints across a serialized checkpoint with chunked=${chunked}`, async () => {
     const server = await createTestServer();
-    const directory = await mkdtemp(path.join(tmpdir(), "nyastra-download-ipc-"));
+    const directory = await realpath(await mkdtemp(path.join(tmpdir(), "nyastra-download-ipc-")));
     const body = Buffer.alloc(chunked ? 12 * 1024 * 1024 : 256 * 1024, 0x61);
     const destination = path.join(directory, "archive");
     const referer = "https://mods.example/download";
@@ -259,7 +268,9 @@ for (const chunked of [false, true]) {
 
 it("resumes a persisted checkpoint from before resolved endpoints were stored", async () => {
   const server = await createTestServer();
-  const directory = await mkdtemp(path.join(tmpdir(), "nyastra-legacy-checkpoint-"));
+  const directory = await realpath(
+    await mkdtemp(path.join(tmpdir(), "nyastra-legacy-checkpoint-")),
+  );
   const body = Buffer.alloc(8192, 0x62);
   const route = server.route(serveFile({ body, acceptRanges: true }));
   const destination = path.join(directory, "archive");

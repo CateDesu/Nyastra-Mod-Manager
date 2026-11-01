@@ -7,6 +7,7 @@ import type { IHarnessFixtures } from "@/test-utils/harnessTest";
 import { test } from "@/test-utils/harnessTest";
 import { ProcessCanceled } from "@/util/CustomErrors";
 
+import { setOAuthCredentials } from "./actions/account";
 import { MEMBERSHIP_ROLE, updateToken } from "./util";
 
 /**
@@ -68,6 +69,17 @@ const deadRefreshToken = () =>
     "The provided authorization grant is invalid, expired, revoked, does not match the redirection URI used in the authorization request, or was issued to another client.",
   );
 
+const validateStoredToken = (
+  harness: ReturnType<IHarnessFixtures["makeApi"]>,
+  nexus: never,
+  value = credentials(),
+) => {
+  harness.api.store.dispatch(
+    setOAuthCredentials(value.token, value.refreshToken, value.fingerprint),
+  );
+  return updateToken(harness.api, nexus, value);
+};
+
 const storedCredentials = (harness: ReturnType<IHarnessFixtures["makeApi"]>) =>
   harness.getState().confidential.account["nexus"].OAuthCredentials;
 
@@ -83,7 +95,7 @@ describe("updateToken", () => {
       const harness = makeApi({ userInfo: makeUserInfo({ name: "Ada" }) });
       const { nexus } = makeNexus(refused(statusCode));
 
-      await updateToken(harness.api, nexus, credentials());
+      await validateStoredToken(harness, nexus);
 
       expect(harness.getState().persistent["nexus"].userInfo).toBeUndefined();
       expect(storedCredentials(harness)).toBeUndefined();
@@ -96,7 +108,7 @@ describe("updateToken", () => {
       const harness = makeApi({ userInfo: makeUserInfo({ name: "Ada" }) });
       const { nexus } = makeNexus(deadRefreshToken());
 
-      await updateToken(harness.api, nexus, credentials());
+      await validateStoredToken(harness, nexus);
 
       expect(harness.getState().persistent["nexus"].userInfo).toBeUndefined();
       expect(storedCredentials(harness)).toBeUndefined();
@@ -112,7 +124,7 @@ describe("updateToken", () => {
       const harness = makeApi({ userInfo: makeUserInfo({ name: "Ada" }) });
       const { nexus } = makeNexus(new ProcessCanceled("network disconnected: getUserInfo"));
 
-      await updateToken(harness.api, nexus, credentials());
+      await validateStoredToken(harness, nexus);
 
       expect(harness.getState().persistent["nexus"].userInfo?.name).toBe("Ada");
       expect(harness.errorNotifications).toEqual([]);
@@ -122,7 +134,7 @@ describe("updateToken", () => {
       const harness = makeApi({ userInfo: makeUserInfo({ name: "Ada" }) });
       const { nexus } = makeNexus(refused(500));
 
-      await updateToken(harness.api, nexus, credentials());
+      await validateStoredToken(harness, nexus);
 
       expect(harness.getState().persistent["nexus"].userInfo?.name).toBe("Ada");
       expect(storedCredentials(harness)).toBeDefined();
@@ -138,7 +150,7 @@ describe("updateToken", () => {
       });
       const { nexus } = makeNexus(socketError);
 
-      await updateToken(harness.api, nexus, credentials([MEMBERSHIP_ROLE.premium]));
+      await validateStoredToken(harness, nexus, credentials([MEMBERSHIP_ROLE.premium]));
 
       expect(harness.getState().persistent["nexus"].userInfo).toMatchObject({
         name: "Ada",

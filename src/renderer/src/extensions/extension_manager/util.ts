@@ -18,7 +18,7 @@ import { downloadPathForGame } from "../download_management/selectors";
 import { SITE_ID } from "../gamemode_management/constants";
 import { nexusGamesProm } from "../nexus_integration/util";
 import { dedupeGameExtensions, fetchExtensionList } from "./availableExtensions";
-import installExtension from "./installExtension";
+import installExtension, { refreshEntry, type ExtensionRefresh } from "./installExtension";
 import { findInCatalog } from "./queries";
 
 let availableExtensionsCache: Promise<IAvailableExtension[]> | undefined;
@@ -77,6 +77,7 @@ async function doFetchAvailableExtensions(api: IExtensionApi): Promise<IAvailabl
 export async function downloadAndInstallExtension(
   api: IExtensionApi,
   ext: IExtensionDownloadInfo,
+  refresh?: ExtensionRefresh,
 ): Promise<boolean> {
   try {
     if (ext.modId === undefined) {
@@ -99,6 +100,10 @@ export async function downloadAndInstallExtension(
     }
 
     const downloadIds = await downloadFromNexus(api, ext, fileId);
+    if (refresh !== undefined) {
+      const live = refreshEntry(api, refresh);
+      if (live === undefined || live.remove || live.enabled === false) return false;
+    }
     if (downloadIds.length === 0) {
       throw new ProcessCanceled("No download found");
     }
@@ -113,6 +118,7 @@ export async function downloadAndInstallExtension(
 
     await installExtension(api, path.join(downloadPath, download.localPath), {
       catalogEntry,
+      refresh,
       analytics: {
         source: "nexusmods",
         gameDomain: catalogEntry?.gameDomain,

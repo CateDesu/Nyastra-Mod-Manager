@@ -18,7 +18,7 @@ describe("NodeFileSystemImpl", () => {
   let fs: NodeFileSystemImpl;
 
   beforeEach(async () => {
-    root = await nodeFs.mkdtemp(join(tmpdir(), "node-fs-"));
+    root = await nodeFs.realpath(await nodeFs.mkdtemp(join(tmpdir(), "node-fs-")));
     rootQP = nativeToQP(root);
     fs = new NodeFileSystemImpl(
       new NodeFileSystemBackendImpl(),

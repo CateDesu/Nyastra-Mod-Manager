@@ -54,9 +54,9 @@ const newParser = () => new IniParser(new WinapiFormat());
  * backup of it. Both matter: the menu mod regenerates the live file from the
  * backup, so fixing only the live copy gets reverted on the next deployment.
  */
-async function enableLocalMods(): Promise<void> {
+async function enableLocalMods(api: types.IExtensionApi): Promise<void> {
   const parser = newParser();
-  const livePath = getDx12UserSettingsPath();
+  const livePath = getDx12UserSettingsPath(api);
 
   for (const target of [livePath, livePath + VORTEX_BACKUP_TAG]) {
     try {
@@ -97,8 +97,9 @@ export const localModsEnabledCheck: types.IHealthCheck = {
 
     let state: ContentManagerState;
     try {
-      const doc =
-        await newParser().read<Record<string, Record<string, unknown>>>(getDx12UserSettingsPath());
+      const doc = await newParser().read<Record<string, Record<string, unknown>>>(
+        getDx12UserSettingsPath(api),
+      );
       state = evaluateContentManagerSettings(doc.data);
     } catch {
       return makeResult(
@@ -137,7 +138,7 @@ export const localModsEnabledCheck: types.IHealthCheck = {
         return passed(LOCAL_MODS_CHECK_ID, "Local mods are enabled", startedAt);
     }
   },
-  fix: () => enableLocalMods(),
+  fix: (api) => enableLocalMods(api),
 };
 
 /**

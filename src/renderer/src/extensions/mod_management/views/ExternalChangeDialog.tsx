@@ -20,7 +20,7 @@ import type { ITableAttribute } from "../../../types/ITableAttribute";
 import getVortexPath from "../../../util/getVortexPath";
 import { setdefault } from "../../../util/util";
 import { confirmExternalChanges, setExternalChangeAction } from "../actions/session";
-import type { FileAction, IFileEntry } from "../types/IFileEntry";
+import type { FileAction, IFileEntry, IFileEntryIdentity } from "../types/IFileEntry";
 
 export interface IBaseProps {}
 
@@ -29,7 +29,7 @@ interface IConnectedProps {
 }
 
 interface IActionProps {
-  onChangeAction: (fileNames: string[], action: FileAction) => void;
+  onChangeAction: (files: IFileEntryIdentity[], action: FileAction) => void;
   onClose: (changes: IFileEntry[], cancel: boolean) => void;
 }
 
@@ -96,22 +96,24 @@ interface ISourceMap {
 }
 
 function bySource(prev: ISourceMap, value: IFileEntry): ISourceMap {
-  setdefault(prev, value.source, []).push(value);
+  setdefault(prev, JSON.stringify([value.modTypeId, value.source]), []).push(value);
   return prev;
 }
 
 interface ISourceEntry {
   id: string;
-  filePaths: string[];
+  source: string;
+  files: IFileEntryIdentity[];
   action: FileAction;
   type: "refchange" | "valchange" | "deleted" | "srcdeleted";
   modTypeId: string;
 }
 
-function transform(source: string, files: IFileEntry[]): ISourceEntry {
+function transform(id: string, files: IFileEntry[]): ISourceEntry {
   return {
-    id: source,
-    filePaths: files.map((file) => file.filePath),
+    id,
+    source: files[0].source,
+    files,
     action: files[0].action,
     modTypeId: files[0].modTypeId,
     type: files[0].type,
@@ -402,7 +404,7 @@ class ExternalChangeDialog extends ComponentEx<IProps, IComponentState> {
             id: "name",
             name: "Mod Name",
             description: "Mod Name",
-            calc: (source: ISourceEntry) => source.id,
+            calc: (source: ISourceEntry) => source.source,
             placement: "table",
             edit: {},
           },
@@ -412,7 +414,7 @@ class ExternalChangeDialog extends ComponentEx<IProps, IComponentState> {
             description: "Number of files in this mod that were changed",
             calc: (source: ISourceEntry, t: TFunction) =>
               t("{{count}} file", {
-                count: source.filePaths !== undefined ? source.filePaths.length : 0,
+                count: source.files !== undefined ? source.files.length : 0,
               }),
             placement: "table",
             edit: {},
@@ -441,13 +443,8 @@ class ExternalChangeDialog extends ComponentEx<IProps, IComponentState> {
 
                   newAction = typeActions[(idx + 1) % typeActions.length].key as FileAction;
                 }
-                // TODO: the way source is created, filePaths should never be undefined and
-                //   I wasn't able to reproduce a case where it was, but we did get a crash
-                //   report where it was.
-                if (source.filePaths !== undefined) {
-                  source.filePaths.forEach((filePath) =>
-                    this.props.onChangeAction([filePath], newAction),
-                  );
+                if (source.files !== undefined) {
+                  this.props.onChangeAction(source.files, newAction);
                 }
               },
             },
@@ -516,11 +513,11 @@ class ExternalChangeDialog extends ComponentEx<IProps, IComponentState> {
                 }
                 if (value === undefined) {
                   this.props.onChangeAction(
-                    [file.filePath],
+                    [file],
                     typeActions[(idx + 1) % typeActions.length].key as FileAction,
                   );
                 } else {
-                  this.props.onChangeAction([file.filePath], value);
+                  this.props.onChangeAction([file], value);
                 }
               },
             },
@@ -538,9 +535,7 @@ class ExternalChangeDialog extends ComponentEx<IProps, IComponentState> {
   private setAllFunc = (changeType: string, action: FileAction) => {
     const { changes, onChangeAction } = this.props;
     onChangeAction(
-      changes
-        .filter((entry) => (entry.type as string) === changeType)
-        .map((entry) => entry.filePath),
+      changes.filter((entry) => (entry.type as string) === changeType),
       action,
     );
   };
@@ -585,8 +580,8 @@ function mapStateToProps(state: any): IConnectedProps {
 
 function mapDispatchToProps(dispatch: ThunkDispatch<any, null, Redux.Action>): IActionProps {
   return {
-    onChangeAction: (fileName: string[], action: FileAction) =>
-      dispatch(setExternalChangeAction(fileName, action)),
+    onChangeAction: (files: IFileEntryIdentity[], action: FileAction) =>
+      dispatch(setExternalChangeAction(files, action)),
     onClose: (changes: IFileEntry[], cancel: boolean) =>
       dispatch(confirmExternalChanges(changes, cancel)),
   };

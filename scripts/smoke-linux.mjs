@@ -61,7 +61,8 @@ try {
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  if (!ready || exited || fatal.test(output))
+  const finalLog = await readFile(path.join(profile, "vortex.log"), "utf8").catch(() => "");
+  if (!ready || exited || fatal.test(finalLog + output))
     throw new Error("Packaged program did not finish startup");
   console.log("Packaged Linux startup passed with a disposable profile.");
 } catch (error) {

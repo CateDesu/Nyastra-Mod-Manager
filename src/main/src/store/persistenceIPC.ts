@@ -54,6 +54,7 @@ export function setupPersistenceIPC(persistor: ReduxPersistorIPC): void {
   // Auto-discovers all hives in the database and registers them
   betterIpcMain.handle("persist:get-hydration", async (_event) => {
     log("debug", "Renderer requested hydration data");
+    await persistor.finalizeWrite();
     // Auto-discover and register all hives found in the database
     const data = await registerAllPersistedHives();
     log("debug", "Sending hydration data", {

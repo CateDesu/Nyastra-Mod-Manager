@@ -1,3 +1,4 @@
+import type * as NodeFs from "node:fs";
 import * as path from "path";
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -39,12 +40,27 @@ const diskCheckResults: Record<string, { free: number }> = {
   "": { free: 42 },
 };
 
-vi.mock("fs", () => ({
-  statfsSync: (checkPath: string) => {
-    const result = diskCheckResults[checkPath] ?? diskCheckResults[""];
-    return { bavail: result.free, bsize: 1 };
-  },
-}));
+vi.mock("fs", async () => {
+  const { constants } = await vi.importActual<typeof NodeFs>("node:fs");
+  return {
+    constants,
+    promises: {
+      copyFile: vi.fn(async (source: string, dest: string, flags: number) => {
+        const info = getFake(source);
+        if (info.fail !== undefined) throw info.fail;
+        if (flags !== constants.COPYFILE_EXCL) throw new Error("Expected exclusive copy");
+        if (getFake(dest) !== undefined) {
+          throw Object.assign(new Error("file exists"), { code: "EEXIST" });
+        }
+        insertFake(dest, { ...info, type: "copied" });
+      }),
+    },
+    statfsSync: (checkPath: string) => {
+      const result = diskCheckResults[checkPath] ?? diskCheckResults[""];
+      return { bavail: result.free, bsize: 1 };
+    },
+  };
+});
 
 type FakeInfo = Record<string, unknown>;
 let fakeFS: Record<string, unknown> = {};
@@ -87,6 +103,18 @@ vi.mock("./fs", async () => {
   const Bluebird = (await import("bluebird")).default;
 
   return {
+    lstatAsync: (filePath: string) =>
+      Bluebird.try(() => {
+        const info = getFake(filePath);
+        if (info === undefined) {
+          throw Object.assign(new Error("file not found"), { code: "ENOENT" });
+        }
+        return {
+          isSymbolicLink: () => false,
+          isFile: () => filePath.indexOf(".") !== -1,
+          isDirectory: () => filePath.indexOf(".") === -1,
+        };
+      }),
     statAsync: (filePath: string) => {
       const dev = filePath.startsWith(path.sep + "drivea") ? 1 : 2;
       return Bluebird.resolve({

@@ -528,9 +528,9 @@ describe("download finalization", () => {
         h.events.emit("remove-download", h.downloadId, () => resolve()),
       );
       if (releaseBeforeRemoval) release();
-      await removed;
-      if (!releaseBeforeRemoval) release();
       expect(await resumed).toBeInstanceOf(Error);
+      if (!releaseBeforeRemoval) release();
+      await removed;
       expect(h.getState().persistent.downloads.files[h.downloadId]).toBeUndefined();
       await vi.advanceTimersByTimeAsync(250);
       expect(window.api.downloader.cancel).toHaveBeenCalledWith(h.downloadId);
@@ -547,10 +547,12 @@ describe("download finalization", () => {
         const h = makeDownloadAdapter({ download: { state: "paused" } });
         let downloadId = h.downloadId;
         let originalCallback: Mock | undefined;
+        let originalCompletion: Promise<{ err: Error | null; id?: string }> | undefined;
         if (hasOriginalCallback) {
           const started = await startFresh(h, "always");
           downloadId = started.downloadId;
           originalCallback = started.callbackSpy;
+          originalCompletion = started.callback;
           await writeFile(started.temporary, "partial");
           window.api.downloader.pause = vi.fn().mockResolvedValue({
             downloadId,
@@ -575,18 +577,36 @@ describe("download finalization", () => {
         const callbacks = [vi.fn(), vi.fn()];
         const finished = vi.fn();
         h.events.on("did-finish-download", finished);
-        h.events.emit("resume-download", downloadId, callbacks[0]);
+        const resume = (callback: Mock) =>
+          new Promise<Error | null>((resolve) =>
+            h.events.emit("resume-download", downloadId, (error) => {
+              callback(error);
+              resolve(error);
+            }),
+          );
+        const first = resume(callbacks[0]);
         await entered.promise;
-        h.events.emit("resume-download", downloadId, callbacks[1]);
-        const removed = await new Promise<Error | null>((resolve) =>
-          h.events.emit("remove-download", downloadId, resolve),
+        const second = resume(callbacks[1]);
+        const removalCallback = vi.fn();
+        const removal = new Promise<Error | null>((resolve) =>
+          h.events.emit("remove-download", downloadId, (error) => {
+            removalCallback(error);
+            resolve(error);
+          }),
         );
+        await Promise.all([first, second]);
+        const callsBeforeResolution = removalCallback.mock.calls.length;
+        const lateError = new Error("resolver failed after removal");
+        if (resolverSucceeds) resolver.resolve({ downloadId });
+        else resolver.reject(lateError);
+        const removed = await removal;
+        await originalCompletion;
         const callsAtRemoval = callbacks.map((callback) => callback.mock.calls.length);
         const originalCallsAtRemoval = originalCallback?.mock.calls.length;
-        if (resolverSucceeds) resolver.resolve({ downloadId });
-        else resolver.reject(new Error("resolver failed after removal"));
         await vi.advanceTimersByTimeAsync(250);
-        expect(removed).toBeNull();
+        expect(callsBeforeResolution).toBe(0);
+        expect(removed).toBe(resolverSucceeds ? null : lateError);
+        expect(removalCallback).toHaveBeenCalledExactlyOnceWith(removed);
         expect(callsAtRemoval).toEqual([1, 1]);
         for (const callback of callbacks) {
           expect(callback).toHaveBeenCalledExactlyOnceWith(expect.any(UserCanceled));
@@ -594,11 +614,19 @@ describe("download finalization", () => {
         if (originalCallback !== undefined) {
           expect(originalCallsAtRemoval).toBe(1);
           expect(originalCallback).toHaveBeenCalledExactlyOnceWith(
-            expect.any(UserCanceled),
+            resolverSucceeds ? expect.any(UserCanceled) : lateError,
             downloadId,
           );
         }
         expect(window.api.downloader.cancel).toHaveBeenCalledTimes(resolverSucceeds ? 1 : 0);
+        if (!resolverSucceeds) {
+          expect(h.getState().persistent.downloads.files[downloadId]).toBeDefined();
+          expect(
+            await new Promise<Error | null>((resolve) =>
+              h.events.emit("remove-download", downloadId, resolve),
+            ),
+          ).toBeNull();
+        }
         expect(h.getState().persistent.downloads.files[downloadId]).toBeUndefined();
         expect(h.getStates).not.toHaveBeenCalled();
         expect(finished).not.toHaveBeenCalled();
@@ -631,17 +659,19 @@ describe("download finalization", () => {
     h.events.emit("resume-download", started.downloadId, resumed);
     await entered.promise;
     await mkdir(started.temporary);
-    const error = await new Promise<Error | null>((resolve) =>
+    const removal = new Promise<Error | null>((resolve) =>
       h.events.emit("remove-download", started.downloadId, resolve),
     );
-    const originalAtRemoval = started.callbackSpy.mock.calls.slice();
     const retry = () =>
       new Promise<Error | null>((resolve) =>
         h.events.emit("resume-download", started.downloadId, resolve),
       );
     const retryWhileResolving = await retry();
-    await rm(started.temporary, { recursive: true });
     resolver.resolve({ downloadId: started.downloadId });
+    const error = await removal;
+    expect((await started.callback).err).toBe(error);
+    const originalAtRemoval = started.callbackSpy.mock.calls.slice();
+    await rm(started.temporary, { recursive: true });
     await vi.advanceTimersByTimeAsync(250);
     expect(error).toBeInstanceOf(Error);
     expect(error).not.toBeInstanceOf(UserCanceled);
@@ -833,24 +863,41 @@ describe("download finalization", () => {
         },
       });
       let release: () => void = () => undefined;
+      const entered = Promise.withResolvers<void>();
+      const canceled = Promise.withResolvers<void>();
+      (window.api.downloader.cancel as Mock).mockImplementation(async () => {
+        canceled.resolve();
+      });
       h.resume.mockImplementation(
         () =>
           new Promise<void>((resolve) => {
             release = resolve;
+            entered.resolve();
           }),
       );
+      const resumeCallback = vi.fn();
       const resumed = new Promise<Error | null>((resolve) =>
-        h.events.emit("resume-download", h.downloadId, resolve),
+        h.events.emit("resume-download", h.downloadId, (error) => {
+          resumeCallback(error);
+          resolve(error);
+        }),
       );
-      await vi.advanceTimersByTimeAsync(0);
-      const removed = new Promise<void>((resolve) =>
-        h.events.emit("remove-download", h.downloadId, () => resolve()),
-      );
+      await entered.promise;
       if (releaseBeforeRemoval) release();
-      await removed;
+      const removalCallback = vi.fn();
+      const removed = new Promise<void>((resolve) =>
+        h.events.emit("remove-download", h.downloadId, (error) => {
+          removalCallback(error);
+          resolve();
+        }),
+      );
       if (!releaseBeforeRemoval) release();
+      await canceled.promise;
+      await removed;
       expect(await resumed).toBeInstanceOf(Error);
-      expect(window.api.downloader.cancel).toHaveBeenCalledWith(h.downloadId);
+      expect(resumeCallback).toHaveBeenCalledExactlyOnceWith(expect.any(Error));
+      expect(removalCallback).toHaveBeenCalledExactlyOnceWith(null);
+      expect(window.api.downloader.cancel).toHaveBeenCalledExactlyOnceWith(h.downloadId);
       expect(h.getState().persistent.downloads.files[h.downloadId]).toBeUndefined();
       await vi.advanceTimersByTimeAsync(250);
       expect(h.getStates).not.toHaveBeenCalled();

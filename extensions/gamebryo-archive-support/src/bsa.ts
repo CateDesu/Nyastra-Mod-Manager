@@ -4,6 +4,8 @@ import { inflateSync } from "zlib";
 
 import * as lz4js from "lz4js";
 
+import { archiveOutputPath } from "./archivePath";
+
 // LZ4 frame magic number
 const LZ4_FRAME_MAGIC = 0x184d2204;
 
@@ -242,7 +244,7 @@ export class BSAArchive {
           offset += 1 + nameLen;
         }
 
-        const outFile = path.join(outputPath, file.fullPath);
+        const outFile = archiveOutputPath(outputPath, file.fullPath);
         await fs.promises.mkdir(path.dirname(outFile), { recursive: true });
 
         if (this.isCompressed(file)) {

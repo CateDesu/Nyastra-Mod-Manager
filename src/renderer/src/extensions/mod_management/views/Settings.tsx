@@ -53,7 +53,13 @@ import { showError } from "../../../util/message";
 import opn from "../../../util/opn";
 import * as selectors from "../../../util/selectors";
 import { getSafe } from "../../../util/storeHelper";
-import { cleanFailedTransfer, testPathTransfer, transferPath } from "../../../util/transferPath";
+import {
+  cleanFailedStagingTransfer,
+  prepareStagingTransfer,
+  STAGING_TRANSFER_TAG,
+  testPathTransfer,
+  transferPath,
+} from "../../../util/transferPath";
 import { ciEqual, isChildPath, isPathValid, isReservedDirectory } from "../../../util/util";
 import { currentGame, currentGameDiscovery } from "../../gamemode_management/selectors";
 import type { IDiscoveryResult } from "../../gamemode_management/types/IDiscoveryResult";
@@ -307,7 +313,7 @@ class Settings extends ComponentEx<IProps, IComponentState> {
     );
   }
 
-  private transferPath() {
+  private transferPath(beforeRemoveSource: () => PromiseLike<void>) {
     const { t, gameMode, onSetTransfer, onShowDialog } = this.props;
     const oldPath = getInstallPath(this.props.installPath, gameMode);
     const newPath = getInstallPath(this.state.installPath, gameMode);
@@ -382,6 +388,7 @@ class Settings extends ComponentEx<IProps, IComponentState> {
                     this.nextState.progressFile = path.basename(from);
                   }
                 },
+                beforeRemoveSource,
               ).catch((err) => {
                 if (err?.code === "ENOENT") {
                   return didReset ? Promise.resolve() : Promise.reject(err);
@@ -532,10 +539,17 @@ class Settings extends ComponentEx<IProps, IComponentState> {
 
     this.nextState.progress = 0;
     this.nextState.busy = t("Calculating required disk space");
-    let deleteOldDestination = true;
+    let deleteOldDestination = false;
     return testPathTransfer(oldInstallPath, newInstallPath)
       .then(() => fs.ensureDirAsync(newInstallPath))
       .then(() => this.checkTargetEmpty(oldInstallPath, newInstallPath))
+      .then(() =>
+        oldInstallPath !== newInstallPath
+          ? prepareStagingTransfer(oldInstallPath, newInstallPath).then((owned) => {
+              deleteOldDestination = owned;
+            })
+          : undefined,
+      )
       .then(() => {
         this.nextState.busy = t("Purging previous deployment");
         return doPurge();
@@ -543,12 +557,25 @@ class Settings extends ComponentEx<IProps, IComponentState> {
       .then(() => {
         if (oldInstallPath !== newInstallPath) {
           this.nextState.busy = t("Moving mod staging folder");
-          return this.transferPath();
+          // Disarm rollback before removing any source files.
+          return this.transferPath(() =>
+            deleteOldDestination
+              ? fs.removeAsync(path.join(newInstallPath, STAGING_TRANSFER_TAG)).then(() => {
+                  deleteOldDestination = false;
+                })
+              : Promise.resolve(),
+          );
         } else {
           return Promise.resolve();
         }
       })
       .then(() => {
+        return deleteOldDestination
+          ? fs.removeAsync(path.join(newInstallPath, STAGING_TRANSFER_TAG))
+          : undefined;
+      })
+      .then(() => {
+        deleteOldDestination = false;
         onSetTransfer(gameMode, undefined);
         onSetInstallPath(gameMode, this.state.installPath);
       })
@@ -658,10 +685,12 @@ class Settings extends ComponentEx<IProps, IComponentState> {
         //  if it is - that means that the user has cancelled the transfer,
         //  we need to cleanup.
         const pendingTransfer: string[] = ["persistent", "transactions", "transfer", gameMode];
-        if (getSafe(state, pendingTransfer, undefined) !== undefined && deleteOldDestination) {
-          return cleanFailedTransfer(newInstallPath)
+        if (deleteOldDestination) {
+          return cleanFailedStagingTransfer(oldInstallPath, newInstallPath)
             .then(() => {
-              onSetTransfer(gameMode, undefined);
+              if (getSafe(state, pendingTransfer, undefined) === newInstallPath) {
+                onSetTransfer(gameMode, undefined);
+              }
               this.nextState.busy = undefined;
             })
             .catch((err) => {
@@ -684,6 +713,9 @@ class Settings extends ComponentEx<IProps, IComponentState> {
               }
             });
         } else {
+          if (getSafe(state, pendingTransfer, undefined) === newInstallPath) {
+            onSetTransfer(gameMode, undefined);
+          }
           this.nextState.busy = undefined;
         }
       });
@@ -1025,7 +1057,7 @@ class Settings extends ComponentEx<IProps, IComponentState> {
     const normalize = await getNormalizeFunc(
       getInstallPath(this.state.installPath, this.props.gameMode),
     );
-    this.applyPaths(normalize);
+    return this.applyPaths(normalize);
   };
 
   private suggestPath = async () => {

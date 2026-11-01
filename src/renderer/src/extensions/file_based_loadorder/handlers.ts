@@ -42,6 +42,47 @@ type PrimaryLoadOrders = Record<string, LoadOrder | undefined>;
 // keyed by profile id
 type Profiles = Record<string, IProfile>;
 
+// Extensions hide their file paths. A game's orders share a queue across all its profiles.
+const gameQueues = new WeakMap<IExtensionApi, Map<string, Promise<void>>>();
+const savingProfiles = new WeakMap<IExtensionApi, Set<string>>();
+
+function inGameQueue<T>(
+  api: IExtensionApi,
+  gameId: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  let queues = gameQueues.get(api);
+  if (queues === undefined) {
+    queues = new Map();
+    gameQueues.set(api, queues);
+  }
+  const previous = queues.get(gameId);
+  let release: () => void;
+  const tail = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  queues.set(gameId, tail);
+  const run = async () => {
+    try {
+      return await operation();
+    } finally {
+      if (queues.get(gameId) === tail) queues.delete(gameId);
+      release();
+    }
+  };
+  return previous === undefined ? run() : previous.then(run);
+}
+
+function ownsGameFile(api: IExtensionApi, profile: IProfile): boolean {
+  const state = api.getState();
+  return (
+    activeProfile(state)?.id === profile.id &&
+    profileById(state, profile.id)?.gameId === profile.gameId &&
+    !savingProfiles.get(api)?.has(profile.id) &&
+    !isInstallationActive(state)
+  );
+}
+
 // A load order the game currently wants managed.
 export const isInUse = (gameEntry: IRegisteredLoadOrder): boolean =>
   gameEntry.condition?.() !== false;
@@ -125,11 +166,14 @@ export async function validateLoadOrder(
     previousLoadOrder,
     loadOrder,
   );
+  if (profileById(api.getState(), profile.id)?.gameId !== profile.gameId) return undefined;
   assertValidationResult(validationResult);
   if (validationResult !== undefined) {
     throw new LoadOrderValidationError(validationResult, loadOrder);
   }
-  api.store.dispatch(setValidationResult(profile.id, undefined, gameEntry.loadOrderId));
+  if (loadOrderForProfile(api.getState(), profile.id, loadOrderId) === loadOrder) {
+    api.store.dispatch(setValidationResult(profile.id, undefined, gameEntry.loadOrderId));
+  }
   return undefined;
 }
 
@@ -166,6 +210,7 @@ async function handleLoadOrderChange(
     if (holdAwaitsMods(held) && holdCanRestore(held, nextLoadOrder)) {
       // deferred past the watcher reporting this change; the restored order comes back through it
       await Promise.resolve();
+      if (!ownsGameFile(api, profile)) return;
       restoreHeldLoadOrder(api, profile.id, gameEntry, held, nextLoadOrder);
     }
     return;
@@ -176,10 +221,21 @@ async function handleLoadOrderChange(
   try {
     if (changed) {
       // the only place a load order change is written to the game
-      await gameEntry.serializeLoadOrder(nextLoadOrder, previousLoadOrder);
+      await inGameQueue(api, gameEntry.gameId, () =>
+        ownsGameFile(api, profile) && isInUse(gameEntry)
+          ? gameEntry.serializeLoadOrder(nextLoadOrder, previousLoadOrder)
+          : Promise.resolve(),
+      );
     }
+    if (!ownsGameFile(api, profile)) return;
     await validateLoadOrder(api, registry, profile, nextLoadOrder, gameEntry.loadOrderId);
   } catch (err) {
+    if (!ownsGameFile(api, profile)) return;
+    if (
+      err instanceof LoadOrderValidationError &&
+      loadOrderForProfile(api.getState(), profile.id, gameEntry.loadOrderId) !== nextLoadOrder
+    )
+      return;
     return reportError(api, gameEntry, err);
   }
 }
@@ -207,8 +263,17 @@ async function readActiveLoadOrdersFromGame(
 ): Promise<void> {
   const active = activeLoadOrders(api, registry);
   for (const gameEntry of active?.gameEntries ?? []) {
+    const stored = loadOrderForProfile(api.getState(), active.profile.id, gameEntry.loadOrderId);
     try {
-      dispatchLoadOrder(api, active.profile.id, gameEntry, await gameEntry.deserializeLoadOrder());
+      await inGameQueue(api, gameEntry.gameId, async () => {
+        const current = () =>
+          ownsGameFile(api, active.profile) &&
+          isInUse(gameEntry) &&
+          loadOrderForProfile(api.getState(), active.profile.id, gameEntry.loadOrderId) === stored;
+        if (!current()) return;
+        const fromGame = await gameEntry.deserializeLoadOrder();
+        if (current()) dispatchLoadOrder(api, active.profile.id, gameEntry, fromGame);
+      });
     } catch {
       // nop - any errors would've been reported by handleLoadOrderChange.
     }
@@ -239,6 +304,7 @@ async function onLoadOrdersChanged<Slice>(
 ): Promise<void> {
   const active = activeLoadOrders(api, registry);
   const gameEntries = active?.gameEntries.filter((entry) => entry.isPrimary === holdsPrimary);
+  const pending: Promise<void>[] = [];
   for (const gameEntry of gameEntries ?? []) {
     const previousLoadOrder = slotOf(previous, active.profile.id, gameEntry);
     const currentLoadOrder = slotOf(current, active.profile.id, gameEntry);
@@ -246,15 +312,18 @@ async function onLoadOrdersChanged<Slice>(
     if (previousLoadOrder === currentLoadOrder || !Array.isArray(currentLoadOrder)) {
       continue;
     }
-    await handleLoadOrderChange(
-      api,
-      registry,
-      active.profile,
-      gameEntry,
-      Array.isArray(previousLoadOrder) ? previousLoadOrder : [],
-      currentLoadOrder,
+    pending.push(
+      handleLoadOrderChange(
+        api,
+        registry,
+        active.profile,
+        gameEntry,
+        Array.isArray(previousLoadOrder) ? previousLoadOrder : [],
+        currentLoadOrder,
+      ),
     );
   }
+  await Promise.all(pending);
 }
 
 async function onProfilesChanged(
@@ -304,25 +373,34 @@ async function reconcileProfileLoadOrders(
   }
   logUnclaimedPrimaryOrder(api, registry, profileId, profile.gameId);
   for (const gameEntry of registry.entries(profile.gameId).filter(isInUse)) {
+    const requestedOrder = loadOrderForProfile(api.getState(), profileId, gameEntry.loadOrderId);
     try {
-      const held = afterDeploy
-        ? loadOrderHeldForDeploy(api.getState(), profileId, gameEntry.loadOrderId)
-        : undefined;
-      const fromGame = await gameEntry.deserializeLoadOrder();
-      const mods = modsForGame(api.getState(), gameEntry.gameId);
-      if (held !== undefined && (holdCanRestore(held, fromGame) || holdIsStale(held, mods))) {
-        restoreHeldLoadOrder(api, profileId, gameEntry, held, fromGame);
-        continue;
-      }
-      const stored = held?.loadOrder ?? storedLoadOrder(api, profileId, gameEntry);
-      dispatchLoadOrder(
-        api,
-        profileId,
-        gameEntry,
-        afterDeploy
-          ? reconcileLoadOrder(stored, fromGame, mods)
-          : loadOrderToPersist(stored, fromGame),
-      );
+      await inGameQueue(api, gameEntry.gameId, async () => {
+        const current = () =>
+          ownsGameFile(api, profile) &&
+          isInUse(gameEntry) &&
+          loadOrderForProfile(api.getState(), profileId, gameEntry.loadOrderId) === requestedOrder;
+        if (!current()) return;
+        const held = afterDeploy
+          ? loadOrderHeldForDeploy(api.getState(), profileId, gameEntry.loadOrderId)
+          : undefined;
+        const fromGame = await gameEntry.deserializeLoadOrder();
+        if (!current()) return;
+        const mods = modsForGame(api.getState(), gameEntry.gameId);
+        if (held !== undefined && (holdCanRestore(held, fromGame) || holdIsStale(held, mods))) {
+          restoreHeldLoadOrder(api, profileId, gameEntry, held, fromGame);
+          return;
+        }
+        const stored = held?.loadOrder ?? storedLoadOrder(api, profileId, gameEntry);
+        dispatchLoadOrder(
+          api,
+          profileId,
+          gameEntry,
+          afterDeploy
+            ? reconcileLoadOrder(stored, fromGame, mods)
+            : loadOrderToPersist(stored, fromGame),
+        );
+      });
     } catch {
       // nop - any errors would've been reported by handleLoadOrderChange.
     }
@@ -396,11 +474,20 @@ async function onModsDidDeploy(
       continue;
     }
     try {
-      const fromGame = await gameEntry.deserializeLoadOrder();
-      const held = loadOrderHeldForDeploy(api.getState(), profileId, gameEntry.loadOrderId);
-      if (held !== undefined && holdCanRestore(held, fromGame)) {
-        restoreHeldLoadOrder(api, profileId, gameEntry, held, fromGame);
-      }
+      const requestedOrder = loadOrderForProfile(api.getState(), profileId, gameEntry.loadOrderId);
+      await inGameQueue(api, gameEntry.gameId, async () => {
+        const current = () =>
+          ownsGameFile(api, profile) &&
+          isInUse(gameEntry) &&
+          loadOrderForProfile(api.getState(), profileId, gameEntry.loadOrderId) === requestedOrder;
+        if (!current()) return;
+        const fromGame = await gameEntry.deserializeLoadOrder();
+        if (!current()) return;
+        const held = loadOrderHeldForDeploy(api.getState(), profileId, gameEntry.loadOrderId);
+        if (held !== undefined && holdCanRestore(held, fromGame)) {
+          restoreHeldLoadOrder(api, profileId, gameEntry, held, fromGame);
+        }
+      });
     } catch {
       // nop - any errors would've been reported by handleLoadOrderChange.
     }
@@ -421,15 +508,27 @@ export async function onStartUp(
     return undefined;
   }
   const stored = storedLoadOrder(api, profileId, gameEntry);
+  const requestedOrder = loadOrderForProfile(api.getState(), profileId, gameEntry.loadOrderId);
+  const profile = profileById(api.getState(), profileId);
   try {
-    const loadOrder = await gameEntry.deserializeLoadOrder();
-    const validationResult: IValidationResult = await gameEntry.validate(stored, loadOrder);
-    assertValidationResult(validationResult);
-    if (validationResult !== undefined) {
-      throw new LoadOrderValidationError(validationResult, loadOrder);
-    }
-    return loadOrder;
+    return await inGameQueue(api, gameEntry.gameId, async () => {
+      const current = () =>
+        profile?.gameId === gameId &&
+        ownsGameFile(api, profile) &&
+        loadOrderForProfile(api.getState(), profileId, gameEntry.loadOrderId) === requestedOrder;
+      if (!current()) return undefined;
+      const loadOrder = await gameEntry.deserializeLoadOrder();
+      if (!current()) return undefined;
+      const validationResult: IValidationResult = await gameEntry.validate(stored, loadOrder);
+      if (!current()) return undefined;
+      assertValidationResult(validationResult);
+      if (validationResult !== undefined) {
+        throw new LoadOrderValidationError(validationResult, loadOrder);
+      }
+      return loadOrder;
+    });
   } catch (err) {
+    if (profile === undefined || !ownsGameFile(api, profile)) return undefined;
     await reportError(api, gameEntry, err);
     if (err instanceof LoadOrderValidationError) {
       throw err;
@@ -442,10 +541,10 @@ export async function onStartUp(
 // purges, profile changes and closed tools, and writes a changed order to the game.
 export function registerLoadOrderHandlers(api: IExtensionApi, registry: LoadOrderRegistry): void {
   api.onStateChange(["session", "base", "toolsRunning"], (_previous, current) => {
-    void onToolsRunningChanged(api, registry, current as Record<string, unknown>);
+    return onToolsRunningChanged(api, registry, current as Record<string, unknown>);
   });
   api.onStateChange(["persistent", "loadOrder"], (previous, current) => {
-    void onLoadOrdersChanged(
+    return onLoadOrdersChanged(
       api,
       registry,
       true,
@@ -455,7 +554,7 @@ export function registerLoadOrderHandlers(api: IExtensionApi, registry: LoadOrde
     );
   });
   api.onStateChange(["persistent", "loadOrders"], (previous, current) => {
-    void onLoadOrdersChanged(
+    return onLoadOrdersChanged(
       api,
       registry,
       false,
@@ -465,8 +564,31 @@ export function registerLoadOrderHandlers(api: IExtensionApi, registry: LoadOrde
     );
   });
   api.onStateChange(["persistent", "profiles"], (previous, current) => {
-    void onProfilesChanged(api, registry, previous as Profiles, current as Profiles);
+    return onProfilesChanged(api, registry, previous as Profiles, current as Profiles);
   });
+  api.events.on("profile-will-change", (_profileId, enqueue, guardSnapshot) => {
+    const profile = activeProfile(api.getState());
+    if (profile === undefined) return;
+    if (guardSnapshot === undefined) {
+      enqueue(() => inGameQueue(api, profile.gameId, async () => undefined));
+      return;
+    }
+    let saving = savingProfiles.get(api);
+    if (saving === undefined) {
+      saving = new Set();
+      savingProfiles.set(api, saving);
+    }
+    guardSnapshot(
+      (save: () => PromiseLike<void>) =>
+        inGameQueue(api, profile.gameId, async () => {
+          // Later outgoing edits must not write across the saved snapshot.
+          saving.add(profile.id);
+          await save();
+        }),
+      () => saving.delete(profile.id),
+    );
+  });
+  api.events.on("profile-did-change", () => readActiveLoadOrdersFromGame(api, registry));
   api.onAsync<"will-remove-mods">("will-remove-mods", (gameId, vortexModIds, removeOptions) =>
     onWillRemoveMods(api, registry, gameId, vortexModIds, removeOptions),
   );
@@ -481,6 +603,6 @@ export function registerLoadOrderHandlers(api: IExtensionApi, registry: LoadOrde
     reconcileProfileLoadOrders(api, registry, profileId, false),
   );
   api.events.on<"mods-did-deploy">("mods-did-deploy", (profileId: string) => {
-    void onModsDidDeploy(api, registry, profileId);
+    return onModsDidDeploy(api, registry, profileId);
   });
 }

@@ -17,7 +17,7 @@ const ARG_COUNTS: Record<string, number> = {
   "--download": 1,
   "--install": 1,
   "--install-archive": 1,
-  "--start-minimized": 1,
+  "--start-minimized": 0,
   "--game": 1,
   "--profile": 1,
   "--get": 1,
@@ -114,7 +114,7 @@ const SKIP_ARGS: Record<string, number> = {
   "-d": 1,
   "--download": 1,
   "-i": 1,
-  "--start-minimized": 1,
+  "--start-minimized": 0,
   "--game": 1,
   "--profile": 1,
   "--install": 1,
@@ -125,17 +125,36 @@ const SKIP_ARGS: Record<string, number> = {
 
 export function filterArgs(input: string[]): string[] {
   let skipCount = 0;
+  let keepCount = 0;
   const result = Array<string>();
 
   input.forEach((arg, idx) => {
+    const option = arg.split("=", 1)[0] ?? arg;
     if (skipCount > 0) {
       skipCount--;
     } else if (idx === 0) {
       // skip
-    } else if (SKIP_ARGS[arg] !== undefined) {
-      skipCount = SKIP_ARGS[arg];
+    } else if (keepCount > 0) {
+      result.push(arg);
+      keepCount--;
+    } else if (Object.hasOwn(SKIP_ARGS, option)) {
+      skipCount = arg === option ? (SKIP_ARGS[option] ?? 0) : 0;
+    } else if (/^nxm:\/\//i.test(arg) || /^-[di].+/.test(arg)) {
+      // These action forms carry their value in the same token.
     } else {
       result.push(arg);
+      if (arg === option && Object.hasOwn(ARG_COUNTS, option)) {
+        keepCount = ARG_COUNTS[option] ?? 0;
+      } else if (
+        /^-(AUTH_LOGIN|AUTH_PASSWORD|AUTH_TYPE|epicapp|epicenv|epicusername|epicuserid|epiclocale|epicsandboxid)$/.test(
+          arg,
+        ) ||
+        /^--epic-(auth-login|auth-password|auth-type|app|env|username|userid|locale|sandboxid)$/.test(
+          arg,
+        )
+      ) {
+        keepCount = 1;
+      }
     }
   });
 
@@ -180,12 +199,6 @@ export function updateStartupSettings(updater: (current: IParameters) => IParame
 }
 
 export function parseCommandline(argv: string[], electronIsShitHack: boolean): IParameters {
-  argv = argv.flatMap((argument, index) =>
-    /^nxm:\/\//i.test(argument) &&
-    !["--install", "-i", "--download", "-d"].includes(argv[index - 1] ?? "")
-      ? ["--install", argument]
-      : [argument],
-  );
   // lets look and replace epic stuff?!
   argv = transformEpicArguments(argv);
 
@@ -197,6 +210,13 @@ export function parseCommandline(argv: string[], electronIsShitHack: boolean): I
   if (electronIsShitHack) {
     argv = electronIsShitArgumentSort(argv);
   }
+
+  argv = argv.flatMap((argument, index) =>
+    /^nxm:\/\//i.test(argument) &&
+    !["--install", "-i", "--download", "-d"].includes(argv[index - 1] ?? "")
+      ? ["--install", argument]
+      : [argument],
+  );
 
   let version: string = "1.0.0";
   try {

@@ -245,15 +245,17 @@ export function testSupportedTL(files: string[], gameId: string) {
 }
 
 export function installTL(files: string[]) {
-  let prefix = files.reduce((prev, file) => {
-    const components: string[] = file.toLowerCase().split(path.sep);
-    const idx = components.indexOf("mods");
-    if (idx > 0 && (prev === undefined || idx < prev.length)) {
-      return components.slice(0, idx) + path.sep;
-    } else {
-      return prev;
-    }
-  }, "");
+  const prefix =
+    files.reduce<string | undefined>((prev, file) => {
+      const components: string[] = file.toLowerCase().split(path.sep);
+      const idx = components.indexOf("mods");
+      const candidate = idx > 0 ? components.slice(0, idx).join(path.sep) + path.sep : "";
+      if (idx !== -1 && (prev === undefined || candidate.length < prev.length)) {
+        return candidate;
+      } else {
+        return prev;
+      }
+    }, undefined) ?? "";
 
   const instructions = files
     .filter((file) => !file.endsWith(path.sep) && file.toLowerCase().startsWith(prefix))

@@ -1,5 +1,6 @@
 /* eslint-disable */
 import { actions, types, selectors, util } from "@nexusmods/vortex-api";
+import Bluebird from "bluebird";
 
 import { setRemasterNoticeSeen } from "./actions";
 import {
@@ -215,7 +216,7 @@ export const onDidDeploy = (api: types.IExtensionApi) => {
 };
 
 export const onProfileWillChange = (api: types.IExtensionApi) => {
-  return async (profileId: string) => {
+  return async (profileId: string, enqueue?: (run: () => Bluebird<void>) => void) => {
     const state = api.getState();
     const profile = selectors.profileById(state, profileId);
     if (profile?.gameId !== GAME_ID) {
@@ -223,12 +224,20 @@ export const onProfileWillChange = (api: types.IExtensionApi) => {
     }
 
     const lastProfId = selectors.lastActiveProfileForGame(state, profile.gameId);
-    try {
-      await storeToProfile(api, lastProfId).then(() => restoreFromProfile(api, profile.id));
-    } catch (err) {
-      if (!(err instanceof util.UserCanceled)) {
-        api.showErrorNotification("Failed to store profile specific merged items", err);
+    const nextProfId = profile.id;
+    const switchFiles = async () => {
+      try {
+        await storeToProfile(api, lastProfId).then(() => restoreFromProfile(api, nextProfId));
+      } catch (err) {
+        if (!(err instanceof util.UserCanceled)) {
+          api.showErrorNotification("Failed to store profile specific merged items", err);
+        }
       }
+    };
+    if (enqueue !== undefined) {
+      enqueue(() => Bluebird.resolve(switchFiles()));
+    } else {
+      await switchFiles();
     }
   };
 };

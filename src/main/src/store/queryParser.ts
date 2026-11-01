@@ -145,8 +145,9 @@ function findSqlFiles(dir: string): string[] {
 /**
  * Parse all .sql files in the queries directory tree.
  * Validates name uniqueness across all files.
+ * Bind internal catalog placeholders to the persistor, or db for schema generation.
  */
-export function parseAllQueries(queriesDir: string): ParsedQuery[] {
+export function parseAllQueries(queriesDir: string, catalogAlias = "db"): ParsedQuery[] {
   const sqlFiles = findSqlFiles(queriesDir);
   const allQueries: ParsedQuery[] = [];
   const nameSet = new Map<string, string>(); // name -> filePath
@@ -156,6 +157,12 @@ export function parseAllQueries(queriesDir: string): ParsedQuery[] {
     const queries = parseFile(filePath, content);
 
     for (const query of queries) {
+      query.sql = query.sql
+        .replaceAll(
+          "{{persistor_catalog_literal}}",
+          () => `'${catalogAlias.replaceAll("'", "''")}'`,
+        )
+        .replaceAll("{{persistor_catalog}}", () => `"${catalogAlias.replaceAll('"', '""')}"`);
       const existing = nameSet.get(query.name);
       if (existing !== undefined) {
         throw new Error(

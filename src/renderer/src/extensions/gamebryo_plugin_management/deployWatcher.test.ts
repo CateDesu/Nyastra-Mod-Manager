@@ -1,7 +1,8 @@
-import { describe, expect, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 
-import { setCollectionSession } from "../../test-utils/builders";
-import { test } from "../../test-utils/gamebryoTest";
+import { startActivity, stopActivity } from "../../actions/session";
+import { resetHarnessRegistries, setCollectionSession } from "../../test-utils/builders";
+import { makeGamebryoHarness, test } from "../../test-utils/gamebryoTest";
 import type { IGamebryoHarness } from "../../test-utils/harnessTypes";
 import { setPluginOrder } from "./actions/loadOrder";
 import { startDeployWatcher } from "./deployWatcher";
@@ -93,5 +94,58 @@ describe("startDeployWatcher", () => {
     expect(watcher.isDeploying()).toBe(true);
     didDeploy();
     expect(watcher.isDeploying()).toBe(false);
+  });
+
+  it("drains queued checks when deployment activity ends without did-deploy", () => {
+    onTestFinished(resetHarnessRegistries);
+    const { harness, watcher, trigger, onDidDeploy } = startWatcher(makeGamebryoHarness());
+
+    harness.api.store.dispatch(startActivity("mods", "deployment"));
+    harness.emit("will-deploy");
+    harness.api.store.dispatch(setPluginOrder(["a.esp"], true));
+    harness.api.store.dispatch(setPluginOrder(["b.esp", "a.esp"], true));
+    expect(trigger).not.toHaveBeenCalled();
+
+    harness.api.store.dispatch(stopActivity("mods", "deployment"));
+
+    expect(watcher.isDeploying()).toBe(false);
+    expect(trigger).toHaveBeenCalledTimes(1);
+    expect(trigger).toHaveBeenCalledWith("plugins-changed", 500);
+    expect(onDidDeploy).not.toHaveBeenCalled();
+
+    harness.api.store.dispatch(setPluginOrder(["c.esp"], true));
+    expect(trigger).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps checks queued while deployment activity remains", () => {
+    onTestFinished(resetHarnessRegistries);
+    const { harness, watcher, trigger } = startWatcher(makeGamebryoHarness());
+
+    harness.api.store.dispatch(startActivity("mods", "deployment"));
+    harness.api.store.dispatch(startActivity("mods", "other"));
+    harness.emit("will-deploy");
+    harness.api.store.dispatch(setPluginOrder(["a.esp"], true));
+    harness.api.store.dispatch(stopActivity("mods", "other"));
+
+    expect(watcher.isDeploying()).toBe(true);
+    expect(trigger).not.toHaveBeenCalled();
+
+    harness.api.store.dispatch(stopActivity("mods", "deployment"));
+    expect(watcher.isDeploying()).toBe(false);
+    expect(trigger).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not repeat a successful deployment check when activity ends", () => {
+    onTestFinished(resetHarnessRegistries);
+    const { harness, trigger, onDidDeploy, didDeploy } = startWatcher(makeGamebryoHarness());
+
+    harness.api.store.dispatch(startActivity("mods", "deployment"));
+    harness.emit("will-deploy");
+    harness.api.store.dispatch(setPluginOrder(["a.esp"], true));
+    didDeploy();
+    harness.api.store.dispatch(stopActivity("mods", "deployment"));
+
+    expect(trigger).toHaveBeenCalledTimes(1);
+    expect(onDidDeploy).toHaveBeenCalledTimes(1);
   });
 });

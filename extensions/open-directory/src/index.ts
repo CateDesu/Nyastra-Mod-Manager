@@ -121,7 +121,13 @@ function init(context: types.IExtensionContext) {
     (instanceIds: string[]) => {
       const store = context.api.store;
       const installPath = selectors.installPath(store.getState());
-      const modPath = path.join(installPath, instanceIds[0]);
+      const gameId = selectors.activeGameId(store.getState());
+      const mod = util.getSafe(
+        store.getState().persistent.mods,
+        [gameId, instanceIds[0]],
+        undefined,
+      );
+      const modPath = path.join(installPath, mod?.installationPath ?? instanceIds[0]);
       openPath(modPath, installPath);
     },
     (instanceIds) => {

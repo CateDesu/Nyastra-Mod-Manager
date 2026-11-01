@@ -1,23 +1,21 @@
-import { stat, rename, rm, writeFile, readdir, readFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { realpathSync } from "node:fs";
+import { stat, rename, rm, readdir, readFile, mkdir } from "node:fs/promises";
+import type * as NodeModule from "node:module";
 import * as path from "node:path";
 
 import { getErrorMessageOrDefault, unknownToError } from "@vortex/shared";
-import * as _ from "lodash";
 import SevenZip from "node-7z";
+import * as semver from "semver";
 
 import { addExtension, forgetExtension, removeExtension } from "../../actions";
 import { isValidBcp47 } from "../../bcp47";
 import ExtensionManager from "../../ExtensionManager";
 import { log } from "../../logging";
-import type {
-  ExtensionType,
-  IExtension,
-  ExtensionInfo,
-  IAvailableExtension,
-} from "../../types/extensions";
+import type { ExtensionType, ExtensionInfo, IAvailableExtension } from "../../types/extensions";
 import type { IExtensionApi, IExtensionContext } from "../../types/IExtensionContext";
 import type { IExtensionState, IState } from "../../types/IState";
-import { DataInvalid } from "../../util/CustomErrors";
+import { DataInvalid, UserCanceled } from "../../util/CustomErrors";
 import { withTrackedActivity } from "../../util/errorHandling";
 import getVortexPath from "../../util/getVortexPath";
 import { INVALID_FILENAME_RE } from "../../util/util";
@@ -27,21 +25,21 @@ import {
   type ExtensionInstallSource,
 } from "../analytics/mixpanel/extensionInstallAnalytics";
 import { parseExtensionInfo } from "./extensionInfo";
-import {
-  findDependencyInCatalog,
-  findPreviousVersions,
-  isAlreadyInstalled,
-  findInstalledDependency,
-} from "./queries";
-import _sessionReducer from "./reducers";
+import { findInstalled, findPreviousVersions } from "./queries";
+
+interface ExtensionDependency {
+  id: string;
+  version?: string;
+  optional: boolean;
+}
 
 class ContextProxyHandler implements ProxyHandler<any> {
-  private mDependencies: string[] = [];
+  private mDependencies: ExtensionDependency[] = [];
 
   public get(target, key: PropertyKey): any {
     if (key === "requireExtension") {
-      return (dependencyId: string) => {
-        this.mDependencies.push(dependencyId);
+      return (id: string, version?: string, optional = false) => {
+        this.mDependencies.push({ id, version, optional });
       };
     } else if (key === "optional") {
       return new Proxy(
@@ -61,46 +59,177 @@ class ContextProxyHandler implements ProxyHandler<any> {
     }
   }
 
-  public get dependencies(): string[] {
+  public get dependencies(): ExtensionDependency[] {
     return this.mDependencies;
   }
 }
 
-async function installExtensionDependencies(api: IExtensionApi, extPath: string): Promise<void> {
+function scanDependencies(api: IExtensionApi, extPath: string): ExtensionDependency[] {
   const handler = new ContextProxyHandler();
   const context = new Proxy<IExtensionContext>({} as IExtensionContext, handler);
+  const entry = path.join(extPath, "index.js");
+  const nativeRequire = (webpackRequireHack("node:module") as typeof NodeModule).createRequire(
+    entry,
+  );
+  const realPath = realpathSync(extPath);
+  const isLocal = (filename: string) =>
+    filename.startsWith(extPath + path.sep) || filename.startsWith(realPath + path.sep);
+  const previous = Object.entries(nativeRequire.cache).filter(([filename]) => isLocal(filename));
+  const loaded = api.getLoadedExtensions().some((ext) => {
+    if (path.resolve(ext.path) === extPath) return true;
+    try {
+      return realpathSync(ext.path) === realPath;
+    } catch {
+      return false;
+    }
+  });
+
+  previous.forEach(([filename]) => delete nativeRequire.cache[filename]);
 
   try {
-    const extension: unknown = webpackRequireHack(path.join(extPath, "index.js"));
+    const extension: unknown = nativeRequire(entry);
     const initFunc = ExtensionManager.getExtensionInitFunc(extension);
     if (initFunc === undefined) {
       log("warn", "extension has no init function, skipping dependency scan", {
         extPath,
       });
 
-      return;
+      return [];
     }
 
     initFunc(context);
 
-    const state = api.getState();
-    const promises = handler.dependencies.map(async (dependencyId) => {
-      if (findInstalledDependency(state.app.extensions, dependencyId) !== undefined) return;
-
-      const toInstall = findDependencyInCatalog(state.session.extensions.available, dependencyId);
-      if (!toInstall) return;
-
-      if (isAlreadyInstalled(state.app.extensions, toInstall)) return;
-      await api.emitAndAwait<"install-extension">("install-extension", toInstall);
-    });
-
-    await Promise.all(promises);
+    return handler.dependencies;
   } catch (unknownErr) {
     const err = unknownToError(unknownErr);
     // TODO: can't check for dependencies if the extension is already loaded
     //   and registers actions
-    if (err.name === "TypeError" && err.message.startsWith("Duplicate action type")) return;
+    if (err.name === "TypeError" && err.message.startsWith("Duplicate action type")) return [];
     throw err;
+  } finally {
+    // Running extensions keep their original module objects and lazy requires.
+    if (loaded) {
+      Object.keys(nativeRequire.cache)
+        .filter(isLocal)
+        .forEach((key) => delete nativeRequire.cache[key]);
+      previous.forEach(([filename, module]) => {
+        nativeRequire.cache[filename] = module;
+      });
+    }
+  }
+}
+
+const dependencyScans = new WeakMap<object, Set<Set<string>>>();
+
+async function installExtensionDependencies(
+  api: IExtensionApi,
+  extension: IExtensionState,
+  info: ExtensionInfo | undefined,
+  dependencies: ExtensionDependency[],
+): Promise<void> {
+  const scans = dependencyScans.get(api.store) ?? new Set<Set<string>>();
+  dependencyScans.set(api.store, scans);
+  const identifiers = new Set([
+    info?.id,
+    info?.name,
+    info?.id || path.basename(extension.path),
+    // Catalog requests can return the same archive while its scan is still running.
+    extension.name,
+  ]);
+  scans.add(identifiers);
+
+  try {
+    // Resolve each identifier once against all its required declarations.
+    for (const id of new Set(dependencies.map((dependency) => dependency.id))) {
+      const declarations = dependencies.filter((dependency) => dependency.id === id);
+      const required = declarations.filter((dependency) => !dependency.optional);
+      const optional = required.length === 0;
+      const ranges = (optional ? declarations : required)
+        .map((dependency) => dependency.version)
+        .filter((version) => version !== undefined);
+      const matchesVersion = (version: string | undefined) =>
+        ranges.length === 0 ||
+        (version !== undefined && ranges.every((range) => semver.satisfies(version, range)));
+      const unmet = () =>
+        new DataInvalid(
+          `Extension dependency "${id}" requires ${ranges.join(" and ") || "an installed extension"}, but no compatible installation is available`,
+        );
+      const isSatisfied = async (): Promise<boolean> => {
+        const loaded = api.getLoadedExtensions();
+        const state = api.getState();
+        const entries = state.app.extensions ?? {};
+        const bundled = loaded.filter((ext) => ext.info?.bundled);
+        const bundledPaths = new Set(bundled.map((ext) => path.normalize(ext.path)));
+        const candidates: { name: string; info?: ExtensionInfo }[] = loaded.filter(
+          (ext) => ext.dynamic === false,
+        );
+        const userNames = new Set<string>();
+        for (const installed of Object.values(entries)) {
+          if (
+            installed.remove ||
+            installed.enabled === false ||
+            installed.path === undefined ||
+            installed.bundled ||
+            bundledPaths.has(path.normalize(installed.path))
+          )
+            continue;
+          try {
+            const installedInfo = parseExtensionInfo(
+              JSON.parse(await readFile(path.join(installed.path, "info.json"), "utf8")),
+            );
+            const registeredName = installedInfo.id || path.basename(installed.path);
+            candidates.push({ name: registeredName, info: installedInfo });
+            userNames.add(registeredName);
+          } catch {
+            // Missing or invalid manifests cannot satisfy a requirement.
+          }
+        }
+        for (const ext of bundled) {
+          const recorded = findInstalled(entries, { path: ext.path })?.extension;
+          const policy =
+            recorded ?? (entries[ext.name]?.path === undefined ? entries[ext.name] : undefined);
+          if (policy?.remove || policy?.enabled === false || userNames.has(ext.name)) continue;
+          candidates.push(ext);
+        }
+        // The loader resolves the first matching registration, including manifest aliases.
+        const candidate = candidates.find(
+          (ext) => ext.name === id || ext.info?.id === id || ext.info?.name === id,
+        );
+        if (api.getState().app.extensions !== state.app.extensions) return isSatisfied();
+        return candidate !== undefined && matchesVersion(candidate.info?.version);
+      };
+
+      try {
+        if (ranges.some((range) => semver.validRange(range) === null)) throw unmet();
+        if (await isSatisfied()) continue;
+
+        const toInstall = (api.getState().session.extensions.available ?? [])
+          .filter(
+            (candidate) =>
+              candidate.name === id &&
+              semver.valid(candidate.version) !== null &&
+              matchesVersion(candidate.version),
+          )
+          .toSorted((left, right) => semver.rcompare(left.version, right.version))[0];
+        if (toInstall === undefined) throw unmet();
+        // Compatible cycles are already satisfied by registration before scanning.
+        // A conflicting cycle must fail rather than await its own install promise.
+        if ([...scans].some((scan) => scan.has(id))) throw unmet();
+
+        await api.emitAndAwait<"install-extension">("install-extension", toInstall);
+        if (!(await isSatisfied())) throw unmet();
+      } catch (err) {
+        if (!optional) throw err;
+        log("warn", "optional extension dependency unavailable", {
+          id,
+          ranges,
+          error: getErrorMessageOrDefault(err),
+        });
+      }
+    }
+  } finally {
+    scans.delete(identifiers);
+    if (scans.size === 0) dependencyScans.delete(api.store);
   }
 }
 
@@ -111,6 +240,14 @@ function sanitize(input: string): string {
     return path.basename(temp, path.extname(temp));
   } else {
     return path.basename(temp);
+  }
+}
+
+function canonicalDestination(destPath: string): string {
+  try {
+    return path.join(realpathSync(path.dirname(destPath)), path.basename(destPath));
+  } catch {
+    return path.resolve(destPath);
   }
 }
 
@@ -128,10 +265,10 @@ export function clearStaleRemovalFlags(
   const extState = state.app.extensions ?? {};
   // Compare paths, not key strings: info.json `id` can decouple the state key
   // from the folder basename, and the archive-name fallback differs again.
-  const normalizedDest = path.normalize(destPath);
+  const normalizedDest = canonicalDestination(destPath);
   removedKeys.forEach((key) => {
     const prevPath = extState[key]?.path;
-    if (prevPath !== undefined && path.normalize(prevPath) === normalizedDest) {
+    if (prevPath !== undefined && canonicalDestination(prevPath) === normalizedDest) {
       api.store.dispatch(forgetExtension(key));
     }
   });
@@ -213,25 +350,66 @@ interface InstallAnalytics {
   gameName?: string;
 }
 
+export interface ExtensionRefresh {
+  key: string;
+  installed: IExtensionState;
+}
+
+export function refreshEntry(
+  api: IExtensionApi,
+  refresh: ExtensionRefresh,
+): IExtensionState | undefined {
+  const live = api.getState().app.extensions[refresh.key];
+  return live?.path === refresh.installed.path &&
+    live?.version === refresh.installed.version &&
+    live?.modId === refresh.installed.modId &&
+    live?.fileId === refresh.installed.fileId
+    ? live
+    : undefined;
+}
+
+interface InstallData {
+  catalogEntry?: IAvailableExtension;
+  analytics?: InstallAnalytics;
+  refresh?: ExtensionRefresh;
+}
+
 // Concurrent install attempts of the same archive (e.g. the update check firing
 // more than once) would extract into the same ".installing" directory
 // simultaneously and fail with "Cannot delete output file ... being used by
 // another process" (#23454). Dedupe them onto a single in-flight promise.
 const activeInstalls: Map<string, Promise<void>> = new Map();
+const destinationCommits = new Map<string, Promise<void>>();
+
+async function commitToDestination<T>(destPath: string, commit: () => Promise<T>): Promise<T> {
+  const key = canonicalDestination(destPath);
+  const result = (destinationCommits.get(key) ?? Promise.resolve()).then(commit);
+  const settled = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  destinationCommits.set(key, settled);
+  try {
+    return await result;
+  } finally {
+    if (destinationCommits.get(key) === settled) destinationCommits.delete(key);
+  }
+}
 
 function installExtension(
   api: IExtensionApi,
   archivePath: string,
-  data?: { catalogEntry?: IAvailableExtension; analytics?: InstallAnalytics },
+  data?: InstallData,
 ): Promise<void> {
-  const key = path.basename(archivePath);
+  const extensionsPath = path.resolve(getVortexPath("userData"), "plugins");
+  const key = extensionsPath + "\0" + path.resolve(archivePath);
   const active = activeInstalls.get(key);
 
   if (active !== undefined) {
     return active;
   }
 
-  const result = installExtensionImpl(api, archivePath, data).finally(() => {
+  const result = installExtensionImpl(api, archivePath, extensionsPath, data).finally(() => {
     activeInstalls.delete(key);
   });
 
@@ -242,14 +420,15 @@ function installExtension(
 async function installExtensionImpl(
   api: IExtensionApi,
   archivePath: string,
-  data?: { catalogEntry?: IAvailableExtension; analytics?: InstallAnalytics },
+  extensionsPath: string,
+  data?: InstallData,
 ): Promise<void> {
-  const extensionsPath = path.join(getVortexPath("userData"), "plugins");
   let destPath: string;
-  const tempPath = path.join(extensionsPath, path.basename(archivePath)) + ".installing";
+  const tempPath = path.join(extensionsPath, `.extension-${randomUUID()}.installing`);
 
   const extractor = new SevenZip();
 
+  await mkdir(extensionsPath, { recursive: true });
   await withTrackedActivity(
     "vortex.extension-manager",
     "extension.install",
@@ -259,16 +438,6 @@ async function installExtensionImpl(
       "extension.type": data?.catalogEntry?.type,
     },
     async () => {
-      try {
-        await rm(tempPath, { recursive: true, force: true, maxRetries: 3 });
-      } catch (err) {
-        throw new DataInvalid(
-          "Failed to remove files left over from a previous install attempt: " +
-            `${getErrorMessageOrDefault(err)}. They may be locked by another process ` +
-            "(e.g. an antivirus scan); please try again or restart your computer.",
-        );
-      }
-
       const result = await Promise.resolve(
         extractor.extractFull(archivePath, tempPath, { ssc: false }),
       );
@@ -334,54 +503,75 @@ async function installExtensionImpl(
       }
       destPath = path.join(extensionsPath, dirName);
 
-      // Keys whose previous-version state entries were marked for removal during
-      // this install. Cleared after the rename succeeds so the next launch's
-      // state-flag-driven removal path in ExtensionManager doesn't wipe the
-      // just-installed folder (#19527).
-      const removedKeys = data?.catalogEntry ? removeOldVersion(api, data?.catalogEntry) : [];
+      const installed = await commitToDestination(destPath, async () => {
+        if (data?.refresh !== undefined) {
+          const live = refreshEntry(api, data.refresh);
+          if (live === undefined || live.remove || live.enabled === false) throw new UserCanceled();
+        }
+        let removedKeys =
+          data?.catalogEntry && !data.refresh ? removeOldVersion(api, data.catalogEntry) : [];
 
-      // we don't actually expect the output directory to exist
-      await rm(destPath, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
-      await rename(tempPath, destPath);
+        // we don't actually expect the output directory to exist
+        await rm(destPath, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+        await rename(tempPath, destPath);
 
-      clearStaleRemovalFlags(api, removedKeys, destPath);
+        // Keep choices made while native replacement was outstanding.
+        const policy = data?.refresh === undefined ? undefined : refreshEntry(api, data.refresh);
+        if (data?.refresh !== undefined && data.catalogEntry !== undefined) {
+          removedKeys = removeOldVersion(api, data.catalogEntry);
+        }
+        // Retire every old owner of the committed directory, including manual installs.
+        clearStaleRemovalFlags(api, Object.keys(api.getState().app.extensions ?? {}), destPath);
 
-      const state: IExtensionState = {
-        name: data?.catalogEntry?.name ?? extensionInfo?.name ?? path.basename(destPath),
-        author: data?.catalogEntry?.author ?? extensionInfo?.author ?? "<unknown>",
-        description: extensionInfo?.description ?? "<missing>",
-        version: data?.catalogEntry?.version ?? extensionInfo?.version ?? "0.0.1",
+        const state: IExtensionState = {
+          name: data?.catalogEntry?.name ?? extensionInfo?.name ?? path.basename(destPath),
+          author: data?.catalogEntry?.author ?? extensionInfo?.author ?? "<unknown>",
+          description: extensionInfo?.description ?? "<missing>",
+          version: data?.catalogEntry?.version ?? extensionInfo?.version ?? "0.0.1",
 
-        endorsed: "Undecided",
-        remove: false,
-        enabled: true,
-        path: destPath,
+          endorsed: "Undecided",
+          remove: data?.refresh === undefined ? false : (policy?.remove ?? true),
+          enabled: data?.refresh === undefined ? true : (policy?.enabled ?? false),
+          path: destPath,
 
-        infoJsonId: extensionInfo?.id,
+          infoJsonId: extensionInfo?.id,
 
-        modId: data?.catalogEntry?.modId,
-        fileId: data?.catalogEntry?.fileId,
-        type: data?.catalogEntry?.type ?? guessedType,
-      };
+          modId: data?.catalogEntry?.modId,
+          fileId: data?.catalogEntry?.fileId,
+          type: data?.catalogEntry?.type ?? guessedType,
+        };
 
-      api.store.dispatch(addExtension(state));
+        api.store.dispatch(addExtension(state));
 
-      emitExtensionInstalled(api, state, {
-        source: data?.analytics?.source,
-        isUpdate: removedKeys.length > 0,
-        gameDomain: data?.analytics?.gameDomain,
-        gameName: data?.analytics?.gameName,
+        emitExtensionInstalled(api, state, {
+          source: data?.analytics?.source,
+          isUpdate: removedKeys.length > 0,
+          gameDomain: data?.analytics?.gameDomain,
+          gameName: data?.analytics?.gameName,
+        });
+
+        if (
+          state.remove ||
+          state.enabled === false ||
+          state.type === "theme" ||
+          state.type === "translation"
+        )
+          return undefined;
+
+        // Capture this commit's requirements before another archive replaces its bytes.
+        return { state, dependencies: scanDependencies(api, state.path) };
       });
 
-      if (state.type === "theme" || state.type === "translation") return;
-
-      // don't install dependencies for extensions that are already loaded because
-      // doing so could cause an exception
-      if (api.getLoadedExtensions().find((ext) => ext.path === destPath) === undefined) {
-        await installExtensionDependencies(api, destPath);
+      if (installed !== undefined) {
+        await installExtensionDependencies(
+          api,
+          installed.state,
+          extensionInfo,
+          installed.dependencies,
+        );
       }
     },
-  );
+  ).finally(() => rm(tempPath, { recursive: true, force: true, maxRetries: 3 }));
 }
 
 export default installExtension;

@@ -71,7 +71,9 @@ async function checkForUpdates(api: IExtensionApi): Promise<void> {
     ),
   });
 
-  const promises = updateable.map(({ available }) => downloadAndInstallExtension(api, available));
+  const promises = updateable.map(({ key, installed, available }) =>
+    downloadAndInstallExtension(api, available, { key, installed }),
+  );
   const success = await Promise.all(promises);
 
   api.dismissNotification("extension-updates");
@@ -97,6 +99,7 @@ async function checkForUpdates(api: IExtensionApi): Promise<void> {
 async function updateAvailableExtensions(
   api: IExtensionApi,
   force: boolean = false,
+  onCatalogReady?: () => void,
 ): Promise<void> {
   const state = api.getState();
   if (!state.session.base.networkConnected) {
@@ -107,6 +110,7 @@ async function updateAvailableExtensions(
     const extensions = await fetchAvailableExtensions(api, force);
     api.store.dispatch(setExtensionsUpdate(Date.now()));
     api.store.dispatch(setAvailableExtensions(extensions));
+    onCatalogReady?.();
     await checkForUpdates(api);
   } catch (err) {
     const allowReport = !(err instanceof DataInvalid);
@@ -307,10 +311,7 @@ function init(context: IExtensionContext) {
     let onDidFetch: () => void;
     const didFetchAvailableExtensions = new Promise<void>((resolve) => (onDidFetch = resolve));
 
-    void (async () => {
-      await updateAvailableExtensions(context.api);
-      onDidFetch();
-    })();
+    void updateAvailableExtensions(context.api, false, onDidFetch).then(onDidFetch);
 
     context.api.onAsync<"install-extension">("install-extension", async (ext) => {
       await didFetchAvailableExtensions;

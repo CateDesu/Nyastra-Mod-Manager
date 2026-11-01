@@ -10,6 +10,7 @@ import { MERGED_PATH } from "./modMerging";
 import type { IDeployedFile, IDeploymentMethod } from "./types/IDeploymentMethod";
 import type { IMod } from "./types/IMod";
 import type BlacklistSet from "./util/BlacklistSet";
+import { normalizeDeployment } from "./util/deploymentNormalize";
 import renderModName from "./util/modName";
 
 async function ensureWritable(api: IExtensionApi, modPath: string): Promise<void> {
@@ -69,7 +70,10 @@ async function deployMods(
 
   try {
     await ensureWritable(api, destinationPath);
-    const normalize: Normalize = await getNormalizeFunc(destinationPath);
+    const normalize: Normalize = normalizeDeployment(
+      gameId,
+      await getNormalizeFunc(destinationPath),
+    );
     await method.prepare(destinationPath, true, lastActivation, normalize);
 
     for (let idx = 0; idx < mods.length; idx++) {

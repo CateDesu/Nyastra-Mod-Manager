@@ -382,7 +382,10 @@ describe("stall recovery", () => {
         const mgr = internals(h.manager);
         mgr.mDependencyInstalls[COLLECTION] = () => undefined;
         // residue of an earlier degraded round
-        mgr.mPendingInstalls.set(`${COLLECTION}:ghost-download`, {});
+        mgr.mPendingInstalls.set(
+          mgr.generateDependencyInstallKey(COLLECTION, "ghost-download"),
+          {},
+        );
 
         const polling = mgr.pollAllPhasesComplete(h.api, COLLECTION);
         // first timeout + rescue, then second timeout -> force-resolve

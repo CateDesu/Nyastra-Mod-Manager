@@ -14,3 +14,5 @@ export interface IFileEntry {
   sourceModified: Date;
   destModified: Date;
 }
+
+export type IFileEntryIdentity = Pick<IFileEntry, "modTypeId" | "source" | "filePath">;

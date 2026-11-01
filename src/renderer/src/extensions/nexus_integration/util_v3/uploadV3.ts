@@ -1,4 +1,5 @@
 import type { components, NexusV3Client } from "@vortex/nexus-api-v3";
+import { UserCanceled } from "@vortex/shared/errors";
 import type { WireUploadHeaders } from "@vortex/shared/ipc";
 
 import { log } from "../../../logging";
@@ -23,16 +24,34 @@ function dispositionOf(state: string): "inprogress" | "success" | undefined {
   return STATE_DISPOSITION[state as UploadState];
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new UserCanceled());
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
 
-export async function pollUploadAvailable(client: NexusV3Client, uploadId: string): Promise<void> {
+export async function pollUploadAvailable(
+  client: NexusV3Client,
+  uploadId: string,
+  signal?: AbortSignal,
+): Promise<void> {
   let unknownStreak = 0;
   for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt++) {
+    if (signal?.aborted) throw new UserCanceled();
     const upload = await client.getUpload(uploadId);
+    if (signal?.aborted) throw new UserCanceled();
     const { state } = upload;
     const disposition = dispositionOf(state);
     if (disposition === "success") {
@@ -60,7 +79,7 @@ export async function pollUploadAvailable(client: NexusV3Client, uploadId: strin
         );
       }
     }
-    await sleep(POLL_INTERVAL_MS);
+    await sleep(POLL_INTERVAL_MS, signal);
   }
   throw new Error(
     `Upload ${uploadId} did not become available within ${(POLL_INTERVAL_MS * POLL_MAX_ATTEMPTS) / 1000}s`,
@@ -79,10 +98,8 @@ export type UploadOptions = {
   headers?: WireUploadHeaders;
   onProgress?: UploadProgressHandler;
   /**
-   * Aborting stops the transfer in main; the returned promise rejects with an
-   * `UploadError` carrying `cancellation`. A signal is used rather than the
-   * upload id because a signal cannot cross the IPC boundary — this maps one
-   * onto the other.
+   * Aborting stops the transfer in main and rejects as user-canceled.
+   * The local signal maps to an upload id across IPC.
    */
   abortSignal?: AbortSignal;
 };
@@ -107,12 +124,13 @@ async function withProgress(
   const uploadId = nextUploadId++;
   const { onProgress, abortSignal } = options ?? {};
 
+  if (abortSignal?.aborted) throw new UserCanceled();
+
   // The signal is local to this process; cancelling the transfer means telling
   // main, which holds the AbortController the request actually listens to.
   const requestCancel = () => {
     void window.api.uploader.cancel(uploadId);
   };
-  if (abortSignal?.aborted === true) requestCancel();
   abortSignal?.addEventListener("abort", requestCancel);
 
   const stopWatchingAbort = () => abortSignal?.removeEventListener("abort", requestCancel);

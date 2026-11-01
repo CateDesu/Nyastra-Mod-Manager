@@ -48,6 +48,37 @@ const cases: Array<Array<Record<string, unknown>>> = [
   ],
   [{}, Object.fromEntries([["__proto__", { id: "special" }]])],
   [Object.fromEntries([["__proto__", { id: "special" }]]), { ordinary: true }],
+  [
+    { profiles: { p: { name: "Saved selection", modState: { enabled: { enabled: true } } } } },
+    {
+      profiles: {
+        p: {
+          name: "Saved selection",
+          modState: { enabled: { enabled: false } },
+          enabledModsBeforeDisable: ["enabled"],
+        },
+      },
+    },
+  ],
+  [
+    {
+      profiles: {
+        p: {
+          name: "Saved selection",
+          modState: { enabled: { enabled: false }, manual: { enabled: true } },
+          enabledModsBeforeDisable: ["enabled"],
+        },
+      },
+    },
+    {
+      profiles: {
+        p: {
+          name: "Saved selection",
+          modState: { enabled: { enabled: true }, manual: { enabled: true } },
+        },
+      },
+    },
+  ],
 ];
 
 for (const flushEach of [false, true]) {

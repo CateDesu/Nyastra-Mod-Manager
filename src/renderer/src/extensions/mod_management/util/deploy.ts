@@ -316,7 +316,7 @@ async function purgeModsImpl(
           await api.emitAndAwait("did-purge", profile.id);
         }
       }
-    }, true);
+    });
   } finally {
     api.dismissNotification(notificationId);
     api.store.dispatch(stopActivity("mods", "purging"));

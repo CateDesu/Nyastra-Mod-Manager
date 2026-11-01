@@ -106,6 +106,52 @@ export function testPathTransfer(source: string, destination: string): PromiseBB
 
 export type ProgressCallback = (from: string, to: string, percentage: number) => void;
 
+export const STAGING_TRANSFER_TAG = "__vortex_staging_transfer";
+
+export function prepareStagingTransfer(source: string, dest: string): PromiseBB<boolean> {
+  return PromiseBB.all([fs.lstatAsync(dest), fs.readdirAsync(dest)]).then(([stat, files]) => {
+    if (!stat.isDirectory() || files.length !== 0) return false;
+    return fs
+      .writeFileAsync(
+        path.join(dest, STAGING_TRANSFER_TAG),
+        JSON.stringify({ source, dest, dev: stat.dev, ino: stat.ino }),
+        { flag: "wx" },
+      )
+      .then(() => true);
+  });
+}
+
+export function cleanFailedStagingTransfer(source: string, dest: string): PromiseBB<void> {
+  return PromiseBB.try(async () => {
+    let owned = false;
+    try {
+      const tag = JSON.parse(
+        String(await fs.readFileAsync(path.join(dest, STAGING_TRANSFER_TAG), "utf8")),
+      ) as { source?: unknown; dest?: unknown; dev?: unknown; ino?: unknown } | null;
+      const [target, original] = await PromiseBB.all([fs.lstatAsync(dest), fs.lstatAsync(source)]);
+      owned =
+        tag !== null &&
+        source !== dest &&
+        original.isDirectory() &&
+        target.isDirectory() &&
+        tag.source === source &&
+        tag.dest === dest &&
+        tag.dev === target.dev &&
+        tag.ino === target.ino;
+    } catch (err) {
+      if (!(err instanceof SyntaxError) && getErrorCode(err) !== "ENOENT") throw err;
+    }
+    if (owned) {
+      await cleanFailedTransfer(dest);
+    } else {
+      // An old pending path alone does not prove ownership of its contents.
+      await fs.rmdirAsync(dest).catch((err) => {
+        if (!["ENOENT", "ENOTEMPTY", "EEXIST"].includes(getErrorCode(err))) throw err;
+      });
+    }
+  });
+}
+
 /**
  * Move the content of a directory to another - Using a move operation if it's on the same
  * drive and a copy+delete if not.
@@ -118,8 +164,9 @@ export function transferPath(
   source: string,
   dest: string,
   progress: ProgressCallback,
+  beforeRemoveSource?: () => PromiseLike<void>,
 ): PromiseBB<void> {
-  let func = fs.copyAsync;
+  let func = copyFile;
 
   let completed: number = 0;
   let count: number = 0;
@@ -161,7 +208,7 @@ export function transferPath(
       ),
     )
     .then((sameVolume: boolean) => {
-      func = sameVolume ? linkFile : fs.copyAsync;
+      func = sameVolume ? linkFile : copyFile;
       return PromiseBB.resolve();
     })
     .then(() =>
@@ -177,89 +224,93 @@ export function transferPath(
             );
           }
 
-          const directories = entries.filter((entry) => entry.isDirectory);
-          const files = entries.filter((entry) => !entry.isDirectory);
+          const directories = entries.filter((entry) => entry.isDirectory && !entry.isReparsePoint);
+          const files = entries.filter((entry) => !entry.isDirectory || entry.isReparsePoint);
 
           count += files.length;
 
-          copyPromise = isCancelled
-            ? PromiseBB.resolve()
-            : copyPromise
-                .then(() =>
-                  PromiseBB.each(directories.sort(longestFirst), (entry) => {
-                    if (moveDown && isChildPath(dest, entry.filePath)) {
-                      // this catches the case where we transfer .../mods to .../mods/foo/bar
-                      // and we come across the path .../mods/foo. Wouldn't want to try to remove
-                      // that, do we?
-                      return PromiseBB.resolve();
-                    }
-                    removableDirectories.push(entry.filePath);
-                    const destPath = path.join(dest, path.relative(source, entry.filePath));
-                    return isCancelled
-                      ? PromiseBB.reject(new UserCanceled())
-                      : fs
-                          .ensureDirWritableAsync(destPath)
-                          .catch((err) =>
-                            getErrorCode(err) === "EEXIST"
-                              ? PromiseBB.resolve()
-                              : PromiseBB.reject(err),
-                          );
-                  }).then(() => {}),
-                )
-                .then(() =>
-                  PromiseBB.map(files, (entry) => {
-                    const sourcePath = entry.filePath;
-                    const destPath = path.join(dest, path.relative(source, entry.filePath));
+          copyPromise = copyPromise
+            .then(() =>
+              PromiseBB.each(directories.sort(longestFirst), (entry) => {
+                if (moveDown && isChildPath(dest, entry.filePath)) {
+                  // this catches the case where we transfer .../mods to .../mods/foo/bar
+                  // and we come across the path .../mods/foo. Wouldn't want to try to remove
+                  // that, do we?
+                  return PromiseBB.resolve();
+                }
+                removableDirectories.push(entry.filePath);
+                const destPath = path.join(dest, path.relative(source, entry.filePath));
+                return isCancelled
+                  ? PromiseBB.reject(new UserCanceled())
+                  : fs
+                      .ensureDirWritableAsync(destPath)
+                      .catch((err) =>
+                        getErrorCode(err) === "EEXIST"
+                          ? PromiseBB.resolve()
+                          : PromiseBB.reject(err),
+                      );
+              }).then(() => {}),
+            )
+            .then(() =>
+              PromiseBB.map(files, (entry) => {
+                if (isCancelled) return PromiseBB.resolve();
+                const sourcePath = entry.filePath;
+                const destPath = path.join(dest, path.relative(source, entry.filePath));
 
-                    return func(sourcePath, destPath, { showDialogCallback })
-                      .catch(UserCanceled, () => {
-                        isCancelled = true;
-                        copyPromise = PromiseBB.resolve();
-                      })
-                      .catch((err) => {
-                        // EXDEV implies we tried to rename when source and destination are
-                        //  not in fact on the same volume. This is what comparing the stat.dev
-                        //  was supposed to prevent.
-                        // ENOTSUP implies that we attempted to hardlink a file on a file system
-                        //  which does not support it - copy instead.
-                        // EISDIR is reported in node 12 if hardlinks aren't supported on the drive
-                        //  come on...
-                        const code = getErrorCode(err);
-                        if (code && ["EXDEV", "ENOTSUP", "EISDIR"].indexOf(code) !== -1) {
-                          func = fs.copyAsync;
-                          return func(sourcePath, destPath, {
-                            showDialogCallback,
-                          });
-                        } else if (code === "ENOENT") {
-                          return PromiseBB.resolve();
-                        } else {
-                          return PromiseBB.reject(err);
-                        }
-                      })
-                      .then(() => {
-                        ++completed;
-                        const perc = Math.floor((completed * 100) / count);
-                        if (perc !== lastPerc || Date.now() - lastProgress > 1000) {
-                          lastPerc = perc;
-                          lastProgress = Date.now();
-                          progress(sourcePath, destPath, perc);
-                        }
+                return preserveTransferTag(source, sourcePath, destPath)
+                  .then((preserved) =>
+                    preserved
+                      ? undefined
+                      : transferEntry(sourcePath, destPath, source, dest, func, {
+                          showDialogCallback,
+                        }),
+                  )
+                  .catch((err) => {
+                    // EXDEV implies we tried to rename when source and destination are
+                    //  not in fact on the same volume. This is what comparing the stat.dev
+                    //  was supposed to prevent.
+                    // ENOTSUP implies that we attempted to hardlink a file on a file system
+                    //  which does not support it - copy instead.
+                    // EISDIR is reported in node 12 if hardlinks aren't supported on the drive
+                    //  come on...
+                    const code = getErrorCode(err);
+                    if (code && ["EXDEV", "ENOTSUP", "EISDIR"].indexOf(code) !== -1) {
+                      func = copyFile;
+                      return transferEntry(sourcePath, destPath, source, dest, func, {
+                        showDialogCallback,
                       });
+                    } else {
+                      return PromiseBB.reject(err);
+                    }
                   })
-                    .then(() => {})
-                    .catch((err) => {
-                      exception = unknownToError(err);
-                    }),
-                );
+                  .then(() => {
+                    ++completed;
+                    const perc = Math.floor((completed * 100) / count);
+                    if (perc !== lastPerc || Date.now() - lastProgress > 1000) {
+                      lastPerc = perc;
+                      lastProgress = Date.now();
+                      progress(sourcePath, destPath, perc);
+                    }
+                  })
+                  .catch((err: unknown) => {
+                    isCancelled ||= err instanceof UserCanceled;
+                    exception ??= unknownToError(err);
+                  });
+              })
+                .then(() => {})
+                .catch((err) => {
+                  exception ??= unknownToError(err);
+                }),
+            );
         },
         { details: false, skipHidden: false, skipInaccessible: false },
       ),
     )
-    .then(() =>
-      copyPromise.then(() =>
-        exception !== undefined ? PromiseBB.reject(exception) : PromiseBB.resolve(),
-      ),
-    )
+    .finally(() => copyPromise)
+    .then(() => {
+      if (exception !== undefined) throw exception;
+    })
+    .then(() => beforeRemoveSource?.())
     .then(() => {
       const cleanUp = () => {
         return moveDown
@@ -300,7 +351,7 @@ export function cleanFailedTransfer(dirPath: string): PromiseBB<void> {
     (entries) => {
       files = files.concat(entries);
     },
-    { skipHidden: false, skipInaccessible: false, skipLinks: false, recurse: true },
+    { skipHidden: false, skipInaccessible: false, skipLinks: true, recurse: true },
   )
     .catch((err) => {
       const code = getErrorCode(err);
@@ -356,12 +407,108 @@ function removeOldDirectories(directories: string[]): PromiseBB<void> {
   ).then(() => PromiseBB.resolve());
 }
 
+async function linkTargetParent(
+  sourceParent: string,
+  target: string,
+): Promise<{ parent: string; tail: string[] }> {
+  let parent = path.isAbsolute(target) ? target : `${sourceParent}${path.sep}${target}`;
+  const tail: string[] = [];
+  if (![".", ".."].includes(path.basename(parent))) {
+    tail.unshift(path.basename(parent));
+    parent = path.dirname(parent);
+  }
+  for (;;) {
+    try {
+      return { parent: await nodeFs.promises.realpath(parent), tail };
+    } catch (err) {
+      if (!["ENOENT", "ENOTDIR"].includes(getErrorCode(err))) throw err;
+      const ancestor = path.dirname(parent);
+      if (ancestor === parent) throw err;
+      // Retain unresolved components so dangling links keep native traversal semantics.
+      tail.unshift(path.basename(parent));
+      parent = ancestor;
+    }
+  }
+}
+
+function transferEntry(
+  source: string,
+  dest: string,
+  sourceRoot: string,
+  destRoot: string,
+  transfer: typeof copyFile,
+  options: fs.ILinkFileOptions,
+): PromiseBB<void> {
+  return fs.lstatAsync(source).then((stat) => {
+    if (!stat.isSymbolicLink()) return transfer(source, dest, options);
+    return PromiseBB.try(async () => {
+      await fs.ensureDirAsync(path.dirname(dest));
+      const [target, actualRoot, actualSourceParent, actualDestRoot, actualDestParent] =
+        await PromiseBB.all([
+          fs.readlinkAsync(source),
+          nodeFs.promises.realpath(sourceRoot),
+          nodeFs.promises.realpath(path.dirname(source)),
+          nodeFs.promises.realpath(destRoot),
+          nodeFs.promises.realpath(path.dirname(dest)),
+        ]);
+      let { parent, tail } = await linkTargetParent(actualSourceParent, target);
+      if (tail.length === 1 && ![".", ".."].includes(tail[0])) {
+        parent = path.join(parent, tail[0]);
+        tail = [];
+      }
+      const relative = [sourceRoot, actualRoot]
+        .map((root) => path.relative(root, parent))
+        .find(
+          (value) =>
+            value === "" ||
+            (!path.isAbsolute(value) && value !== ".." && !value.startsWith(`..${path.sep}`)),
+        );
+      const moved = relative !== undefined ? path.resolve(actualDestRoot, relative) : parent;
+      // Keep dangling entries as links and retain each step of a link chain.
+      const prefix = path.isAbsolute(target)
+        ? moved
+        : path.relative(actualDestParent, moved) || ".";
+      const newTarget = tail.length === 0 ? prefix : `${prefix}${path.sep}${tail.join(path.sep)}`;
+      await fs.symlinkAsync(newTarget, dest);
+    });
+  });
+}
+
 function linkFile(source: string, dest: string, options?: fs.ILinkFileOptions): PromiseBB<void> {
   return fs.ensureDirAsync(path.dirname(dest)).then(() => {
     return fs
       .linkAsync(source, dest, options)
-      .catch((err) =>
-        getErrorCode(err) !== "EEXIST" ? PromiseBB.reject(err) : PromiseBB.resolve(),
-      );
+      .catch((err) => acceptIdenticalFile(source, dest, err));
   });
+}
+
+function acceptIdenticalFile(source: string, dest: string, err: unknown): PromiseBB<void> {
+  if (getErrorCode(err) !== "EEXIST") return PromiseBB.reject(err);
+  return PromiseBB.all([fs.lstatAsync(source), fs.lstatAsync(dest)]).then(([from, to]) => {
+    if (!from.isFile() || !to.isFile() || from.dev !== to.dev || from.ino !== to.ino) throw err;
+  });
+}
+
+function copyFile(source: string, dest: string, _options?: fs.ILinkFileOptions): PromiseBB<void> {
+  return fs
+    .ensureDirAsync(path.dirname(dest))
+    .then(() => nodeFs.promises.copyFile(source, dest, nodeFs.constants.COPYFILE_EXCL))
+    .catch((err) => acceptIdenticalFile(source, dest, err));
+}
+
+function preserveTransferTag(root: string, source: string, dest: string): PromiseBB<boolean> {
+  if (
+    path.dirname(source) !== root ||
+    ![STAGING_DIR_TAG, DOWNLOADS_DIR_TAG].includes(path.basename(source))
+  ) {
+    return PromiseBB.resolve(false);
+  }
+  // Existing folder tags describe the destination and are not payload collisions.
+  return fs
+    .lstatAsync(dest)
+    .then((stat) => stat.isFile())
+    .catch((err) => {
+      if (getErrorCode(err) !== "ENOENT") throw err;
+      return false;
+    });
 }

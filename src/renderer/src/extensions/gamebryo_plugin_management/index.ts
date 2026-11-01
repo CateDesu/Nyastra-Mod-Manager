@@ -29,6 +29,7 @@ import { discoveryByGame } from "../gamemode_management/selectors";
 import { installPathForGame } from "../mod_management/selectors";
 import {
   activeGameId,
+  activeProfile,
   lastActiveProfileForGame,
   profileById,
 } from "../profile_management/selectors";
@@ -1214,12 +1215,16 @@ function init(context: IExtensionContextExt) {
 
         context.api.events.on(
           "collection-postprocess-complete",
-          (gameId: string, collectionModId: string) => {
+          (gameId: string, collectionModId: string, ownerProfileId?: string) => {
             if (!gameSupported(gameId)) {
               return;
             }
-            const profileId = lastActiveProfileForGame(context.api.getState(), gameId);
-            if (!profileId) {
+            const profileId =
+              ownerProfileId ?? lastActiveProfileForGame(context.api.getState(), gameId);
+            const ownsProfile = () =>
+              activeProfile(context.api.getState())?.id === profileId &&
+              context.api.getState().persistent.profiles[profileId]?.gameId === gameId;
+            if (!profileId || !ownsProfile()) {
               return;
             }
             // persist the loadOrder hive before the plugin list refresh: the postprocess
@@ -1233,7 +1238,9 @@ function init(context: IExtensionContextExt) {
                     });
                   })
                 : Promise.resolve();
-            void flushed.then(() => onDidDeploy(context.api, profileId));
+            return flushed.then(() =>
+              ownsProfile() ? onDidDeploy(context.api, profileId) : undefined,
+            );
           },
         );
 

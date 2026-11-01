@@ -1,5 +1,5 @@
 {
-  "recipeVersion": 3,
+  "recipeVersion": 4,
   "plugins": [
     {
       "directory": "Vortex Extension Update - Resident Evil 4 (2023) Vortex Extension v0.4.1",
@@ -16,6 +16,15 @@
       "game": "requiem",
       "author": "ChemBoy1",
       "url": "https://www.nexusmods.com/site/mods/1653"
+    },
+    {
+      "directory": "helldivers2",
+      "name": "Game: Helldivers 2",
+      "version": "1.2.2",
+      "game": "helldivers2",
+      "helper": false,
+      "author": "ChemBoy1 and Wistipouf",
+      "url": "https://www.nexusmods.com/site/mods/845"
     }
   ],
   "distribution": "Recipes only. Third-party extension code and artwork are not included."

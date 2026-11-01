@@ -76,9 +76,16 @@ function main(context: types.IExtensionContext) {
     updateDebouncer.schedule();
   };
 
-  const updateContent = (state: types.IState, mod: types.IMod, reset: boolean) => {
-    const gameId = selectors.activeGameId(state);
-    const stagingPath = selectors.installPath(state);
+  const updateContent = (
+    state: types.IState,
+    mod: types.IMod,
+    reset: boolean,
+    gameId: string = selectors.activeGameId(state),
+  ) => {
+    if (gameId === undefined) {
+      return;
+    }
+    const stagingPath = selectors.installPathForGame(state, gameId);
     if (stagingPath === undefined || mod.installationPath === undefined) {
       return;
     }
@@ -187,7 +194,7 @@ function main(context: types.IExtensionContext) {
       const state = context.api.store.getState();
       const mod = util.getSafe(state.persistent.mods, [gameId, modId], undefined);
       if (mod !== undefined) {
-        updateContent(state, mod, true);
+        updateContent(state, mod, true, gameId);
       }
     });
 

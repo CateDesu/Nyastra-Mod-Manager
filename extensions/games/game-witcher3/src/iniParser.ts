@@ -92,7 +92,7 @@ export default class IniStructure {
           })
           .catch((err) => this.modSettingsErrorHandler(err, "Failed to cleanup load order file"));
       } else {
-        const filePath = getLoadOrderFilePath();
+        const filePath = getLoadOrderFilePath(this.mApi);
         await fs
           .removeAsync(filePath)
           .catch((err) =>
@@ -107,7 +107,7 @@ export default class IniStructure {
   }
 
   public async ensureModSettings() {
-    const filePath = getLoadOrderFilePath();
+    const filePath = getLoadOrderFilePath(this.mApi);
     const parser = new IniParser(new WinapiFormat());
     return fs
       .statAsync(filePath)
@@ -120,7 +120,7 @@ export default class IniStructure {
   }
 
   private async createModSettings() {
-    const filePath = getLoadOrderFilePath();
+    const filePath = getLoadOrderFilePath(this.mApi);
     // Theoretically the Witcher 3 documents path should be
     //  created at this point (either by us or the game) but
     //  just in case it got removed somehow, we re-instate it
@@ -153,7 +153,7 @@ export default class IniStructure {
       return Promise.resolve(null);
     }
 
-    const filePath = getLoadOrderFilePath();
+    const filePath = getLoadOrderFilePath(this.mApi);
     const parser = new IniParser(new WinapiFormat());
     const ini = await parser.read(filePath);
     const data = Object.entries(ini.data).reduce((accum, [key, value]) => {
@@ -167,7 +167,7 @@ export default class IniStructure {
   }
 
   public async writeToModSettings(): Promise<void> {
-    const filePath = getLoadOrderFilePath();
+    const filePath = getLoadOrderFilePath(this.mApi);
     // Built beside the real file and moved over it, so a concurrent read never
     // sees it empty or half written.
     const tempPath = `${filePath}.vortex_tmp`;

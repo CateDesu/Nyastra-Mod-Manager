@@ -1,0 +1,86 @@
+diff --git a/lib/Nexus.js b/lib/Nexus.js
+--- a/lib/Nexus.js
++++ b/lib/Nexus.js
+@@ -278,7 +278,7 @@
+             const key = (_a = this.mBaseData.headers) === null || _a === void 0 ? void 0 : _a.APIKEY;
+             this.mLogCB('info', 'revalidate', { isUndefined: key === undefined });
+             if (key !== undefined) {
+-                this.mValidationResult = yield this.setKey(key);
++                yield this.setKey(key);
+             }
+             return this.mValidationResult;
+         });
+@@ -288,6 +288,7 @@
+     }
+     setTokenProvider(provider) {
+         return __awaiter(this, void 0, void 0, function* () {
++            this.mKeyValidation = undefined;
+             this.mTokenProvider = provider;
+             this.mOAuthCredentials = undefined;
+             this.mOAuthConfig = undefined;
+@@ -319,8 +320,15 @@
+             };
+         });
+     }
+-    setKey(apiKey) {
+-        return __awaiter(this, void 0, void 0, function* () {
++    setKey(apiKey, isCurrent) {
++        return __awaiter(this, void 0, void 0, function* () {
++            if (isCurrent !== undefined && !isCurrent()) {
++                return null;
++            }
++            const validation = {};
++            this.mKeyValidation = validation;
++            const ownsValidation = () => this.mKeyValidation === validation
++                && (isCurrent === undefined || isCurrent());
+             this.mLogCB('info', 'assigning api key', { isUndefined: apiKey === undefined });
+             if (apiKey === undefined) {
+                 delete this.mBaseData.headers.APIKEY;
+@@ -330,11 +338,16 @@
+             }
+             if (apiKey !== undefined) {
+                 try {
+-                    this.mValidationResult = yield this.validateKey(apiKey);
+-                    return this.mValidationResult;
++                    const result = yield this.validateKey(apiKey);
++                    if (ownsValidation()) {
++                        this.mValidationResult = result;
++                    }
++                    return result;
+                 }
+                 catch (err) {
+-                    this.mValidationResult = null;
++                    if (ownsValidation()) {
++                        this.mValidationResult = null;
++                    }
+                     throw err;
+                 }
+             }
+@@ -349,6 +362,7 @@
+     }
+     validateKey(key) {
+         return __awaiter(this, void 0, void 0, function* () {
++            yield this.mQuota.wait();
+             return this.request(this.mBaseURL + '/users/validate', this.args({ headers: this.filter({ APIKEY: key }) }));
+         });
+     }
+@@ -1161,6 +1175,7 @@
+         });
+     }
+     set oAuthCredentials(credentials) {
++        this.mKeyValidation = undefined;
+         this.mOAuthCredentials = credentials;
+         this.mValidationResult = transformJwtToValidationResult(this.mOAuthCredentials);
+     }
+diff --git a/lib/Nexus.d.ts b/lib/Nexus.d.ts
+--- a/lib/Nexus.d.ts
++++ b/lib/Nexus.d.ts
+@@ -28,7 +28,7 @@
+     setTokenProvider(provider: types.AccessTokenProvider): Promise<types.IValidateKeyResponse | undefined>;
+     getAccessToken(rejectedToken?: string): Promise<string | undefined>;
+     setOAuthCredentials(credentials: types.IOAuthCredentials, config: types.IOAuthConfig, onJWTRefresh: (credentials: types.IOAuthCredentials) => void): Promise<types.IValidateKeyResponse>;
+-    setKey(apiKey: string): Promise<types.IValidateKeyResponse>;
++    setKey(apiKey: string, isCurrent?: () => boolean): Promise<types.IValidateKeyResponse>;
+     getRateLimits(): {
+         daily: number;
+         hourly: number;

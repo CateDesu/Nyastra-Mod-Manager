@@ -58,7 +58,7 @@ This is a list of all modules leaked by Vortex to extensions. Any module listed 
 | feedparser | 2.3.0 |
 | fs-extra | 9.1.0 |
 | fuzzball | 1.4.0 |
-| glob | 11.1.0 |
+| glob | 14.0.3 |
 | got | 15.0.5 |
 | graphlib | 2.1.8 |
 | i18next | 21.10.0 |

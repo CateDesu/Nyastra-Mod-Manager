@@ -5,6 +5,7 @@ import {
   lstatSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -38,9 +39,40 @@ export function importLinuxProfile(sourceDirectory, configHome) {
   const oldFluffy = path.join(configHome, "vortex-native/fluffy.json");
   let copiedFluffy = false;
   let moved = false;
+  const rollback = () => {
+    let failure;
+    for (const cleanup of [
+      () => {
+        if (moved) rmSync(destination, { recursive: true, force: true });
+      },
+      () => {
+        if (copiedFluffy) rmSync(fluffy, { force: true });
+      },
+    ]) {
+      try {
+        cleanup();
+      } catch (error) {
+        failure ??= error;
+      }
+    }
+    if (failure) throw failure;
+  };
+  mkdirSync(staging, { recursive: false, mode: 0o700 });
   try {
-    mkdirSync(staging, { recursive: false, mode: 0o700 });
-    for (const name of ["state.v2", "plugins"]) {
+    const names = ["state.v2", "plugins"];
+    for (const entry of readdirSync(source, { withFileTypes: true })) {
+      if (entry.isSymbolicLink()) throw new Error("Profile import does not copy symlinks");
+      if (!entry.isDirectory() || names.includes(entry.name)) continue;
+      const profiles = path.join(entry.name, "profiles");
+      try {
+        const stats = lstatSync(path.join(source, profiles));
+        if (stats.isSymbolicLink()) throw new Error("Profile import does not copy symlinks");
+        if (stats.isDirectory()) names.push(profiles);
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+      }
+    }
+    for (const name of names) {
       const filename = path.join(source, name);
       if (!existsSync(filename)) continue;
       cpSync(filename, path.join(staging, name), {
@@ -82,14 +114,14 @@ export function importLinuxProfile(sourceDirectory, configHome) {
     }
     return {
       profile: destination,
-      rollback() {
-        rmSync(destination, { recursive: true, force: true });
-        if (copiedFluffy) rmSync(fluffy, { force: true });
-      },
+      rollback,
     };
   } catch (error) {
-    if (moved) rmSync(destination, { recursive: true, force: true });
-    if (copiedFluffy) rmSync(fluffy, { force: true });
+    try {
+      rollback();
+    } catch (recoveryError) {
+      console.error(`Profile recovery failed: ${recoveryError.message}`);
+    }
     throw error;
   } finally {
     rmSync(staging, { recursive: true, force: true });

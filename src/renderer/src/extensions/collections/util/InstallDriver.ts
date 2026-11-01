@@ -100,6 +100,8 @@ class InstallDriver {
   private mPrepare: Bluebird<void> = Bluebird.resolve();
   private mTimeStarted: number;
   private mPostprocessing: boolean = false;
+  private mStartGeneration: number = 0;
+  private mPendingPatches: Map<Promise<void>, string> = new Map();
 
   // Throttle the progress notification to avoid flooding Redux/UI on every single mod
   // event. (Session status writes are dispatched directly now - InstallManager is the
@@ -179,6 +181,10 @@ class InstallDriver {
     this.mApi = api;
 
     this.mInfoCache = new InfoCache(api);
+
+    api.onAsync("will-deploy", (profileId: string) =>
+      this.awaitPatches(profileById(api.getState(), profileId)?.gameId),
+    );
 
     api.onAsync("will-install-mod", (_gameId: string, archiveId: string, _modId: string) => {
       const state: IState = api.store.getState();
@@ -280,14 +286,20 @@ class InstallDriver {
           this.mCollection?.installationPath !== undefined &&
           dependent.reference.description !== undefined
         ) {
-          applyPatches(
-            api,
-            this.mCollection,
-            gameId,
-            dependent.reference.description,
-            modId,
-            installSpec.patches,
-          );
+          const pending = Promise.resolve(
+            applyPatches(
+              api,
+              this.mCollection,
+              gameId,
+              dependent.reference.description,
+              modId,
+              installSpec.patches,
+            ),
+          ).catch((error) => {
+            api.showErrorNotification("Failed to apply collection patches", error);
+          });
+          this.mPendingPatches.set(pending, gameId);
+          void pending.then(() => this.mPendingPatches.delete(pending));
         }
       }
       this.triggerUpdate();
@@ -352,8 +364,8 @@ class InstallDriver {
 
     api.events.on(
       "did-install-dependencies",
-      (gameId: string, modId: string, recommendations: boolean) => {
-        this.onDidInstallDependencies(gameId, modId, recommendations);
+      (gameId: string, modId: string, recommendations: boolean, ownerProfileId?: string) => {
+        return this.onDidInstallDependencies(gameId, modId, recommendations, ownerProfileId);
       },
     );
   }
@@ -377,6 +389,7 @@ class InstallDriver {
       });
       return;
     }
+    this.mStartGeneration++;
     this.mProfile = profile;
     this.mLastCollection = this.mCollection = collection;
     this.mGameId = profile?.gameId ?? activeGameId(this.mApi.getState());
@@ -576,7 +589,9 @@ class InstallDriver {
 
   public async continue() {
     if (this.canContinue() && this.mCollection?.archiveId !== undefined) {
+      const generation = this.mStartGeneration;
       await this.initCollectionInfo();
+      if (generation !== this.mStartGeneration) return;
 
       const steps = {
         query: this.startInstall,
@@ -621,11 +636,12 @@ class InstallDriver {
     if (this.mCollection?.archiveId === undefined) {
       return;
     }
+    const generation = this.mStartGeneration;
     const slug = this.collectionSlug;
     const state: IState = this.mApi.store.getState();
     const modInfo = state.persistent.downloads.files[this.mCollection.archiveId]?.modInfo;
     const nexusInfo = modInfo?.nexus;
-    this.mCollectionInfo =
+    const collectionInfo =
       nexusInfo?.collectionInfo ??
       (await this.mInfoCache.getCollectionInfo(slug)) ??
       // this last fallback is for the weird case where we have revision info cached but
@@ -634,6 +650,8 @@ class InstallDriver {
       // Not sure if/why this would happen on live, it did occur during testing because the
       // stuff was getting deleted from the DB directly
       this.mRevisionInfo?.collection;
+    if (generation !== this.mStartGeneration) return;
+    this.mCollectionInfo = collectionInfo;
   }
 
   /**
@@ -650,6 +668,7 @@ class InstallDriver {
     if (this.mCollection === undefined || this.mGameId === undefined) {
       return false;
     }
+    if ([...this.mPendingPatches.values()].includes(this.mGameId)) return false;
     const session = getCollectionActiveSession(this.mApi.getState());
     if (session === undefined || session.collectionId !== this.mCollection.id) {
       // no active session for this collection - nothing we can assert as complete
@@ -667,14 +686,42 @@ class InstallDriver {
       .every((mod) => isTerminalMemberStatus(mod.status));
   }
 
-  private async onDidInstallDependencies(gameId: string, modId: string, recommendations: boolean) {
+  private async awaitPatches(gameId?: string): Promise<void> {
+    while (true) {
+      const pending = [...this.mPendingPatches.entries()]
+        .filter(([, pendingGame]) => gameId === undefined || pendingGame === gameId)
+        .map(([promise]) => promise);
+      if (pending.length === 0) return;
+      await Promise.all(pending);
+    }
+  }
+
+  private async onDidInstallDependencies(
+    gameId: string,
+    modId: string,
+    recommendations: boolean,
+    ownerProfileId?: string,
+  ) {
+    const profileId =
+      ownerProfileId ??
+      (this.mGameId === gameId && this.mCollection?.id === modId ? this.mProfile?.id : undefined);
+    const ownsSession =
+      this.mGameId === gameId && this.mCollection?.id === modId && this.mProfile?.id === profileId;
+    const generation = this.mStartGeneration;
+    const ownsCompletion = () =>
+      (!ownsSession || generation === this.mStartGeneration) &&
+      profileId !== undefined &&
+      profileById(this.mApi.getState(), profileId)?.gameId === gameId;
+    if (!ownsCompletion()) return;
+    await this.awaitPatches(gameId);
+    if (!ownsCompletion()) return;
     const mods = this.mApi.getState().persistent.mods[gameId];
 
     if (mods[modId]?.type === MOD_TYPE) {
       log("info", "did install dependencies", { gameId, modId });
     }
 
-    if (this.mCollection !== undefined && modId === this.mCollection.id) {
+    if (ownsSession && this.mCollection !== undefined) {
       // update the stored collection because it might have been updated as part of the
       // dependency installation
       this.mLastCollection = this.mCollection = mods[modId];
@@ -683,6 +730,7 @@ class InstallDriver {
         if (!recommendations) {
           if (this.isInstallComplete(false)) {
             await this.initCollectionInfo();
+            if (!ownsCompletion()) return;
             this.mStep = "review";
           } else {
             this.mInstallDone = true;
@@ -699,6 +747,7 @@ class InstallDriver {
           if (this.isInstallComplete(true)) {
             // revisit review screen
             await this.initCollectionInfo();
+            if (!ownsCompletion()) return;
             this.mStep = "review";
           } else {
             this.onStop();
@@ -708,7 +757,15 @@ class InstallDriver {
       }
     }
 
-    await this.finalizeInstalledCollection(gameId, modId, mods);
+    if (!ownsCompletion()) return;
+    await this.finalizeInstalledCollection(
+      gameId,
+      modId,
+      mods,
+      profileId,
+      ownsCompletion,
+      ownsSession,
+    );
   }
 
   /**
@@ -723,42 +780,59 @@ class InstallDriver {
     gameId: string,
     modId: string,
     mods: Record<string, IMod>,
+    profileId: string,
+    ownsCompletion: () => boolean,
+    ownsSession: boolean,
   ) {
     const mod = mods[modId];
     if (mod === undefined || mod.type !== MOD_TYPE) {
       return;
     }
+    const generation = this.mStartGeneration;
     try {
       const stagingPath = installPathForGame(this.mApi.getState(), gameId);
       const collectionInfo: ICollection = await readCollection(
         this.mApi,
         path.join(stagingPath, mod.installationPath, "collection.json"),
       );
+      if (!ownsCompletion()) return;
 
       // Signal postprocessing and yield to the event loop so the review
       // dialog can render before the heavy deployment/parsing work begins.
-      this.mPostprocessing = true;
-      this.triggerUpdate();
+      if (ownsSession) {
+        this.mPostprocessing = true;
+        this.triggerUpdate();
+      }
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      if (!ownsCompletion()) return;
 
-      await postprocessCollection(this.mApi, gameId, mod, collectionInfo, mods);
-
-      this.mPostprocessing = false;
-
-      // Refresh again so that postprocessing changes are reflected in the UI.
-      // (and have the finalization step cleared)
-      this.triggerUpdate();
+      await postprocessCollection(
+        this.mApi,
+        gameId,
+        mod,
+        collectionInfo,
+        mods,
+        profileId,
+        ownsCompletion,
+      );
+      if (!ownsCompletion()) return;
 
       // Terminal install analytics are emitted from the completeInstallationTracking
       // funnel (via close/onStop), sourced from the session SSOT.
     } catch (err) {
-      this.mPostprocessing = false;
+      if (!ownsCompletion()) return;
       log(
         "info",
         "Failed to apply mod rules from collection. This is normal if this is the " +
           "platform where the collection has been created.",
       );
-      this.mDebounce.schedule(undefined, this.collectionSlug, this.revisionNumber, err);
+      if (ownsSession)
+        this.mDebounce.schedule(undefined, this.collectionSlug, this.revisionNumber, err);
+    } finally {
+      if (ownsSession && generation === this.mStartGeneration && this.mPostprocessing) {
+        this.mPostprocessing = false;
+        this.triggerUpdate();
+      }
     }
   }
 
@@ -766,6 +840,7 @@ class InstallDriver {
     outcome: "cancelled" | "paused" = "cancelled",
     context: CollectionInstallOutcomeContext = {},
   ) {
+    this.mStartGeneration++;
     this.mPostprocessing = false;
     if (this.mCollection !== undefined) {
       this.mApi.dismissNotification(INSTALLING_NOTIFICATION_ID + this.mCollection.id);
@@ -799,14 +874,16 @@ class InstallDriver {
     // a restarted install replaces the hold it already has
     this.mOnStop?.();
     // hold off the checks while the collection installs
+    let releaseHold: (() => void) | undefined;
     this.mApi.ext.withSuppressedTests?.(
       ["plugins-changed", "settings-changed", "mod-activated", "mod-installed"],
       () =>
         new Promise<void>((resolve) => {
-          this.mOnStop = () => {
+          const release = () => {
             resolve();
-            this.mOnStop = undefined;
+            if (this.mOnStop === release) this.mOnStop = undefined;
           };
+          this.mOnStop = releaseHold = release;
         }),
     );
 
@@ -817,7 +894,7 @@ class InstallDriver {
       return started;
     } finally {
       if (started === false) {
-        this.mOnStop?.();
+        releaseHold?.();
       }
     }
   };
@@ -826,6 +903,7 @@ class InstallDriver {
     if (this.mCollection?.archiveId === undefined || this.mProfile === undefined) {
       return false;
     }
+    const generation = ++this.mStartGeneration;
 
     this.mInstalledMods = [];
     this.mInstallingMod = undefined;
@@ -859,9 +937,11 @@ class InstallDriver {
 
     if (revisionId !== undefined) {
       try {
-        this.mRevisionInfo = Array.isArray(nexusInfo?.revisionInfo?.modFiles)
+        const revisionInfo = Array.isArray(nexusInfo?.revisionInfo?.modFiles)
           ? nexusInfo.revisionInfo
           : await this.mInfoCache.getRevisionInfo(revisionId, slug, this.revisionNumber);
+        if (generation !== this.mStartGeneration) return false;
+        this.mRevisionInfo = revisionInfo;
       } catch (err) {
         log("error", "failed to get remote info for revision", {
           revisionId,
@@ -871,6 +951,7 @@ class InstallDriver {
         });
       }
     }
+    if (generation !== this.mStartGeneration) return false;
 
     const { userInfo } = state.persistent["nexus"] ?? {};
     // don't request a vote on own collection
@@ -882,6 +963,7 @@ class InstallDriver {
     const currentgame = getGame(gameMode);
     const discovery = discoveryByGame(state, gameMode);
     const gameVersion = await currentgame.getInstalledVersion(discovery);
+    if (generation !== this.mStartGeneration) return false;
     const gvMatch = (gv) => gv.reference === gameVersion;
     const revGameVersions = this.mRevisionInfo?.gameVersions ?? [];
     if ((revGameVersions.length ?? 0 !== 0) && revGameVersions.find(gvMatch) === undefined) {
@@ -908,6 +990,7 @@ class InstallDriver {
         },
         [{ label: "Cancel" }, { label: "Continue" }],
       );
+      if (generation !== this.mStartGeneration) return false;
       if (choice.action === "Cancel") {
         this.mInstallDone = true;
         return false;

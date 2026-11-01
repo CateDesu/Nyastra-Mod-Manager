@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { access, mkdir, rename, rm, stat } from "node:fs/promises";
+import { access, mkdir, open, rename, stat } from "node:fs/promises";
 import * as path from "node:path";
 
 import { unknownToError } from "@vortex/shared";
@@ -48,6 +48,15 @@ import {
 import { downloadPathForGame } from "./extensions/download_management/selectors";
 import type { IDownload } from "./extensions/download_management/types/IDownload";
 import {
+  archiveOwners,
+  archiveOwnership,
+  downloadArchivePath,
+  physicalArchivePath,
+  removeArchiveFile,
+  withArchiveAdmission,
+  withArchiveMutation,
+} from "./extensions/download_management/util/archiveOwnership";
+import {
   moveDownloadToFreeName,
   normalizeDownloadFileName,
   TEMP_DOWNLOAD_PREFIX,
@@ -62,6 +71,7 @@ import { log } from "./logging";
 import type { IExtensionApi } from "./types/IExtensionContext";
 import type { IState } from "./types/IState";
 import getVortexPath from "./util/getVortexPath";
+import { resolveWinePath } from "./util/resolvePathCase";
 import { batchDispatch, flatten } from "./util/util";
 
 function rehydrateDownloadError(state: WireDownloadState): Error | null {
@@ -181,7 +191,13 @@ export class IPCDownloadAdapter {
   // A checkpointless restart shares its outcome with every resume caller.
   readonly #restoring = new Map<
     string,
-    { activeDownload: ActiveDownload; promise: Promise<void>; cancel: () => void }
+    {
+      activeDownload: ActiveDownload;
+      promise: Promise<void>;
+      work: Promise<void>;
+      canceled: UserCanceled;
+      cancel: () => void;
+    }
   >();
   readonly #resuming = new Map<string, Promise<void>>();
   readonly #removing = new Map<string, Promise<void>>();
@@ -279,7 +295,7 @@ export class IPCDownloadAdapter {
     });
   }
 
-  hydrateFromState(): void {
+  async hydrateFromState(): Promise<void> {
     const state = this.#api.getState();
     const { maxParallelDownloads, maxBandwidth } = state.settings.downloads;
     this.#currentMaxParallelDownloads = maxParallelDownloads;
@@ -302,22 +318,27 @@ export class IPCDownloadAdapter {
     const files = state.persistent.downloads.files ?? {};
     const checkpoints = state.persistent.downloads.checkpoints ?? {};
 
+    const work: Promise<void>[] = [];
     for (const [id, download] of Object.entries(files)) {
       if (!["init", "started"].includes(download.state)) continue;
 
       const checkpoint = checkpoints[id];
       if (checkpoint !== undefined) {
         log("debug", "auto-resuming interrupted download", { id });
-        this.#activeDownloads.set(id, {
-          lastBytesReceived: 0,
-          lastProgressDispatch: 0,
-          startedEventEmitted: false,
-        });
-        window.api.downloader.resume(checkpoint).catch((err) => {
-          log("error", "failed to auto-resume download", { id, err });
-          this.#activeDownloads.delete(id);
-          this.#api.store.dispatch(setDownloadInterrupted(id, download.received));
-        });
+        // Startup also lets the native downloader handle empty checkpoints.
+        work.push(
+          new Promise<void>((resolve) => {
+            void this.#handleResumeDownload(
+              id,
+              (err) => {
+                if (err !== null) log("error", "failed to auto-resume download", { id, err });
+                resolve();
+              },
+              undefined,
+              true,
+            );
+          }),
+        );
       } else {
         // Without a checkpoint there is no record of which byte ranges completed
         // (chunks download in parallel, so the partial file may have holes) nor
@@ -327,23 +348,20 @@ export class IPCDownloadAdapter {
         // re-requests a fresh download instead of attempting a resume that is
         // guaranteed to fail with "No checkpoint stored for download <id>".
         log("debug", "interrupted download has no checkpoint, discarding", { id });
-        this.#discardStaleDownload(id, download).catch((err) => {
-          log("error", "failed to discard stale download", { id, err });
-        });
+        work.push(
+          this.#discardStaleDownload(id).catch((err) => {
+            log("error", "failed to discard stale download", { id, err });
+          }),
+        );
       }
     }
+    await Promise.all(work);
   }
 
-  async #discardStaleDownload(downloadId: string, download: IDownload): Promise<void> {
-    if (download.localPath !== undefined) {
-      const state = this.#api.getState();
-      const gameId = toInternalGameId(this.#api, download.game?.[0] ?? activeGameId(state));
-      const dlPath = downloadPathForGame(state, gameId);
-      await rm(path.join(dlPath, download.localPath), { force: true });
-    }
-    // Silent: this is automatic startup cleanup, not a user-initiated removal,
-    // so it shouldn't raise a "downloads removed" toast.
-    this.#api.store.dispatch(removeDownloadSilent(downloadId));
+  async #discardStaleDownload(downloadId: string): Promise<void> {
+    await this.#trackRemoval(downloadId, () =>
+      this.#removeStoppedDownload(downloadId, undefined, true),
+    );
   }
 
   #emitAnalytics(
@@ -483,52 +501,48 @@ export class IPCDownloadAdapter {
     activeDownload?: ActiveDownload,
   ): Promise<void> {
     const reduxState = this.#api.getState();
-    const download = reduxState.persistent.downloads.files?.[downloadId];
-
-    if (download?.localPath !== undefined) {
-      const gameId = toInternalGameId(this.#api, download.game?.[0] ?? activeGameId(reduxState));
-      const dlPath = downloadPathForGame(reduxState, gameId);
-      const tempPath = path.join(dlPath, download.localPath);
-
-      // Determine the final filename: server Content-Disposition > caller hint > temp name.
-      const hint = activeDownload?.fileNameHint;
-      const requestedName = wireState.fileName ?? hint ?? download.localPath;
-      let finalPath = tempPath;
-
-      try {
+    let download = reduxState.persistent.downloads.files?.[downloadId];
+    let tempPath: string;
+    let requestedName: string;
+    let finalPath: string;
+    try {
+      finalPath = await withArchiveMutation(this.#api, async () => {
+        const state = this.#api.getState();
+        download = state.persistent.downloads.files?.[downloadId];
+        if (download?.localPath === undefined) return undefined;
+        const gameId = toInternalGameId(this.#api, download.game?.[0] ?? activeGameId(state));
+        const dlPath = await resolveWinePath(downloadPathForGame(state, gameId));
+        tempPath = path.join(dlPath, download.localPath);
+        requestedName = wireState.fileName ?? activeDownload?.fileNameHint ?? download.localPath;
         let finalName = normalizeDownloadFileName(requestedName);
-        if (!(await stat(tempPath)).isFile()) {
-          throw new Error("Downloaded archive is not a file");
-        }
+        if (!(await stat(tempPath)).isFile()) throw new Error("Downloaded archive is not a file");
         if (path.join(dlPath, finalName) !== tempPath) {
           if (finalName === activeDownload?.replaceExistingName) {
             await rename(tempPath, path.join(dlPath, finalName));
           } else {
             finalName = await moveDownloadToFreeName(tempPath, dlPath, finalName);
           }
-          finalPath = path.join(dlPath, finalName);
           this.#api.store.dispatch(setDownloadFilePath(downloadId, finalName));
         }
-      } catch (err) {
-        if (activeDownload?.cancelRequested) return;
-        const error = unknownToError(err);
-        log("error", "failed to finalize download file", {
-          downloadId,
-          tempPath,
-          requestedName,
-          err,
-        });
-        this.#emitAnalytics(downloadId, "failed", error);
-        this.#api.store.dispatch(finishDownload(downloadId, "failed", error));
-        this.#api.events.emit("did-finish-download", downloadId, "failed");
-        settleDownloadCallback(activeDownload, error, downloadId);
-        return;
-      }
-
+        return path.join(dlPath, finalName);
+      });
+    } catch (err) {
+      if (activeDownload?.cancelRequested) return;
+      const error = unknownToError(err);
+      log("error", "failed to finalize download file", {
+        downloadId,
+        tempPath,
+        requestedName,
+        err,
+      });
+      this.#emitAnalytics(downloadId, "failed", error);
+      this.#api.store.dispatch(finishDownload(downloadId, "failed", error));
+      this.#api.events.emit("did-finish-download", downloadId, "failed");
+      settleDownloadCallback(activeDownload, error, downloadId);
+      return;
+    }
+    if (finalPath !== undefined) {
       try {
-        // MD5 is a fallback identifier for collection rule matching and reverse
-        // ModDB lookups for files that lack Nexus IDs (e.g. non-NXM downloads).
-        // Hash on a main-process worker_thread so a large file doesn't block the renderer.
         const { hash } = await window.api.hash.compute("md5", finalPath);
         this.#api.store.dispatch(setDownloadHash(downloadId, hash));
       } catch (err) {
@@ -587,133 +601,135 @@ export class IPCDownloadAdapter {
     if (fileName !== undefined) fileName = normalizeDownloadFileName(fileName);
     const encodedUrl = parseEncodedUrl(rawUrl.toString());
 
-    const { state, dlPath, gameIds } = await this.#resolveDownloadTarget(modInfo);
-    let replaceExisting = redownload === "replace";
+    await withArchiveAdmission(this.#api, async () => {
+      const { state, dlPath, gameIds } = await this.#resolveDownloadTarget(modInfo);
+      let replaceExisting = redownload === "replace";
 
-    // Check for an existing file using the caller-supplied name before queuing.
-    // We can only do this when a name is provided; temp-named downloads are always new.
-    if (fileName !== undefined && redownload !== "always") {
-      const namedDest = path.join(dlPath, fileName);
-      const fileExists = await access(namedDest).then(
-        () => true,
-        () => false,
-      );
-      if (fileExists && redownload !== "replace") {
-        let useExisting = true;
-        if (redownload === "ask") {
-          const result = await this.#api.showDialog?.(
-            "question",
-            "File already downloaded",
-            { text: `"${fileName}" is already on disk. Download again?` },
-            [{ label: "Use existing" }, { label: "Re-download" }],
-          );
-          useExisting = result?.action !== "Re-download";
-          replaceExisting = !useExisting;
-        }
-        if (useExisting) {
-          const downloads = state.persistent.downloads.files;
-          let existingId = Object.keys(downloads).find(
-            (id) =>
-              downloads[id].localPath === fileName &&
-              downloadPathForGame(
-                state,
-                toInternalGameId(this.#api, downloads[id].game?.[0] ?? activeGameId(state)),
-              ) === dlPath,
-          );
-          const gameId = gameIds[0];
-          if (existingId === undefined && gameId !== undefined) {
-            // A file no record tracks (dropped in manually, or its record was lost) is adopted
-            // the same way the download-folder scan adopts unknown archives, so the caller
-            // receives a usable download id. Adoption needs a game id: ADD_LOCAL_DOWNLOAD's
-            // sanity check blocks a record without one.
-            const { size } = await stat(namedDest);
-            existingId = randomUUID();
-            this.#api.store.dispatch(addLocalDownload(existingId, gameId, fileName, size));
-            this.#api.store.dispatch(
-              setCompatibleGames(
-                existingId,
-                gameIds.filter((game): game is string => game !== undefined),
-              ),
-            );
-          }
-          if (existingId !== undefined) {
-            callback?.(new AlreadyDownloaded(fileName, existingId));
-            return;
-          }
-          // untracked file with no game to record it under: fall through to a fresh download
-        }
-      }
-    }
-
-    const collationId = this.#nextCollationId++;
-    try {
-      const info: StoredDownloadInfo = {
-        encodedUrl: encodedUrl,
-        callback,
-      };
-
-      this.#pending.set(collationId, info);
-
-      // Use a temporary filename so the main process can start writing immediately.
-      // #completeDownload renames to the final name derived from Content-Disposition.
-      // The real filename is passed as a hint; the server name takes priority.
-      const tempName = `${TEMP_DOWNLOAD_PREFIX}${randomUUID()}`;
-      const dest = path.join(dlPath, tempName);
-
-      log("debug", "starting download", {
-        encodedUrl,
-        dest,
-        collationId,
-      });
-
-      const { downloadId } = await window.api.downloader.start(dest, collationId);
-
-      const allowInstall = normalizeAllowInstall(options?.allowInstall);
-
-      this.#activeDownloads.set(downloadId, {
-        callback,
-        fileNameHint: fileName,
-        replaceExistingName: replaceExisting ? fileName : undefined,
-        allowInstall,
-        lastBytesReceived: 0,
-        lastProgressDispatch: 0,
-        startedEventEmitted: false,
-      });
-      log("debug", "download queued", { downloadId, collationId });
-
-      // Create the Redux record. nexus_integration's onChangeDownloads watches
-      // downloads.files and triggers metadata enrichment when nexus.ids is present.
-      this.#api.store.dispatch(initDownload(downloadId, rawUrls, modInfo, gameIds));
-      // Set localPath to the temp name so the UI has something to display.
-      this.#api.store.dispatch(setDownloadFilePath(downloadId, tempName));
-      // Fall back to the filename hint for the display name only when the caller didn't
-      // provide a semantic name in modInfo, so the hint can't override it.
-      if (fileName !== undefined && !modInfo?.name) {
-        this.#api.store.dispatch(setDownloadModInfo(downloadId, "name", fileName));
-      }
-      // All IPC downloads support pause via checkpoint. DownloadView checks
-      // download.pausable to show/hide the pause button.
-      this.#api.store.dispatch(setDownloadPausable(downloadId, true));
-
-      // Flatten the resolver's meta into download.modInfo. For nxm URLs this
-      // carries nexus.ids.modId/fileId (or collectionId/revisionId), which
-      // attributeExtractors and collection install plumbing read from.
-      const resolvedMeta = this.#resolvedMeta.get(collationId);
-      this.#resolvedMeta.delete(collationId);
-
-      if (resolvedMeta !== undefined) {
-        const flattened = flatten(resolvedMeta) as Record<string, unknown>;
-        const actions = Object.entries(flattened).map(([key, value]) =>
-          setDownloadModInfo(downloadId, key, value),
+      // Check for an existing file using the caller-supplied name before queuing.
+      // We can only do this when a name is provided; temp-named downloads are always new.
+      if (fileName !== undefined && redownload !== "always") {
+        const namedDest = path.join(dlPath, fileName);
+        const fileExists = await access(namedDest).then(
+          () => true,
+          () => false,
         );
-        if (actions.length > 0) {
-          batchDispatch(this.#api.store, actions);
+        if (fileExists && redownload !== "replace") {
+          let useExisting = true;
+          if (redownload === "ask") {
+            const result = await this.#api.showDialog?.(
+              "question",
+              "File already downloaded",
+              { text: `"${fileName}" is already on disk. Download again?` },
+              [{ label: "Use existing" }, { label: "Re-download" }],
+            );
+            useExisting = result?.action !== "Re-download";
+            replaceExisting = !useExisting;
+          }
+          if (useExisting) {
+            const downloads = state.persistent.downloads.files;
+            let existingId = Object.keys(downloads).find(
+              (id) =>
+                downloads[id].localPath === fileName &&
+                downloadPathForGame(
+                  state,
+                  toInternalGameId(this.#api, downloads[id].game?.[0] ?? activeGameId(state)),
+                ) === dlPath,
+            );
+            const gameId = gameIds[0];
+            if (existingId === undefined && gameId !== undefined) {
+              // A file no record tracks (dropped in manually, or its record was lost) is adopted
+              // the same way the download-folder scan adopts unknown archives, so the caller
+              // receives a usable download id. Adoption needs a game id: ADD_LOCAL_DOWNLOAD's
+              // sanity check blocks a record without one.
+              const { size } = await stat(namedDest);
+              existingId = randomUUID();
+              this.#api.store.dispatch(addLocalDownload(existingId, gameId, fileName, size));
+              this.#api.store.dispatch(
+                setCompatibleGames(
+                  existingId,
+                  gameIds.filter((game): game is string => game !== undefined),
+                ),
+              );
+            }
+            if (existingId !== undefined) {
+              callback?.(new AlreadyDownloaded(fileName, existingId));
+              return;
+            }
+            // untracked file with no game to record it under: fall through to a fresh download
+          }
         }
       }
-    } catch (err) {
-      this.#resolvedMeta.delete(collationId);
-      callback?.(unknownToError(err));
-    }
+
+      const collationId = this.#nextCollationId++;
+      try {
+        const info: StoredDownloadInfo = {
+          encodedUrl: encodedUrl,
+          callback,
+        };
+
+        this.#pending.set(collationId, info);
+
+        // Use a temporary filename so the main process can start writing immediately.
+        // #completeDownload renames to the final name derived from Content-Disposition.
+        // The real filename is passed as a hint; the server name takes priority.
+        const tempName = `${TEMP_DOWNLOAD_PREFIX}${randomUUID()}`;
+        const dest = path.join(dlPath, tempName);
+
+        log("debug", "starting download", {
+          encodedUrl,
+          dest,
+          collationId,
+        });
+
+        const { downloadId } = await window.api.downloader.start(dest, collationId);
+
+        const allowInstall = normalizeAllowInstall(options?.allowInstall);
+
+        this.#activeDownloads.set(downloadId, {
+          callback,
+          fileNameHint: fileName,
+          replaceExistingName: replaceExisting ? fileName : undefined,
+          allowInstall,
+          lastBytesReceived: 0,
+          lastProgressDispatch: 0,
+          startedEventEmitted: false,
+        });
+        log("debug", "download queued", { downloadId, collationId });
+
+        // Create the Redux record. nexus_integration's onChangeDownloads watches
+        // downloads.files and triggers metadata enrichment when nexus.ids is present.
+        this.#api.store.dispatch(initDownload(downloadId, rawUrls, modInfo, gameIds));
+        // Set localPath to the temp name so the UI has something to display.
+        this.#api.store.dispatch(setDownloadFilePath(downloadId, tempName));
+        // Fall back to the filename hint for the display name only when the caller didn't
+        // provide a semantic name in modInfo, so the hint can't override it.
+        if (fileName !== undefined && !modInfo?.name) {
+          this.#api.store.dispatch(setDownloadModInfo(downloadId, "name", fileName));
+        }
+        // All IPC downloads support pause via checkpoint. DownloadView checks
+        // download.pausable to show/hide the pause button.
+        this.#api.store.dispatch(setDownloadPausable(downloadId, true));
+
+        // Flatten the resolver's meta into download.modInfo. For nxm URLs this
+        // carries nexus.ids.modId/fileId (or collectionId/revisionId), which
+        // attributeExtractors and collection install plumbing read from.
+        const resolvedMeta = this.#resolvedMeta.get(collationId);
+        this.#resolvedMeta.delete(collationId);
+
+        if (resolvedMeta !== undefined) {
+          const flattened = flatten(resolvedMeta) as Record<string, unknown>;
+          const actions = Object.entries(flattened).map(([key, value]) =>
+            setDownloadModInfo(downloadId, key, value),
+          );
+          if (actions.length > 0) {
+            batchDispatch(this.#api.store, actions);
+          }
+        }
+      } catch (err) {
+        this.#resolvedMeta.delete(collationId);
+        callback?.(unknownToError(err));
+      }
+    });
   }
 
   // Resolves where a download for the given modInfo goes: the game's download folder (created if
@@ -752,21 +768,24 @@ export class IPCDownloadAdapter {
       }
       const fileName = normalizeDownloadFileName(rawName);
 
-      const { dlPath, gameIds } = await this.#resolveDownloadTarget(modInfo);
+      const { id, finalName, size } = await withArchiveMutation(this.#api, async () => {
+        const { dlPath, gameIds } = await this.#resolveDownloadTarget(modInfo);
 
-      const blobPath = path.join(getVortexPath("temp"), `${fileName}.tmp`);
-      const finalName = await moveDownloadToFreeName(blobPath, dlPath, fileName);
-      const finalPath = path.join(dlPath, finalName);
-      const { size } = await stat(finalPath);
+        const blobPath = path.join(getVortexPath("temp"), `${fileName}.tmp`);
+        const finalName = await moveDownloadToFreeName(blobPath, dlPath, fileName);
+        const finalPath = path.join(dlPath, finalName);
+        const { size } = await stat(finalPath);
 
-      // Register the record already at its final name, so #completeDownload skips the rename and
-      // just hashes, marks it finished, fires the callback, and triggers install. A blob url isn't
-      // fetchable, so the record stores no source urls.
-      const id = randomUUID();
-      this.#api.store.dispatch(initDownload(id, [], modInfo, gameIds));
-      this.#api.store.dispatch(setDownloadFilePath(id, finalName));
-      this.#api.store.dispatch(downloadProgress(id, size, size, undefined));
+        // Register the record already at its final name, so #completeDownload skips the rename and
+        // just hashes, marks it finished, fires the callback, and triggers install. A blob url isn't
+        // fetchable, so the record stores no source urls.
+        const id = randomUUID();
+        this.#api.store.dispatch(initDownload(id, [], modInfo, gameIds));
+        this.#api.store.dispatch(setDownloadFilePath(id, finalName));
+        this.#api.store.dispatch(downloadProgress(id, size, size, undefined));
 
+        return { id, finalName, size };
+      });
       const wireState: WireDownloadState = {
         status: "completed",
         error: null,
@@ -812,13 +831,41 @@ export class IPCDownloadAdapter {
   async #removeDownload(downloadId: string): Promise<void> {
     const finalizing = this.#finalizing.get(downloadId);
     const restoring = this.#restoring.get(downloadId);
+    const resuming = this.#resuming.get(downloadId);
     const activeDownload =
       finalizing?.activeDownload ??
       restoring?.activeDownload ??
       this.#activeDownloads.get(downloadId);
+    let resumeSucceeded = false;
+    if (resuming !== undefined) {
+      if (activeDownload !== undefined) activeDownload.cancelRequested = true;
+      try {
+        // Wait for main admission and any cancellation owned by the resume.
+        await resuming;
+        resumeSucceeded = true;
+      } catch (err) {
+        if (
+          !(err instanceof UserCanceled) ||
+          this.#activeDownloads.get(downloadId)?.cancelRequested === false
+        ) {
+          if (activeDownload !== undefined) activeDownload.cancelRequested = false;
+          throw err;
+        }
+      }
+    }
     if (restoring !== undefined) {
       restoring.activeDownload.cancelRequested = true;
       restoring.cancel();
+      try {
+        // The caller race can reject before main admits the original start.
+        await restoring.work;
+      } catch (err) {
+        if (err !== restoring.canceled) {
+          restoring.activeDownload.cancelRequested = false;
+          settleDownloadCallback(restoring.activeDownload, unknownToError(err), downloadId);
+          throw err;
+        }
+      }
     }
     if (finalizing !== undefined) {
       finalizing.activeDownload.cancelRequested = true;
@@ -828,31 +875,42 @@ export class IPCDownloadAdapter {
     const download = state.persistent.downloads.files?.[downloadId];
     const isRunning = download !== undefined && ["init", "started"].includes(download.state);
 
-    if (this.#activeDownloads.has(downloadId) && isRunning) {
+    const runningDownload = this.#activeDownloads.get(downloadId);
+    if ((resuming === undefined || resumeSucceeded) && runningDownload !== undefined && isRunning) {
       log("debug", "cancelling download", { downloadId });
-      activeDownload!.cancelRequested = true;
+      runningDownload.cancelRequested = true;
       try {
         await window.api.downloader.cancel(downloadId);
       } catch (err) {
-        activeDownload!.cancelRequested = false;
+        runningDownload.cancelRequested = false;
         throw err;
       }
     }
 
     // Cancellation waits for writes even if the transfer finished before this request.
     this.#activeDownloads.delete(downloadId);
-    await this.#removeStoppedDownload(downloadId, activeDownload);
+    await this.#removeStoppedDownload(downloadId, runningDownload ?? activeDownload);
   }
 
-  async #removeStoppedDownload(downloadId: string, activeDownload?: ActiveDownload): Promise<void> {
+  #removeStoppedDownload(
+    downloadId: string,
+    activeDownload?: ActiveDownload,
+    silent = false,
+  ): Promise<void> {
+    return withArchiveMutation(this.#api, () =>
+      this.#performStoppedRemoval(downloadId, activeDownload, silent),
+    );
+  }
+
+  async #performStoppedRemoval(
+    downloadId: string,
+    activeDownload?: ActiveDownload,
+    silent = false,
+  ): Promise<void> {
     try {
       const state = this.#api.getState();
       const download = state.persistent.downloads.files?.[downloadId];
-      if (download?.localPath) {
-        const gameId = toInternalGameId(this.#api, download.game?.[0] ?? activeGameId(state));
-        const dlPath = downloadPathForGame(state, gameId);
-        await rm(path.join(dlPath, download.localPath), { force: true });
-      }
+      if (download !== undefined) await removeArchiveFile(this.#api, downloadId, download);
       if (
         download?.state !== "finished" &&
         activeDownload !== undefined &&
@@ -862,7 +920,9 @@ export class IPCDownloadAdapter {
         this.#emitAnalytics(downloadId, "canceled");
       }
       this.#api.store.dispatch(clearDownloadCheckpoint(downloadId));
-      this.#api.store.dispatch(removeDownload(downloadId));
+      this.#api.store.dispatch(
+        silent ? removeDownloadSilent(downloadId) : removeDownload(downloadId),
+      );
       settleDownloadCallback(activeDownload, new UserCanceled(), downloadId);
     } catch (err) {
       const error = unknownToError(err);
@@ -906,6 +966,7 @@ export class IPCDownloadAdapter {
     downloadId: string,
     callback?: (err: Error | null, id?: string) => void,
     options?: { allowInstall?: boolean | "force" },
+    fromStartup = false,
   ): Promise<void> {
     try {
       if (this.#removing.has(downloadId)) throw new UserCanceled();
@@ -924,12 +985,16 @@ export class IPCDownloadAdapter {
         callback?.(null, downloadId);
         return;
       }
-      if (this.#activeDownloads.has(downloadId) && ["init", "started"].includes(download.state)) {
+      if (
+        this.#activeDownloads.has(downloadId) &&
+        !this.#resuming.has(downloadId) &&
+        ["init", "started"].includes(download.state)
+      ) {
         callback?.(null, downloadId);
         return;
       }
       const checkpoint = state.persistent.downloads.checkpoints[downloadId];
-      if (!isResumableCheckpoint(checkpoint)) {
+      if (checkpoint === undefined || (!fromStartup && !isResumableCheckpoint(checkpoint))) {
         // Interrupted rather than cleanly paused, or paused before any range completed: there is
         // nothing to resume from, so restart the download from scratch under the same id.
         const activeDownload = this.#activeDownloads.get(downloadId) ?? {
@@ -937,7 +1002,11 @@ export class IPCDownloadAdapter {
           lastProgressDispatch: 0,
           startedEventEmitted: false,
         };
-        const cancellation = Promise.withResolvers<never>();
+        let rejectCancellation!: (reason: UserCanceled) => void;
+        const cancellation = new Promise<never>((_resolve, reject) => {
+          rejectCancellation = reject;
+        });
+        const canceled = new UserCanceled();
         // Keep ownership until resolver cleanup finishes, while callers can cancel immediately.
         const work = Promise.resolve()
           .then(() =>
@@ -945,15 +1014,18 @@ export class IPCDownloadAdapter {
               downloadId,
               download,
               activeDownload,
+              canceled,
               normalizeAllowInstall(options?.allowInstall),
             ),
           )
           .finally(() => this.#restoring.delete(downloadId));
-        const pending = Promise.race([work, cancellation.promise]);
+        const pending = Promise.race([work, cancellation]);
         this.#restoring.set(downloadId, {
           activeDownload,
           promise: pending,
-          cancel: () => cancellation.reject(new UserCanceled()),
+          work,
+          canceled,
+          cancel: () => rejectCancellation(canceled),
         });
         await pending;
         callback?.(null, downloadId);
@@ -963,29 +1035,66 @@ export class IPCDownloadAdapter {
       log("debug", "resuming download", { downloadId });
       let pending = this.#resuming.get(downloadId);
       if (pending === undefined) {
-        pending = Promise.resolve()
-          .then(() => window.api.downloader.resume(checkpoint))
-          .then(async () => {
+        pending = withArchiveMutation(this.#api, async () => {
+          const liveState = this.#api.getState();
+          const liveDownload = liveState.persistent.downloads.files[downloadId];
+          const liveCheckpoint = liveState.persistent.downloads.checkpoints[downloadId];
+          if (
+            this.#removing.has(downloadId) ||
+            liveDownload === undefined ||
+            (!fromStartup && liveDownload.localPath === undefined) ||
+            liveCheckpoint === undefined ||
+            (!fromStartup && !isResumableCheckpoint(liveCheckpoint))
+          )
+            throw new UserCanceled();
+          // Reserve the path before IPC starts, without holding the queue across its response.
+          this.#api.store.dispatch(pauseDownload(downloadId, false));
+          try {
+            return { resuming: window.api.downloader.resume(liveCheckpoint), liveDownload };
+          } catch (err) {
+            this.#api.store.dispatch(setDownloadInterrupted(downloadId, liveDownload.received));
+            throw err;
+          }
+        })
+          .then(async ({ resuming, liveDownload }) => {
+            try {
+              await resuming;
+            } catch (err) {
+              await withArchiveMutation(this.#api, async () => {
+                const current = this.#api.getState().persistent.downloads.files[downloadId];
+                if (current !== undefined && ["init", "started"].includes(current.state)) {
+                  this.#api.store.dispatch(setDownloadInterrupted(downloadId, current.received));
+                }
+              });
+              throw err;
+            }
+            const allowInstall = normalizeAllowInstall(options?.allowInstall);
+            let active = this.#activeDownloads.get(downloadId);
+            if (active === undefined) {
+              active = {
+                allowInstall,
+                lastBytesReceived: liveDownload.received ?? 0,
+                lastProgressDispatch: 0,
+                startedEventEmitted: false,
+              };
+              this.#activeDownloads.set(downloadId, active);
+            } else if (allowInstall !== undefined) {
+              active.allowInstall = allowInstall;
+            }
             if (
               this.#removing.has(downloadId) ||
               this.#api.getState().persistent.downloads.files[downloadId] === undefined
             ) {
-              await window.api.downloader.cancel(downloadId);
+              active.cancelRequested = true;
+              try {
+                await window.api.downloader.cancel(downloadId);
+              } catch (err) {
+                active.cancelRequested = false;
+                throw err;
+              }
+              if (!this.#removing.has(downloadId)) this.#activeDownloads.delete(downloadId);
               throw new UserCanceled();
             }
-            const allowInstall = normalizeAllowInstall(options?.allowInstall);
-            const active = this.#activeDownloads.get(downloadId);
-            if (active === undefined) {
-              this.#activeDownloads.set(downloadId, {
-                allowInstall,
-                lastBytesReceived: download.received ?? 0,
-                lastProgressDispatch: 0,
-                startedEventEmitted: false,
-              });
-            } else if (allowInstall !== undefined) {
-              active.allowInstall = allowInstall;
-            }
-            this.#api.store.dispatch(pauseDownload(downloadId, false));
           })
           .finally(() => this.#resuming.delete(downloadId));
         this.#resuming.set(downloadId, pending);
@@ -1006,10 +1115,10 @@ export class IPCDownloadAdapter {
     downloadId: string,
     download: IDownload,
     activeDownload: ActiveDownload,
+    canceled: UserCanceled,
     allowInstall?: boolean,
   ): Promise<void> {
-    if (activeDownload.cancelRequested) throw new UserCanceled();
-    const state = this.#api.getState();
+    if (activeDownload.cancelRequested) throw canceled;
     // Treat an empty-string url as absent so a wiped record falls back to reconstruction.
     const storedUrl = download.urls?.[0] || undefined;
     const rawUrl = storedUrl ?? nxmUrlFromDownload(download);
@@ -1020,30 +1129,50 @@ export class IPCDownloadAdapter {
     // record half-reset.
     const encodedUrl = parseEncodedUrl(rawUrl);
 
-    const gameId = toInternalGameId(this.#api, download.game?.[0] ?? activeGameId(state));
-    const dlPath = downloadPathForGame(state, gameId);
-    const dest = path.join(dlPath, download.localPath);
+    let dest: string;
 
     this.#activeDownloads.delete(downloadId);
     try {
       log("debug", "restoring download without usable checkpoint", { downloadId });
-      // Reset progress to zero and return the record to its active state so the UI and any
-      // re-entrant resume emitters see it downloading rather than paused. A reconstructed url is
-      // written back onto the record.
-      this.#api.store.dispatch(
-        downloadProgress(
-          downloadId,
-          0,
-          download.size ?? 0,
-          storedUrl === undefined ? [rawUrl] : undefined,
-        ),
-      );
-      this.#api.store.dispatch(pauseDownload(downloadId, false));
+      await withArchiveMutation(this.#api, async () => {
+        if (activeDownload.cancelRequested) throw canceled;
+        download = this.#api.getState().persistent.downloads.files[downloadId];
+        if (download?.localPath === undefined) throw canceled;
+        const archivePath = await resolveWinePath(
+          downloadArchivePath(this.#api.getState(), download),
+        );
+        dest = archivePath;
+        const identity = await physicalArchivePath(archivePath);
+        const shared = (await archiveOwners(this.#api, downloadId, identity)).length > 0;
+        const { fileAlias } = await archiveOwnership(archivePath, identity, download);
+        if (shared || fileAlias) {
+          const freshName = `${TEMP_DOWNLOAD_PREFIX}${randomUUID()}`;
+          dest = path.join(path.dirname(archivePath), freshName);
+          if (!download.localPath.startsWith(TEMP_DOWNLOAD_PREFIX)) {
+            activeDownload.fileNameHint ??= download.localPath;
+          }
+          this.#api.store.dispatch(setDownloadFilePath(downloadId, freshName));
+        }
+        this.#api.store.dispatch(
+          downloadProgress(
+            downloadId,
+            0,
+            download.size ?? 0,
+            storedUrl === undefined ? [rawUrl] : undefined,
+          ),
+        );
+        this.#api.store.dispatch(pauseDownload(downloadId, false));
 
-      // Drop the unusable partial and stale checkpoint so the transfer starts over from zero.
-      await rm(dest, { force: true });
-      if (activeDownload.cancelRequested) throw new UserCanceled();
-      this.#api.store.dispatch(clearDownloadCheckpoint(downloadId));
+        if (activeDownload.cancelRequested) throw canceled;
+        await removeArchiveFile(this.#api, downloadId, download);
+        if (activeDownload.cancelRequested) throw canceled;
+        if (shared || fileAlias) {
+          const reserved = await open(dest, "wx");
+          await reserved.close();
+        }
+        this.#api.store.dispatch(clearDownloadCheckpoint(downloadId));
+      });
+      if (activeDownload.cancelRequested) throw canceled;
 
       const collationId = this.#nextCollationId++;
       this.#pending.set(collationId, { encodedUrl });
@@ -1056,13 +1185,20 @@ export class IPCDownloadAdapter {
         this.#resolvedMeta.delete(collationId);
       }
 
+      this.#activeDownloads.set(downloadId, activeDownload);
       if (
         activeDownload.cancelRequested ||
         this.#removing.has(downloadId) ||
         this.#api.getState().persistent.downloads.files[downloadId] === undefined
       ) {
-        await window.api.downloader.cancel(downloadId);
-        throw new UserCanceled();
+        try {
+          await window.api.downloader.cancel(downloadId);
+        } catch (err) {
+          activeDownload.cancelRequested = false;
+          throw err;
+        }
+        this.#activeDownloads.delete(downloadId);
+        throw canceled;
       }
 
       // Register the poll entry after start resolves (as #handleStartDownload does) so the poll

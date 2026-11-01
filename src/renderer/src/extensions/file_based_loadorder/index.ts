@@ -92,6 +92,9 @@ export default function init(context: IExtensionContext) {
         },
         onImportList: async (loadOrderId?: string) => {
           const api = context.api;
+          const owner = activeProfile(api.getState());
+          if (owner === undefined) return;
+          const { id: profileId, gameId } = owner;
           const file = await api.selectFile({
             filters: [{ name: "JSON", extensions: ["json"] }],
             title: "Import Load Order",
@@ -101,7 +104,13 @@ export default function init(context: IExtensionContext) {
           }
           try {
             const loadOrderFile = parseLoadOrderFile(await readFile(file, "utf8"));
-            const profileId = activeProfile(api.getState()).id;
+            const current = activeProfile(api.getState());
+            if (
+              current?.id !== profileId ||
+              current.gameId !== gameId ||
+              profileById(api.getState(), profileId)?.gameId !== gameId
+            )
+              return;
             setOrder(profileId, loadOrderFile.entries, loadOrderId);
             if (importedFromOtherLoadOrder(loadOrderFile, loadOrderId)) {
               api.sendNotification({
@@ -179,8 +188,13 @@ export default function init(context: IExtensionContext) {
       const mods: Record<string, IMod> = currentGameMods(context.api.getState());
       return generate(context.api, registry.entries(gameId).filter(isInUse), includedMods, mods);
     },
-    (gameId: string, collection: ICollection) =>
-      parser(context.api, registry.entries(gameId), gameId, collection),
+    (
+      gameId: string,
+      collection: ICollection,
+      _mod: IMod,
+      profileId?: string,
+      isCurrent?: () => boolean,
+    ) => parser(context.api, registry.entries(gameId), gameId, collection, profileId, isCurrent),
     () => Promise.resolve(),
     (t) => t("Load Order"),
     (_state: IState, gameId: string) => {

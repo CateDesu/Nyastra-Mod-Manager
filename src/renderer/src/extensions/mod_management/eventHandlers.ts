@@ -561,7 +561,11 @@ function loadOrderRulesChanged(before: IModRule[], after: IModRule[]): boolean {
   const normalizeRules = (input: IModRule[]) =>
     (input ?? [])
       .filter((rule) => types.includes(rule.type))
-      .map((rule) => _.omit(rule, ["idHint", "md5Hint"])).sort;
+      .map((rule) => {
+        const normalized = _.omit(rule, ["idHint", "md5Hint"]);
+        normalized.reference = _.omit(rule.reference, ["idHint", "md5Hint"]);
+        return normalized;
+      });
 
   return !_.isEqual(normalizeRules(before), normalizeRules(after));
 }
@@ -712,7 +716,9 @@ async function undeploy(
         );
       }),
     );
-    reportRecordedFailures(api, gameMode);
+    if (reportRecordedFailures(api, gameMode).length > 0) {
+      throw new TemporaryError("Some mod files could not be undeployed");
+    }
   } finally {
     log("debug", "done undeploying single mod", {
       game: gameMode,
@@ -839,11 +845,12 @@ export function onRemoveMods(
       options,
     )
     .then(() => undeployMods(api, activators, gameId, removeMods))
-    .then(() => {
+    .then(async () => {
       let completedCount = 0;
       const totalCount = removeMods.length;
       let batched = [];
-      return Promise.all(
+      let removalError: Error | undefined;
+      await Promise.all(
         removeMods.map(async (mod: IMod) => {
           const forwardOptions = { ...(options || {}), modData: { ...mod } };
           try {
@@ -884,6 +891,7 @@ export function onRemoveMods(
             completedCount++;
             options?.progressCB?.(completedCount, totalCount, modName(mod));
           } catch (error) {
+            removalError ??= unknownToError(error);
             log("error", "Failed to remove mod", {
               game: gameId,
               mod: mod.id,
@@ -892,6 +900,10 @@ export function onRemoveMods(
           }
         }),
       );
+      if (batched.length > 0) {
+        batchDispatch(store, batched);
+      }
+      if (removalError !== undefined) throw removalError;
     })
     .then(() => {
       if (callback !== undefined) {

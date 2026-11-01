@@ -38,7 +38,7 @@ describe("BA2 parser", () => {
 
         // Verify extracted files exist and have content
         for (const name of EXPECTED.gnrl.fileList) {
-          const extracted = path.join(tmpDir, name);
+          const extracted = path.join(tmpDir, ...name.split("\\"));
           expect(fs.existsSync(extracted)).toBe(true);
           const stat = fs.statSync(extracted);
           expect(stat.size).toBeGreaterThan(0);
@@ -76,7 +76,7 @@ describe("BA2 parser", () => {
         await archive.extractAll(tmpDir);
 
         for (const name of EXPECTED.dx10.fileList) {
-          const extracted = path.join(tmpDir, name);
+          const extracted = path.join(tmpDir, ...name.split("\\"));
           expect(fs.existsSync(extracted)).toBe(true);
           // DDS files should start with "DDS " magic
           const header = Buffer.alloc(4);

@@ -44,6 +44,7 @@ import type { IExtensionApi, IRunOptions } from "../types/IExtensionContext";
 import type { IHealthCheckResult } from "../types/IHealthCheck";
 import type { INotification } from "../types/INotification";
 import type { IState } from "../types/IState";
+import type ConcurrencyLimiter from "../util/ConcurrencyLimiter";
 
 /** A dispatched redux-act action as the harness sees it. */
 export interface ITrackedAction {
@@ -283,7 +284,15 @@ export interface IInstallManagerHarness extends IApiHarness {
  * itself. `api` is `unknown` here because the harness api is structurally narrower than the real
  * IExtensionApi.
  */
+type InstallLimiter = Pick<ConcurrencyLimiter, "do"> & { mNext?: () => void; mLimit: number };
+
 export interface IManagerInternals {
+  mPhaseTracker: InstallPhaseTracker;
+  augmentRules: (api: IExtensionApi, gameId: string, mod: IMod) => Promise<IModRule[]>;
+  setModSize: (api: IExtensionApi, modId: string, gameId: string) => Promise<void>;
+  mInstallLimit: InstallLimiter;
+  mDependencyPipelineLimit: InstallLimiter;
+  generateDependencyInstallKey: (sourceModId: string | undefined, downloadId: string) => string;
   reQueueDownloadedMods: (
     api: unknown,
     sourceModId: string,
@@ -297,7 +306,11 @@ export interface IManagerInternals {
   ) => { phaseComplete: boolean; needsRequeue: boolean; allMods: unknown[] };
   driveSelectedOptionals: (api: unknown, sourceModId: string) => void;
   admitSettledOptionalPhase: (sourceModId: string, api: unknown) => void;
-  pollAllPhasesComplete: (api: unknown, sourceModId: string) => Promise<void>;
+  pollAllPhasesComplete: (
+    api: unknown,
+    sourceModId: string,
+    isCurrentAttempt?: () => boolean,
+  ) => Promise<void>;
   doInstallDependencies: (
     api: unknown,
     gameId: string,
@@ -326,7 +339,7 @@ export interface IManagerInternals {
   ) => void;
   maybeAdvancePhase: (sourceModId: string, api: unknown) => void;
   getTerminalModCount: (api: unknown, sourceModId: string) => number;
-  // queued dependency installs, keyed by `${sourceModId}:${downloadId}`
+  // queued dependency installs, keyed by owner and download
   mPendingInstalls: Map<string, unknown>;
   // the per-collection cancel callback the completion poll checks, keyed by collection mod id
   mDependencyInstalls: Record<string, () => void>;
@@ -346,6 +359,7 @@ export interface IProfileSwitchOpts {
   gameSettings?: Record<string, string>;
   // the settings file saved in each profile, keyed by profileId
   savedSettings?: Record<string, string>;
+  waitForStartup?: boolean;
 }
 
 export interface IProfileSwitchHarness extends IApiHarness {
@@ -355,6 +369,7 @@ export interface IProfileSwitchHarness extends IApiHarness {
   deployed: string[];
   // the game's live settings file, which a deploy of profile X rewrites to "deployed:X"
   gameSettings: (gameId: string) => Promise<string | undefined>;
+  setGameSettings: (gameId: string, content: string) => Promise<void>;
   // the settings file saved in a profile
   savedSettings: (profileId: string) => Promise<string | undefined>;
   // messages logged since the harness was built, in order

@@ -1,6 +1,6 @@
 import path from "path";
 
-import { log, util } from "@nexusmods/vortex-api";
+import { log, types, util } from "@nexusmods/vortex-api";
 export class ResourceInaccessibleError extends Error {
   private mIsReportingAllowed;
   private mFilePath;
@@ -64,12 +64,26 @@ export class MergeDataViolationError extends Error {
   }
 }
 
-export function getLoadOrderFilePath() {
-  return path.join(util.getVortexPath("documents"), "The Witcher 3", LOAD_ORDER_FILENAME);
+export function getGameDocumentsPath(
+  api?: types.IExtensionApi,
+  discovery?: types.IDiscoveryResult,
+) {
+  const discovered = discovery ?? api?.getState().settings.gameMode.discovered?.[GAME_ID];
+  const documents = discovered?.protonPrefix
+    ? path.join(discovered.protonPrefix, "drive_c", "users", "steamuser", "Documents")
+    : util.getVortexPath("documents");
+  return path.join(documents, "The Witcher 3");
 }
 
-export function getDx12UserSettingsPath() {
-  return path.join(util.getVortexPath("documents"), "The Witcher 3", DX12_USER_SETTINGS_FILENAME);
+export function getLoadOrderFilePath(
+  api?: types.IExtensionApi,
+  discovery?: types.IDiscoveryResult,
+) {
+  return path.join(getGameDocumentsPath(api, discovery), LOAD_ORDER_FILENAME);
+}
+
+export function getDx12UserSettingsPath(api?: types.IExtensionApi) {
+  return path.join(getGameDocumentsPath(api), DX12_USER_SETTINGS_FILENAME);
 }
 
 export function getRemasterNoticeSeenBranch() {

@@ -18,7 +18,7 @@ it.each([{ names: ["python3"] }, { names: ["python"] }, { names: ["python3", "py
       vi.stubEnv("PATH", directory);
       vi.resetModules();
       const { default: init } = await import("./index");
-      const registerInterpreter = vi.fn();
+      const registerInterpreter = vi.fn<types.IExtensionContext["registerInterpreter"]>();
       init({ registerInterpreter } as unknown as types.IExtensionContext);
       const python = registerInterpreter.mock.calls.find(([extension]) => extension === ".py")![1];
       const result = python({ executable: "script.py", args: ["--option"], options: {} });
@@ -34,3 +34,51 @@ it.each([{ names: ["python3"] }, { names: ["python"] }, { names: ["python3", "py
     }
   },
 );
+
+it("discovers native Java from PATH without JAVA_HOME", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "nyastra-java-"));
+  try {
+    await writeFile(path.join(directory, "java"), "#!/bin/sh\n", { mode: 0o700 });
+    vi.stubEnv("JAVA_HOME", undefined);
+    vi.stubEnv("PATH", directory);
+    vi.resetModules();
+    const { default: init } = await import("./index");
+    const registerInterpreter = vi.fn<types.IExtensionContext["registerInterpreter"]>();
+    init({ registerInterpreter } as unknown as types.IExtensionContext);
+    const java = registerInterpreter.mock.calls.find(([extension]) => extension === ".jar")![1];
+    const options = { cwd: directory };
+    expect(java({ executable: "tool.jar", args: ["--option"], options })).toEqual({
+      executable: path.join(directory, "java"),
+      args: ["-jar", "tool.jar", "--option"],
+      options,
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("preserves JAVA_HOME precedence over PATH", async () => {
+  vi.stubEnv("JAVA_HOME", "/configured-jvm");
+  vi.stubEnv("PATH", "");
+  vi.resetModules();
+  const { default: init } = await import("./index");
+  const registerInterpreter = vi.fn<types.IExtensionContext["registerInterpreter"]>();
+  init({ registerInterpreter } as unknown as types.IExtensionContext);
+  const java = registerInterpreter.mock.calls.find(([extension]) => extension === ".jar")![1];
+  expect(java({ executable: "tool.jar", args: [], options: {} }).executable).toBe(
+    "/configured-jvm/bin/java",
+  );
+});
+
+it("reports missing Java when neither JAVA_HOME nor PATH provides it", async () => {
+  vi.stubEnv("JAVA_HOME", undefined);
+  vi.stubEnv("PATH", "");
+  vi.resetModules();
+  const { default: init } = await import("./index");
+  const registerInterpreter = vi.fn<types.IExtensionContext["registerInterpreter"]>();
+  init({ registerInterpreter } as unknown as types.IExtensionContext);
+  const java = registerInterpreter.mock.calls.find(([extension]) => extension === ".jar")![1];
+  expect(() => java({ executable: "tool.jar", args: [], options: {} })).toThrow(
+    "Java isn't installed",
+  );
+});
