@@ -745,6 +745,7 @@ catalogs:
 
 overrides:
   node-7z>7z-bin: workspace:*
+  deepmerge: file:vendor/deepmerge
   turbowalk>winapi-bindings: '-'
   '@nexusmods/nexus-api>request': '-'
   d3-interpolate@3>d3-color: 3.1.0
@@ -755,7 +756,7 @@ overrides:
   brace-expansion@>=5 <5.0.12: 5.0.12
   builder-util-runtime@>=9 <9.7.0: 9.7.0
   fast-uri@>=3 <3.1.8: 3.1.9
-  follow-redirects@>=1 <1.16.1: 1.16.1
+  follow-redirects@>=1 <1.16.2: 1.16.2
   js-yaml@>=4 <4.3.2: 4.3.2
   lodash@>=4 <4.18.1: 4.18.1
   path-to-regexp@<0.1.13: 0.1.13
@@ -5967,6 +5968,9 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@nyastra/deepmerge@file:vendor/deepmerge':
+    resolution: {directory: vendor/deepmerge, type: directory}
+
   '@octokit/app@16.1.2':
     resolution: {integrity: sha512-8j7sEpUYVj18dxvh0KWj6W/l6uAiVRBl1JBDVRqH1VHKAO/G5eRVl4yEoYACjakWers1DjUkcCHyJNQK47JqyQ==}
     engines: {node: '>= 20'}
@@ -8532,10 +8536,6 @@ packages:
   deep-is@0.1.4:
     resolution: {integrity: sha512-oIPzksmTg4/MriiaYGO+okXDT7ztn/w3Eptv/+gSIdMdKsJo0u4CfYNFJPy+4SKMuCqGw2wxnA+URMg3t8a/bQ==}
 
-  deepmerge@4.3.1:
-    resolution: {integrity: sha512-3sUqbMEc77XqpdNO7FRyRog+eW3ph+GYCbj+rK+uYyRMuwsVy0rMiVtPn+QJlKFvWP/1PYpapqYn0Me2knFn+A==}
-    engines: {node: '>=0.10.0'}
-
   default-browser-id@5.0.0:
     resolution: {integrity: sha512-A6p/pu/6fyBcA1TRz/GqWYPViplrftcW2gZC9q79ngNCKAeR/X3gcEdXQHl4KNXV+3wgIJ1CPkJQ3IHM6lcsyA==}
     engines: {node: '>=18'}
@@ -9109,8 +9109,8 @@ packages:
   flux-standard-action@2.1.2:
     resolution: {integrity: sha512-7vdgawlphCjzaMLdpZv8hlGC/FJCXu6sqE3Wuqe3HLZ22KcDiO4IFplxLDePDhEt6hgCrugt45RoUObuzZP6Kg==}
 
-  follow-redirects@1.16.1:
-    resolution: {integrity: sha512-FNvFGzoMLWmE6Yj9spb/zjd7yiNCHiAW9/Tg9CXrQ8wuu32HtlJOwWO11OJafl5FfY3DxTdQ0vj42zU1kvv5jg==}
+  follow-redirects@1.16.2:
+    resolution: {integrity: sha512-/kVP2U8z596Ia0gwFrwyIeo74ta5aVmSeU1FfAUMAmcEP5EP7zydmag3SLiN64NaRKef3lxsq7i/g7ltJQDGow==}
     engines: {node: '>=4.0'}
     peerDependencies:
       debug: '*'
@@ -13904,6 +13904,8 @@ snapshots:
   '@nx/nx-win32-x64-msvc@23.2.1':
     optional: true
 
+  '@nyastra/deepmerge@file:vendor/deepmerge': {}
+
   '@octokit/app@16.1.2':
     dependencies:
       '@octokit/auth-app': 8.2.0
@@ -15666,7 +15668,7 @@ snapshots:
 
   axios@1.20.0(debug@4.4.3)(supports-color@7.2.0):
     dependencies:
-      follow-redirects: 1.16.1(debug@4.4.3)
+      follow-redirects: 1.16.2(debug@4.4.3)
       form-data: 4.0.6
       https-proxy-agent: 5.0.1(supports-color@7.2.0)
       proxy-from-env: 2.1.0
@@ -16240,8 +16242,6 @@ snapshots:
   deep-freeze-strict@1.1.1: {}
 
   deep-is@0.1.4: {}
-
-  deepmerge@4.3.1: {}
 
   default-browser-id@5.0.0: {}
 
@@ -16973,7 +16973,7 @@ snapshots:
       lodash.isplainobject: 4.0.6
       lodash.isstring: 4.0.1
 
-  follow-redirects@1.16.1(debug@4.4.3):
+  follow-redirects@1.16.2(debug@4.4.3):
     optionalDependencies:
       debug: 4.4.3(supports-color@7.2.0)
 
@@ -16987,7 +16987,7 @@ snapshots:
       chalk: 4.1.2
       chokidar: 4.0.3
       cosmiconfig: 8.3.6(typescript@6.0.3)
-      deepmerge: 4.3.1
+      deepmerge: '@nyastra/deepmerge@file:vendor/deepmerge'
       fs-extra: 10.1.0
       memfs: 3.5.3
       minimatch: 11.0.3(patch_hash=c45cb487620fa301baed0462b47f93a16cf9e483f0a32d69d91503fbde05179c)
@@ -18169,7 +18169,7 @@ snapshots:
       fast-wrap-ansi: 0.2.0
       figures: 3.2.0
       flat: 5.0.2
-      follow-redirects: 1.16.1(debug@4.4.3)
+      follow-redirects: 1.16.2(debug@4.4.3)
       form-data: 4.0.6
       fs-constants: 1.0.0
       function-bind: 1.1.2

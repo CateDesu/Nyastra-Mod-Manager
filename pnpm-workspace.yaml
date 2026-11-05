@@ -296,6 +296,7 @@ peerDependencyRules:
 
 overrides:
   "node-7z>7z-bin": "workspace:*"
+  deepmerge: file:vendor/deepmerge
   "turbowalk>winapi-bindings": "-"
   # The pinned Nexus client uses native HTTP and no longer imports request.
   "@nexusmods/nexus-api>request": "-"
@@ -310,7 +311,7 @@ overrides:
   "brace-expansion@>=5 <5.0.12": 5.0.12
   "builder-util-runtime@>=9 <9.7.0": 9.7.0
   "fast-uri@>=3 <3.1.8": 3.1.9
-  "follow-redirects@>=1 <1.16.1": 1.16.1
+  "follow-redirects@>=1 <1.16.2": 1.16.2
   "js-yaml@>=4 <4.3.2": 4.3.2
   "lodash@>=4 <4.18.1": 4.18.1
   "path-to-regexp@<0.1.13": 0.1.13
