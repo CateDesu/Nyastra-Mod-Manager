@@ -76,7 +76,11 @@ export class GenericDebouncer<
     }
     this.mArgs = args;
     if (this.mTriggerImmediately && this.mTimer === undefined) {
-      this.run();
+      if (this.mRunning) {
+        this.mReschedule = "immediately";
+      } else {
+        this.run();
+      }
     } else {
       const doReset = this.mTimer !== undefined && this.mResetting;
       if (doReset) {

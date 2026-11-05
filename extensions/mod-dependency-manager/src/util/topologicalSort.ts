@@ -1,4 +1,4 @@
-import { types } from "@nexusmods/vortex-api";
+import type { types } from "@nexusmods/vortex-api";
 /* eslint-disable */
 import memoize from "memoize-one";
 
@@ -26,6 +26,11 @@ export const topologicalSort = memoize((graph: types.IMod[]): string[] => {
         visit(rule.reference.id as string, rule.type);
       }
     });
+    graph
+      .filter((other) =>
+        other.rules?.some((rule) => rule.type === "before" && rule.reference.id === modId),
+      )
+      .forEach((other) => visit(other.id));
     result.push(modId);
   };
 

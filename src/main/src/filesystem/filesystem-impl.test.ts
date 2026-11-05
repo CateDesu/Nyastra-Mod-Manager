@@ -12,6 +12,11 @@ import { NodeFileSystemImpl } from "./filesystem-impl";
 import { PathResolverRegistryImpl } from "./path-resolver-registry";
 import { nativeToQP } from "./testing";
 
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof nodeFs>();
+  return { ...actual, rename: vi.fn(actual.rename) };
+});
+
 describe("NodeFileSystemImpl", () => {
   let root: string;
   let rootQP: QualifiedPath;
@@ -37,6 +42,93 @@ describe("NodeFileSystemImpl", () => {
     expect(Array.from(bytes)).toEqual([1, 2, 3]);
   });
 
+  it("deletes empty directories but preserves populated directories and symlink targets", async () => {
+    await fs.createDirectory(rootQP.join("empty"));
+    await fs.delete(rootQP.join("empty"));
+    expect(await fs.stat(rootQP.join("empty"))).toEqual({ exists: false });
+
+    await fs.writeFile(rootQP.join("populated", "keep"), Buffer.from("keep"));
+    await expect(fs.delete(rootQP.join("populated"))).rejects.toMatchObject({
+      data: { kind: "fs:directory-not-empty" },
+    });
+    await nodeFs.symlink("populated", join(root, "link"));
+    await fs.delete(rootQP.join("link"));
+    expect(await nodeFs.readFile(join(root, "populated", "keep"), "utf8")).toBe("keep");
+    await expect(nodeFs.lstat(join(root, "link"))).rejects.toMatchObject({ code: "ENOENT" });
+    await fs.delete(rootQP.join("populated", "keep"));
+    await fs.delete(rootQP.join("populated"));
+  });
+
+  it("preserves relative links when moving a directory across filesystems", async () => {
+    await fs.writeFile(rootQP.join("source", "payload"), Buffer.from("saved bytes"));
+    await nodeFs.symlink("payload", join(root, "source", "link"));
+    const rename = vi.spyOn(nodeFs, "rename").mockRejectedValueOnce(
+      Object.assign(new Error("Cross-device link"), {
+        code: "EXDEV",
+        errno: -18,
+        syscall: "rename",
+      }),
+    );
+    try {
+      await fs.move(rootQP.join("source"), rootQP.join("target"));
+      expect(await nodeFs.readlink(join(root, "target", "link"))).toBe("payload");
+      expect(await nodeFs.readFile(join(root, "target", "link"), "utf8")).toBe("saved bytes");
+      expect(await fs.stat(rootQP.join("source"))).toEqual({ exists: false });
+    } finally {
+      rename.mockRestore();
+    }
+  });
+
+  it.each([undefined, { overwrite: false }])(
+    "classifies an existing copy destination with options %s",
+    async (options) => {
+      await fs.writeFile(rootQP.join("source", "incoming"), Buffer.from("new bytes"));
+      await fs.writeFile(rootQP.join("target", "keep"), Buffer.from("original bytes"));
+
+      await expect(
+        fs.copy(rootQP.join("source"), rootQP.join("target"), options),
+      ).rejects.toMatchObject({
+        data: { kind: "fs:already-exists" },
+      });
+      expect(await nodeFs.readdir(join(root, "target"))).toEqual(["keep"]);
+      expect(await nodeFs.readFile(join(root, "target", "keep"), "utf8")).toBe("original bytes");
+      expect(await nodeFs.readFile(join(root, "source", "incoming"), "utf8")).toBe("new bytes");
+    },
+  );
+
+  it("copies to a new directory and permits an explicitly requested merge", async () => {
+    await fs.writeFile(rootQP.join("source", "incoming"), Buffer.from("new bytes"));
+    await fs.copy(rootQP.join("source"), rootQP.join("target"));
+    expect(await nodeFs.readFile(join(root, "target", "incoming"), "utf8")).toBe("new bytes");
+
+    await fs.writeFile(rootQP.join("source", "incoming"), Buffer.from("replacement bytes"));
+    await fs.writeFile(rootQP.join("target", "keep"), Buffer.from("original bytes"));
+    await fs.copy(rootQP.join("source"), rootQP.join("target"), { overwrite: true });
+    expect(await nodeFs.readFile(join(root, "target", "incoming"), "utf8")).toBe(
+      "replacement bytes",
+    );
+    expect(await nodeFs.readFile(join(root, "target", "keep"), "utf8")).toBe("original bytes");
+  });
+
+  it.each(["source-directory", "target-directory"])(
+    "classifies mismatched copy types with %s",
+    async (directory) => {
+      if (directory === "source-directory") {
+        await fs.createDirectory(rootQP.join("source"));
+        await fs.writeFile(rootQP.join("target"), Buffer.from("original bytes"));
+      } else {
+        await fs.writeFile(rootQP.join("source"), Buffer.from("new bytes"));
+        await fs.createDirectory(rootQP.join("target"));
+      }
+
+      await expect(
+        fs.copy(rootQP.join("source"), rootQP.join("target"), { overwrite: true }),
+      ).rejects.toMatchObject({
+        data: { kind: directory === "source-directory" ? "fs:not-a-file" : "fs:not-a-directory" },
+      });
+    },
+  );
+
   it("does not overwrite a dangling symlink unless replacement is requested", async () => {
     await nodeFs.writeFile(join(root, "source"), "new data");
     await nodeFs.symlink("missing", join(root, "destination"));
@@ -61,6 +153,38 @@ describe("NodeFileSystemImpl", () => {
 
     const missing = await fs.stat(rootQP.join("missing"));
     expect(missing.exists).toBe(false);
+  });
+
+  it.each([
+    { mode: "w", options: { start: -1 } },
+    { mode: "r", options: { start: -1 } },
+    { mode: "r", options: { start: 3, end: 1 } },
+  ])(
+    "rejects invalid $mode ranges without changing or retaining the file",
+    async ({ mode, options }) => {
+      const filename = join(root, "ranged");
+      await nodeFs.writeFile(filename, "saved bytes");
+      await expect(fs.createStream(rootQP.join("ranged"), mode, options)).rejects.toThrow();
+      expect(await nodeFs.readFile(filename, "utf8")).toBe("saved bytes");
+      const descriptors = await nodeFs.readdir("/proc/self/fd");
+      const targets = await Promise.all(
+        descriptors.map((fd) => nodeFs.readlink(`/proc/self/fd/${fd}`).catch(() => "")),
+      );
+      expect(targets.filter((target) => target === filename)).toHaveLength(0);
+    },
+  );
+
+  it.each([1, Infinity])("reads a valid range with end %s", async (end) => {
+    await nodeFs.writeFile(join(root, "ranged"), "saved bytes");
+    const stream = await fs.createStream(rootQP.join("ranged"), "r", { start: 1, end });
+    const reader = stream.getReader();
+    const chunks: Uint8Array[] = [];
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      chunks.push(next.value as Uint8Array);
+    }
+    expect(Buffer.concat(chunks).toString()).toBe(end === 1 ? "a" : "aved bytes");
   });
 
   it("throws VortexError for missing files via readFile", async () => {

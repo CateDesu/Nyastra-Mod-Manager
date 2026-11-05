@@ -44,6 +44,23 @@ describe("parseError", () => {
 
   describe("filesystem codes", () => {
     test.for([
+      { code: "ERR_FS_CP_EEXIST", posix: "EEXIST", errno: 17, kind: "fs:already-exists" },
+      { code: "ERR_FS_CP_DIR_TO_NON_DIR", posix: "EISDIR", errno: 21, kind: "fs:not-a-file" },
+      { code: "ERR_FS_CP_NON_DIR_TO_DIR", posix: "ENOTDIR", errno: 20, kind: "fs:not-a-directory" },
+    ] as const)("$code uses its native error kind", ({ code, posix, errno, kind }) => {
+      const cause = makeSystemError(code, {
+        errno,
+        path: "/copy/target",
+        syscall: "cp",
+        info: { code: posix, errno, syscall: "cp", path: "/copy/target" },
+      });
+
+      const result = parseError(cause);
+      expect(result.data).toMatchObject({ kind, originalCode: code, path: "/copy/target" });
+      expect(result.cause).toBe(cause);
+    });
+
+    test.for([
       { code: "ENOENT", kind: "fs:not-found", path: "/missing" },
       { code: "EEXIST", kind: "fs:already-exists", path: "/existing" },
       { code: "ENOSPC", kind: "fs:no-space", path: "/dev/sda1" },

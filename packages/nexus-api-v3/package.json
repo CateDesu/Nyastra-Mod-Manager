@@ -18,24 +18,60 @@
         "dependsOn": [
           "codegen",
           "^build"
+        ],
+        "inputs": [
+          "default",
+          "typescript",
+          "!{projectRoot}/src/**/*.test.{ts,tsx}",
+          {
+            "dependentTasksOutputFiles": "**/dist/**"
+          },
+          {
+            "dependentTasksOutputFiles": "**/generated/nexus-api-v3*.d.ts"
+          }
         ]
       },
       "typecheck": {
         "dependsOn": [
           "codegen",
           "^build"
+        ],
+        "inputs": [
+          "default",
+          "typescript",
+          {
+            "dependentTasksOutputFiles": "**/generated/nexus-api-v3*.d.ts"
+          }
         ]
       },
       "lint": {
         "dependsOn": [
           "codegen",
           "^build"
+        ],
+        "inputs": [
+          "default",
+          "typescript",
+          "eslint",
+          "oxlint",
+          {
+            "dependentTasksOutputFiles": "**/generated/nexus-api-v3*.d.ts"
+          }
         ]
       },
       "lint:verbose": {
         "dependsOn": [
           "codegen",
           "^build"
+        ],
+        "inputs": [
+          "default",
+          "typescript",
+          "eslint",
+          "oxlint",
+          {
+            "dependentTasksOutputFiles": "**/generated/nexus-api-v3*.d.ts"
+          }
         ]
       },
       "codegen": {

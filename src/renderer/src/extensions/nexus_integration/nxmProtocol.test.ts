@@ -265,6 +265,36 @@ describe("nxm protocol resolver", () => {
   // The cached url is keyed by file, so without this the plan change would be invisible to it and
   // the next download of that file would reuse a url issued for the plan the user just left.
   describe("changing membership", () => {
+    test("a late free response cannot refill the cache after an upgrade", async ({ makeNxm }) => {
+      const { harness, resolve } = makeNxm({ userInfo: FREE });
+      const reply = Promise.withResolvers<ReturnType<typeof downloadLink>>();
+      harness.getDownloadURLs.mockReturnValueOnce(reply.promise);
+      const pending = resolve(`${MOD_URL}?key=abc&expires=1700000000`);
+      await vi.waitFor(() => expect(harness.getDownloadURLs).toHaveBeenCalledTimes(1));
+      harness.setUserInfo(PREMIUM);
+      reply.resolve(downloadLink("https://cdn/free.7z"));
+      await pending;
+      harness.getDownloadURLs.mockResolvedValue(downloadLink("https://cdn/premium.7z"));
+
+      await expect(resolve(MOD_URL)).resolves.toMatchObject({ urls: ["https://cdn/premium.7z"] });
+      expect(harness.getDownloadURLs).toHaveBeenCalledTimes(2);
+    });
+
+    test("switching between accounts with the same plan requests that account's URL", async ({
+      makeNxm,
+    }) => {
+      const { harness, resolve } = makeNxm();
+      harness.getDownloadURLs.mockResolvedValue(downloadLink("https://cdn/first-account.7z"));
+      await resolve(MOD_URL);
+      harness.setUserInfo({ ...PREMIUM, userId: PREMIUM.userId + 1 });
+      harness.getDownloadURLs.mockResolvedValue(downloadLink("https://cdn/second-account.7z"));
+
+      await expect(resolve(MOD_URL)).resolves.toMatchObject({
+        urls: ["https://cdn/second-account.7z"],
+      });
+      expect(harness.getDownloadURLs).toHaveBeenCalledTimes(2);
+    });
+
     test("asks for a new url after an upgrade, rather than reusing the free one", async ({
       makeNxm,
     }) => {
@@ -480,6 +510,39 @@ describe("nxm protocol resolver", () => {
 
         nxm.dialogHandlers.onCancel(MOD_URL);
         await expect(pending).rejects.toBeInstanceOf(UserCanceled);
+      });
+
+      test("skipping queries the game's domain when its link id differs", async ({ makeNxm }) => {
+        const link = "nxm://SkyrimSE/mods/100/files/500";
+        const { harness, nxm, resolve } = makeNxm({
+          userInfo: FREE,
+          knownGames: [
+            makeGameStored({
+              details: { nxmLinkId: "SkyrimSE", nexusPageId: "skyrimspecialedition" },
+            }),
+          ],
+        });
+        websiteRoundTrip();
+        const pending = resolve(link);
+        await queued(harness);
+        harness.getModFiles.mockResolvedValue({ file_updates: [] });
+        nxm.dialogHandlers.onSkip(link);
+        await expect(pending).rejects.toBeInstanceOf(UserCanceled);
+        expect(harness.getModFiles).toHaveBeenCalledWith(100, "skyrimspecialedition");
+      });
+
+      test("opens the mapped website domain for an NXM alias", async ({ makeNxm }) => {
+        const link = "nxm://SkyrimSE/mods/100/files/500";
+        const { harness, nxm, resolve } = makeNxm({ userInfo: FREE });
+        websiteRoundTrip();
+        const pending = resolve(link);
+        await queued(harness);
+        nxm.dialogHandlers.onDownload(link);
+        nxm.dialogHandlers.onCancel(link);
+        await expect(pending).rejects.toBeInstanceOf(UserCanceled);
+        expect(openPage).toHaveBeenLastCalledWith(
+          "https://www.nexusmods.com/skyrimspecialedition/mods/100?tab=files&file_id=500&nmm=1",
+        );
       });
 
       test("skipping marks the mod skipped in the active collection install", async ({

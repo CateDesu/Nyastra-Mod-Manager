@@ -1,7 +1,12 @@
 import * as path from "path";
 
 import type msgpackT from "@msgpack/msgpack";
-import { getErrorCode, getErrorMessageOrDefault, unknownToError } from "@vortex/shared";
+import {
+  getErrorCode,
+  getErrorMessageOrDefault,
+  unknownToError,
+  VortexError,
+} from "@vortex/shared";
 import { sync as writeAtomicSync } from "write-file-atomic";
 
 import { showDialog } from "../../../actions/notifications";
@@ -69,17 +74,17 @@ function repairManifest(input: IDeploymentManifest): IDeploymentManifest {
 }
 
 function readManifest(data: string | Buffer): IDeploymentManifest {
-  if (data === "") {
-    return undefined;
-  }
-
   const msgpack: typeof msgpackT = require("@msgpack/msgpack");
 
   let parsed: IDeploymentManifest;
   try {
     parsed = typeof data === "string" ? JSON.parse(deBOM(data)) : msgpack.decode(data);
   } catch (err) {
-    const newErr = new Error(`Failed to parse manifest: "${getErrorMessageOrDefault(err)}"`);
+    const newErr = new VortexError(
+      `Failed to parse manifest: "${getErrorMessageOrDefault(err)}"`,
+      { kind: "data-invalid" },
+      { cause: err },
+    );
     // invalid input data, not a bug
     newErr["allowReport"] = false;
     throw newErr;
@@ -218,10 +223,7 @@ function getManifestImpl(
         return Promise.reject(errObj);
       }
 
-      if (
-        errObj.message.startsWith("Unexpected token") ||
-        errObj.message.startsWith("Unexpected end of JSON input")
-      ) {
+      if (err instanceof VortexError && err.data.kind === "data-invalid") {
         errObj.message =
           `The manifest file "${filePath}" is corrupted.\n` +
           'You should delete it, then immediately click the "Purge" button ' +
@@ -234,6 +236,10 @@ function getManifestImpl(
             return readManifestFile(backupPath);
           }
           throw inner;
+        })
+        .catch((backupErr: unknown) => {
+          errObj.message += "\nBackup couldn't be read: " + unknownToError(backupErr).message;
+          return Promise.reject(errObj);
         })
         .then((data) =>
           api
@@ -258,11 +264,7 @@ function getManifestImpl(
                 return Promise.resolve(data);
               }
             }),
-        )
-        .catch((backupErr: unknown) => {
-          errObj.message += "\nBackup couldn't be read: " + unknownToError(backupErr).message;
-          return Promise.reject(errObj);
-        });
+        );
     })
     .then((manifest) => (manifest !== undefined ? manifest : emptyManifest(instanceId)));
 }
@@ -495,19 +497,18 @@ export function saveActivation(
     } catch (err) {
       log("error", "Failed to write manifest backup", getErrorMessageOrDefault(err));
     }
-  } else {
-    try {
-      fs.removeSync(tagBackupPath);
-    } catch (err) {
-      const code = getErrorCode(err);
-      if (code !== "ENOENT") {
-        log("error", "failed to remove manifest backup", getErrorMessageOrDefault(err));
-      }
-    }
   }
 
   return activation.length === 0
-    ? fs.removeAsync(tagFilePath).catch(() => undefined)
+    ? fs.removeAsync(tagFilePath).then(() => {
+        try {
+          fs.removeSync(tagBackupPath);
+        } catch (err) {
+          if (getErrorCode(err) !== "ENOENT") {
+            log("error", "failed to remove manifest backup", getErrorMessageOrDefault(err));
+          }
+        }
+      })
     : writeFileAtomic(tagFilePath, dataJSON).then(() =>
         fs.removeAsync(path.join(stagingPath, tagFileName)).catch((err: unknown) => {
           if (getErrorCode(err) === "ENOENT") {

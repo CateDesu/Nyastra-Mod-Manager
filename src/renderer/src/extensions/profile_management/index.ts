@@ -278,6 +278,7 @@ function deploy(api: IExtensionApi, profileId: string | undefined, what: string)
         lastProgress = Date.now();
         api.store.dispatch(setProgress("profile", "deploying", text, percent));
       },
+      { failOnError: true },
     );
   });
 }

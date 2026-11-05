@@ -104,6 +104,7 @@ export function purgeMods(
   api: IExtensionApi,
   gameId?: string,
   isUnmanaging?: boolean,
+  failOnError = false,
 ): Promise<void> {
   const state = api.store.getState();
   let profile =
@@ -151,9 +152,9 @@ export function purgeMods(
             method: manifest?.deploymentMethod,
           });
           const deployedActivator = getActivator(manifest?.deploymentMethod);
-          return purgeModsImpl(api, deployedActivator, profile);
+          return purgeModsImpl(api, deployedActivator, profile, failOnError);
         } else {
-          return purgeModsImpl(api, undefined, profile).catch((err: unknown) => {
+          return purgeModsImpl(api, undefined, profile, failOnError).catch((err: unknown) => {
             // If the user is unmanaging the game and the purge was unable to find any
             //  of the game's mods path during the purge, that suggests that the user
             //  has uninstalled the game and is trying to "unmanage" the game.
@@ -173,6 +174,7 @@ async function purgeModsImpl(
   api: IExtensionApi,
   activator: IDeploymentMethod,
   profile: IProfile,
+  failOnError: boolean,
 ): Promise<void> {
   const state = api.store.getState();
   const { gameId } = profile;
@@ -186,6 +188,7 @@ async function purgeModsImpl(
       message: "Can't purge because game is not discovered",
       displayMS: 5000,
     });
+    if (failOnError) throw new ProcessCanceled("Can't purge because game is not discovered");
     return;
   }
 
@@ -210,6 +213,7 @@ async function purgeModsImpl(
       message: "Can't purge while the game or a tool is running",
       displayMS: 5000,
     });
+    if (failOnError) throw new ProcessCanceled("Can't purge while the game or a tool is running");
     return;
   }
 
@@ -305,7 +309,7 @@ async function purgeModsImpl(
             ),
           );
         }
-        if (!(err instanceof ProcessCanceled)) {
+        if (!(err instanceof ProcessCanceled) || failOnError) {
           purgeSucceeded = false;
           throw err;
         }

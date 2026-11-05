@@ -154,6 +154,36 @@ describe("GenericDebouncer", () => {
   // ── triggerImmediately ────────────────────────────────────────────────────
 
   describe("triggerImmediately=true", () => {
+    it("waits for an active job after its cooldown expires and keeps the latest queued args", async () => {
+      const releases: Array<() => void> = [];
+      const fn = vi.fn<(_value: unknown) => Promise<void>>(
+        (_value) => new Promise<void>((resolve) => releases.push(resolve)),
+      );
+      const { d, advance } = makeDebouncer(fn, 200, false, true);
+      const first = vi.fn<(error: Error | null) => void>();
+      const second = vi.fn<(error: Error | null) => void>();
+      const latest = vi.fn<(error: Error | null) => void>();
+
+      d.schedule(first, "first");
+      await advance(250);
+      d.schedule(second, "second");
+      d.schedule(latest, "latest");
+      expect(fn).toHaveBeenCalledTimes(1);
+
+      releases[0]!();
+      await advance(0);
+      expect(first).toHaveBeenCalledExactlyOnceWith(null);
+      expect(second).not.toHaveBeenCalled();
+      expect(latest).not.toHaveBeenCalled();
+      expect(fn.mock.calls).toEqual([["first"], ["latest"]]);
+
+      releases[1]!();
+      await advance(250);
+      expect(second).toHaveBeenCalledExactlyOnceWith(null);
+      expect(latest).toHaveBeenCalledExactlyOnceWith(null);
+      expect(fn).toHaveBeenCalledTimes(2);
+    });
+
     it("calls the function immediately on first schedule()", () => {
       const fn = vi.fn().mockResolvedValue(undefined);
       const { d } = makeDebouncer(fn, 200, true, true);

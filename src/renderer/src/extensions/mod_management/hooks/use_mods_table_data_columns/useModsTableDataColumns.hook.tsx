@@ -10,8 +10,7 @@ import { activeGameId } from "@/util/selectors";
 
 import { getModType } from "../../../gamemode_management/util/modTypeExtensions";
 import type { IMod } from "../../types/IMod";
-import modName from "../../util/modName";
-import type { IModRow } from "../../util/mods_table_views/modsTableViews";
+import { displayName, type IModRow } from "../../util/mods_table_views/modsTableViews";
 import { getModSources } from "../../util/modSource";
 import type { IModsTableColumn } from "../use_mods_table_columns/useModsTableColumns.hook";
 
@@ -127,7 +126,7 @@ export const useModsTableDataColumns = (memberships: {
       {
         ...textColumn("collection", t("Collection"), "180px", ({ mod }) =>
           (memberships[mod.id] ?? [])
-            .map((collection) => modName(collection))
+            .map((collection) => displayName(collection))
             .sort((a, b) => a.localeCompare(b))
             .join(", "),
         ),

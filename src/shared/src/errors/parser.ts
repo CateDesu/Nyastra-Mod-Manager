@@ -68,13 +68,17 @@ function parseNodeSystemError(
 
   const { code: originalCode, errno, syscall } = data;
   const osData = { originalCode, errno, syscall };
+  // Node copy errors wrap their POSIX code in info.
+  const code = originalCode.startsWith("ERR_FS_CP_")
+    ? (parseNodeSystemErrorData(data.info)?.code ?? originalCode)
+    : originalCode;
 
   const hasPath = context?.path !== undefined || data?.path !== undefined;
   const path = context?.path ?? data?.path ?? "<unknown path>";
 
   const { message } = cause;
 
-  if (originalCode === "EACCES" || originalCode === "EPERM") {
+  if (code === "EACCES" || code === "EPERM") {
     // EACCES: Permission denied (POSIX.1-2001).
     // EPERM: Operation not permitted (POSIX.1-2001).
 
@@ -83,63 +87,63 @@ function parseNodeSystemError(
     if (hasPath) {
       return { message, data: { kind: "fs:no-permissions", ...osData, path } };
     }
-  } else if (originalCode === "ENOENT") {
+  } else if (code === "ENOENT") {
     // ENOENT: No such file or directory (POSIX.1-2001).
     return {
       message: `File or directory does not exist at '${path}'`,
       data: { kind: "fs:not-found", ...osData, path },
     };
-  } else if (originalCode === "EEXIST") {
+  } else if (code === "EEXIST") {
     // EEXIST: File exists (POSIX.1-2001).
     return {
       message: `File at '${path}' already exists`,
       data: { kind: "fs:already-exists", ...osData, path },
     };
-  } else if (originalCode === "EROFS") {
+  } else if (code === "EROFS") {
     // EROFS: Read-only filesystem (POSIX.1-2001).
     return {
       message: `Filesystem is read-only: '${path}'`,
       data: { kind: "fs:read-only", ...osData, path },
     };
-  } else if (originalCode === "ENOSPC") {
+  } else if (code === "ENOSPC") {
     // ENOSPC: No space left on device (POSIX.1-2001)
     return {
       message: `No space left on device: '${path}'`,
       data: { kind: "fs:no-space", ...osData, path },
     };
-  } else if (originalCode === "ENOTDIR") {
+  } else if (code === "ENOTDIR") {
     // ENOTDIR: Not a directory (POSIX.1-2001).
     return {
       message: `Path is not a directory: '${path}'`,
       data: { kind: "fs:not-a-directory", ...osData, path },
     };
-  } else if (originalCode === "EISDIR") {
+  } else if (code === "EISDIR") {
     // EISDIR: Is a directory (POSIX.1-2001).
     return {
       message: `Path is not a file: '${path}'`,
       data: { kind: "fs:not-a-file", ...osData, path },
     };
-  } else if (originalCode === "ENOTEMPTY") {
+  } else if (code === "ENOTEMPTY") {
     // ENOTEMPTY: Directory not empty (POSIX.1-2001).
     return {
       message: `Directory is not empty: '${path}'`,
       data: { kind: "fs:directory-not-empty", ...osData, path },
     };
-  } else if (originalCode === "EMFILE") {
+  } else if (code === "EMFILE") {
     // EMFILE: Too many open files (POSIX.1-2001).
     return {
       message,
       data: { kind: "os:generic", ...osData },
       isTransient: true,
     };
-  } else if (originalCode === "EBUSY") {
+  } else if (code === "EBUSY") {
     // EBUSY: Device or resource busy (POSIX.1-2001)
     return {
       message,
       data: { kind: "os:generic", ...osData },
       isTransient: true,
     };
-  } else if (NETWORK_POSIX_CODES.has(originalCode)) {
+  } else if (NETWORK_POSIX_CODES.has(code)) {
     return networkError(osData, message, context);
   }
 

@@ -41,11 +41,9 @@ async function findSMAPIMainFile(api: types.IExtensionApi): Promise<IFileInfo> {
   }
   const modFiles = await api.ext.nexusGetModFiles(GAME_ID, SMAPI_MOD_ID);
 
-  const fileTime = (input: IFileInfo) => Number.parseInt(String(input.uploaded_time ?? 0), 10);
-
   const file = modFiles
     .filter((modFile) => modFile.category_id === 1)
-    .sort((lhs, rhs) => fileTime(lhs) - fileTime(rhs))[0];
+    .toSorted((lhs, rhs) => rhs.uploaded_timestamp - lhs.uploaded_timestamp)[0];
 
   if (file === undefined) {
     throw new util.ProcessCanceled("No SMAPI main file found");

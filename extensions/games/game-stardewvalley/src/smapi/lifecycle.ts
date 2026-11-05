@@ -12,12 +12,24 @@ import { GAME_ID } from "../common";
  *
  * @param api Vortex extension API (`types.IExtensionApi`) used for deployment
  * events and state dispatch.
+ * @param profileId Profile that requested deployment.
  * @returns Resolves after deployment/discovery completes and primary tool is
  * updated when available.
  */
-export async function deploySMAPI(api: types.IExtensionApi): Promise<void> {
-  await util.toPromise((cb) => api.events.emit("deploy-mods", cb));
+export async function deploySMAPI(
+  api: types.IExtensionApi,
+  profileId = selectors.lastActiveProfileForGame(api.getState(), GAME_ID),
+): Promise<void> {
+  const isCurrent = () =>
+    profileId !== undefined &&
+    selectors.lastActiveProfileForGame(api.getState(), GAME_ID) === profileId;
+  if (!isCurrent()) return;
+  await util.toPromise((cb) =>
+    api.events.emit("deploy-mods", cb, profileId, undefined, { failOnError: true }),
+  );
+  if (!isCurrent()) return;
   await util.toPromise((cb) => api.events.emit("start-quick-discovery", () => cb(null)));
+  if (!isCurrent()) return;
 
   const discovery = selectors.discoveryByGame(api.getState(), GAME_ID);
   const tool = discovery?.tools?.["smapi"];

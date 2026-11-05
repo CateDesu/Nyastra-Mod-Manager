@@ -47,7 +47,7 @@ vi.mock("../../preload/src/ipc", () => ({
   rendererCallback: vi.fn(),
 }));
 
-const sender = new EventEmitter();
+const sender = Object.assign(new EventEmitter(), { isDestroyed: () => false });
 let directory: string;
 let fs: NodeFileSystemImpl;
 let api: PreloadWindow["api"];
@@ -102,7 +102,85 @@ it("releases an enumeration session when the real filesystem iterator fails", as
   }
 });
 
+it.each(["destroyed", "render-process-gone", "did-start-navigation"])(
+  "releases an enumeration opened after its renderer emitted %s",
+  async (event) => {
+    const opened = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const enumerate = fs.enumerateDirectory.bind(fs);
+    const closed = vi.fn();
+    vi.spyOn(fs, "enumerateDirectory").mockImplementation(async (...args) => {
+      const iterator = await enumerate(...args);
+      const finish = iterator.return!.bind(iterator);
+      iterator.return = async (...args) => {
+        closed();
+        return finish(...args);
+      };
+      opened.resolve();
+      await release.promise;
+      return iterator;
+    });
+    const pending = api.fs
+      .enumerateDirectory(QualifiedPath.fromNative(directory))
+      .catch((error: unknown) => error);
+    await opened.promise;
+    sender.emit(event, { isMainFrame: true, isSameDocument: false });
+    release.resolve();
+    expect(await pending).toBeInstanceOf(Error);
+    expect(closed).toHaveBeenCalledOnce();
+    expect(sender.listenerCount("destroyed")).toBe(0);
+  },
+);
+
 describe("filesystem streams through preload and main handlers", () => {
+  it.each(["destroyed", "render-process-gone", "did-start-navigation"])(
+    "releases an active stream and enumeration when the renderer emits %s",
+    async (event) => {
+      const abort = vi.fn();
+      vi.spyOn(fs, "createStream").mockResolvedValue(new WritableStream({ abort }));
+      const stream = await api.fs.createStream(
+        QualifiedPath.fromNative(path.join(directory, "abandoned")),
+        "w",
+      );
+      const iterator = await api.fs.enumerateDirectory(QualifiedPath.fromNative(directory));
+      sender.emit("did-start-navigation", { isMainFrame: false, isSameDocument: false });
+      sender.emit("did-start-navigation", { isMainFrame: true, isSameDocument: true });
+      expect(sender.listenerCount("destroyed")).toBe(2);
+      expect(abort).not.toHaveBeenCalled();
+
+      sender.emit(event, { isMainFrame: true, isSameDocument: false });
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(abort).toHaveBeenCalledOnce();
+      expect(sender.eventNames()).toEqual([]);
+      await expect(iterator.next()).rejects.toThrow("No enumeration session");
+      await expect(stream.getWriter().write(Buffer.from("late write"))).rejects.toThrow(
+        "No stream session",
+      );
+    },
+  );
+
+  it.each(["destroyed", "render-process-gone", "did-start-navigation"])(
+    "releases a stream opened after its renderer emitted %s",
+    async (event) => {
+      const opened = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const abort = vi.fn();
+      vi.spyOn(fs, "createStream").mockImplementation(async () => {
+        opened.resolve();
+        await release.promise;
+        return new WritableStream({ abort });
+      });
+      const target = QualifiedPath.fromNative(path.join(directory, "abandoned"));
+      const pending = api.fs.createStream(target, "w").catch((error: unknown) => error);
+      await opened.promise;
+      sender.emit(event, { isMainFrame: true, isSameDocument: false });
+      release.resolve();
+      expect(await pending).toBeInstanceOf(Error);
+      expect(abort).toHaveBeenCalledOnce();
+      expect(sender.listenerCount("destroyed")).toBe(0);
+    },
+  );
+
   it("awaits closing a real Linux file before reporting success", async () => {
     const target = QualifiedPath.fromNative(path.join(directory, "output"));
     const stream = await api.fs.createStream(target, "w");

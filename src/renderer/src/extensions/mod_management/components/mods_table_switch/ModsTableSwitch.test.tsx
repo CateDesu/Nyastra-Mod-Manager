@@ -66,6 +66,45 @@ describe("ModsTableSwitch", () => {
     expect(screen.queryByRole("grid")).toBeNull();
   });
 
+  it("skips new table rows and groups while the classic table is open", () => {
+    mocks.newTable = false;
+    const throwingName = mod("a", "Alpha", true, {
+      attributes: {
+        get name(): string {
+          throw new Error("classic table built new rows");
+        },
+      },
+    });
+    renderSwitch({ a: throwingName, x: collection("x", "", ["a"]) });
+    expect(screen.getByTestId("legacy-table")).toBeInTheDocument();
+  });
+
+  it("skips grouping after switching back to the classic table", async () => {
+    const store = makeModsTableStore();
+    const mods = { a: mod("a", "Alpha", true), x: collection("x", "Pack", ["a"]) };
+    const view = (items: typeof mods) => (
+      <Provider store={store}>
+        <ModsTableSwitch
+          legacy={<div data-testid="legacy-table" />}
+          mods={items}
+          onSetModsEnabled={vi.fn()}
+        />
+      </Provider>
+    );
+    const { rerender } = render(view(mods));
+    await showView("Collections");
+    mocks.newTable = false;
+    const throwingName = mod("a", "Alpha", true, {
+      attributes: {
+        get name(): string {
+          throw new Error("classic table grouped new rows");
+        },
+      },
+    });
+    rerender(view({ ...mods, a: throwingName }));
+    expect(screen.getByTestId("legacy-table")).toBeInTheDocument();
+  });
+
   it("lists the mods by name, ungrouped, when no collection is installed", () => {
     renderSwitch({ b: mod("b", "Beta", false), a: mod("a", "Alpha", true) });
 

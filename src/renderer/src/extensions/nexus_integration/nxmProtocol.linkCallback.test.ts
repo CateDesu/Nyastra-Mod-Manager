@@ -258,6 +258,75 @@ describe("nxm link callback", () => {
     expect(harness.freeUserQueue()).toEqual([]);
   });
 
+  test("returns an authorised alias link to the waiting domain download", async ({ makeNxm }) => {
+    const { harness, nxm, handleLink } = arrangeLink(makeNxm({ userInfo: FREE }));
+    modInfoQuery.mockResolvedValue({
+      modInfo: { direct_download_enabled: false },
+      fileInfo: {},
+    } as never);
+    const result = vi.fn();
+    const pending = nxm.resolve(MOD_URL).then(result, result);
+    await vi.waitFor(() => expect(harness.freeUserQueue()).toHaveLength(1));
+    nxm.dialogHandlers.onDownload(MOD_URL);
+    harness.getDownloadURLs.mockResolvedValue([{ URI: "https://cdn/file.7z" }]);
+    handleLink("nxm://SkyrimSE/mods/100/files/500?key=abc&expires=1700000000", false);
+    try {
+      await vi.waitFor(() =>
+        expect(result).toHaveBeenCalledWith(
+          expect.objectContaining({ urls: ["https://cdn/file.7z"] }),
+        ),
+      );
+      expect(beginDownload).not.toHaveBeenCalled();
+      expect(harness.freeUserQueue()).toEqual([]);
+    } finally {
+      nxm.dialogHandlers.onCancel(MOD_URL);
+      await pending;
+    }
+  });
+
+  test("a keyless link cannot leave a hidden download behind a website callback", async ({
+    makeNxm,
+  }) => {
+    const { harness, nxm, handleLink } = arrangeLink(makeNxm({ userInfo: FREE }));
+    const info = { modInfo: { direct_download_enabled: false }, fileInfo: {} };
+    modInfoQuery.mockResolvedValue(info as never);
+    const pending = nxm.resolve(MOD_URL).catch((error: unknown) => error);
+    try {
+      await vi.waitFor(() => expect(harness.freeUserQueue()).toEqual([MOD_URL]));
+      nxm.dialogHandlers.onDownload(MOD_URL);
+
+      const routed = Promise.withResolvers<void>();
+      modInfoQuery.mockImplementationOnce(() => {
+        routed.resolve();
+        return Promise.resolve(info) as never;
+      });
+      beginDownload.mockImplementationOnce(() => {
+        routed.resolve();
+        return PromiseBB.resolve("dl-1") as never;
+      });
+      handleLink(MOD_URL, false);
+      await routed.promise;
+      await PromiseBB.delay(0);
+
+      nxm.dialogHandlers.onDownload(MOD_URL);
+      harness.getDownloadURLs.mockResolvedValue([{ URI: "https://cdn/file.7z" }]);
+      handleLink(`${MOD_URL}?key=abc&expires=1700000000`, false);
+      await expect(pending).resolves.toMatchObject({ urls: ["https://cdn/file.7z"] });
+      expect(harness.freeUserQueue()).toEqual([]);
+      expect(beginDownload).toHaveBeenCalledExactlyOnceWith(
+        harness.api,
+        harness.nexus,
+        MOD_URL,
+        undefined,
+        undefined,
+        undefined,
+      );
+    } finally {
+      nxm.dialogHandlers.onCancel(MOD_URL);
+      await pending;
+    }
+  });
+
   // the website opens on every click, so a user who gives up may have asked for a link more than
   // once; a cancelled download must stop waiting for all of them or the link is swallowed
   test("stops waiting for a link once its download is cancelled, however often it was asked for", async ({

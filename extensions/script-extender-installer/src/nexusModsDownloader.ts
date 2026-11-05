@@ -4,11 +4,15 @@ import { actions, log, selectors, types, util } from "@nexusmods/vortex-api";
 
 import { storeName } from "./common";
 import { IGameSupport } from "./types";
-import { getGameStore, ignoreNotifications } from "./util";
+import { getGameStore } from "./util";
 
 export async function downloadScriptExtender(api: types.IExtensionApi, gameSupport: IGameSupport) {
   const state: types.IState = api.getState();
   const gameId: string = gameSupport.gameId;
+  const profileId = selectors.lastActiveProfileForGame(state, gameId);
+  const isCurrent = () =>
+    profileId !== undefined &&
+    selectors.lastActiveProfileForGame(api.getState(), gameId) === profileId;
   const discovery = selectors.discoveryByGame(state, gameId);
   const game = util.getGame(gameId);
   if (game === undefined) {
@@ -24,12 +28,22 @@ export async function downloadScriptExtender(api: types.IExtensionApi, gameSuppo
 
   try {
     // If yes, start installing.
-    const modId = await startDownload(api, gameSupport, gameId, versionBasic, gameStore);
+    const modId = await startDownload(
+      api,
+      gameSupport,
+      gameId,
+      profileId,
+      isCurrent,
+      versionBasic,
+      gameStore,
+    );
+    if (!modId || !isCurrent()) return;
     // Force-deploy the xSE files
-    if (modId) await api.emitAndAwait("deploy-single-mod", gameId, modId, true);
+    await api.emitAndAwait("deploy-single-mod", gameId, modId, true);
+    if (!isCurrent()) return;
     // Refresh the tools dashlet
     await util.toPromise((cb) => api.events.emit("start-quick-discovery", () => cb(null)));
-    api.store.dispatch(actions.setPrimaryTool(gameId, gameSupport.toolId));
+    if (isCurrent()) api.store.dispatch(actions.setPrimaryTool(gameId, gameSupport.toolId));
   } catch (err) {
     if (err instanceof util.UserCanceled || err instanceof util.ProcessCanceled) {
       return Promise.resolve();
@@ -58,6 +72,8 @@ async function startDownload(
   api: types.IExtensionApi,
   gameSupport: IGameSupport,
   gameId: string,
+  profileId: string,
+  isCurrent: () => boolean,
   gameVersion?: string,
   gameStore?: string,
 ) {
@@ -70,13 +86,14 @@ async function startDownload(
   const nexusModsModId = gameSupport.nexusMods?.modId;
   const state = api.getState();
   const nexusInfo: any = util.getSafe(state, ["persistent", "nexus", "userInfo"], undefined);
-  const OAuthCredentials = (state?.confidential?.account as any)?.nexus?.OAuthCredentials;
+  const credentials = (state?.confidential?.account as any)?.nexus;
 
   // Free users or logged out users should be directed to the website.
   const modPageURL = `https://www.nexusmods.com/${gameSupport.nexusMods?.gameId}/mods/${gameSupport.nexusMods?.modId}?tab=files`;
 
   // If the user is logged out, all we can do is open the web page.
-  if (!nexusInfo || !OAuthCredentials) return util.opn(modPageURL).catch(() => null);
+  if (!nexusInfo || !(credentials?.OAuthCredentials || credentials?.APIKey))
+    return util.opn(modPageURL).catch(() => null);
 
   if (api.ext?.ensureLoggedIn !== undefined) {
     try {
@@ -121,9 +138,9 @@ async function startDownload(
       // Exit here are just open the mod page.
       const fileChoices = allModFiles
         .filter((m) => !!m.category_name)
-        .sort((a, b) => b.uploaded_timestamp - a.uploaded_timestamp)
+        .toSorted((a, b) => b.uploaded_timestamp - a.uploaded_timestamp)
         .slice(0, 5);
-      const gameStore = getGameStore(gameId, api);
+      const selectedStore = getGameStore(gameId, api);
       // For some weird reason, New Vegas has a tab character in the middle of it's name, so that needs to be removed.
       const title = (selectors.gameById(api.getState(), gameId)?.name || "game").replaceAll(
         "\t",
@@ -140,7 +157,7 @@ async function startDownload(
             {
               name: gameSupport.name,
               version: gameVersion,
-              store: storeName(gameStore),
+              store: storeName(selectedStore),
               title,
             },
           ),
@@ -179,7 +196,7 @@ async function startDownload(
       const idToUse = selected[0][0];
       // Resolve the modfile from the chosen option.
       const id = parseInt(idToUse);
-      modFile = modFiles.find((m) => m.file_id === id);
+      modFile = fileChoices.find((m) => m.file_id === id);
       // If somehow we've still failed to find the ID.
       if (!modFile) throw new util.DataInvalid("Failed to match file ID to a valid file.");
     }
@@ -201,17 +218,21 @@ async function startDownload(
     modId: nexusModsModId,
   };
   const nxm = `nxm://${nexusModsGameId}/mods/${nexusModsModId}/files/${fileId}`;
+  if (!isCurrent()) throw new util.ProcessCanceled("Profile changed");
   const dlId = await util.toPromise<string>((cb) =>
     api.events.emit("start-download", [nxm], modInfo, undefined, cb, undefined, {
       allowInstall: false,
     }),
   );
+  if (!isCurrent()) throw new util.ProcessCanceled("Profile changed");
   const modId = await util.toPromise<string>((cb) =>
-    api.events.emit("start-install-download", dlId, { allowAutoEnable: false }, cb),
+    api.events.emit("start-install-download", dlId, { allowAutoEnable: false, profileId }, cb),
   );
-  const profileId = selectors.lastActiveProfileForGame(api.getState(), gameId);
+  if (!isCurrent()) throw new util.ProcessCanceled("Profile changed");
   await actions.setModsEnabled(api, profileId, [modId], true, {
     allowAutoDeploy: false,
     installed: true,
+    isCurrent,
   });
+  return modId;
 }

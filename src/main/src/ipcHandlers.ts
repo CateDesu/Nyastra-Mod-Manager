@@ -44,13 +44,29 @@ import { relaunch } from "./cli";
 import { getVortexPath } from "./getVortexPath";
 import { hashFile } from "./hash/host";
 import { betterIpcMain } from "./ipc";
-import { openUrl, openFile, showItemInFolder } from "./open";
+import { openUrlString, openFile, showItemInFolder } from "./open";
 import { createUpdateChecker } from "./updateCheck";
 import { closeView, extraWebViews, registerView } from "./webview";
 
 export interface GlobalWithRedux {
   getReduxState?: () => object;
   getReduxStateMsgpack?: (idx: number) => string;
+}
+
+function watchRendererLifetime(sender: WebContents, onGone: () => void): () => void {
+  const onNavigation = (
+    details: Electron.Event<Electron.WebContentsDidStartNavigationEventParams>,
+  ) => {
+    if (details.isMainFrame && !details.isSameDocument) onGone();
+  };
+  sender.once("destroyed", onGone);
+  sender.once("render-process-gone", onGone);
+  sender.on("did-start-navigation", onNavigation);
+  return () => {
+    sender.removeListener("destroyed", onGone);
+    sender.removeListener("render-process-gone", onGone);
+    sender.removeListener("did-start-navigation", onNavigation);
+  };
 }
 
 export function init(fs: FileSystem) {
@@ -183,7 +199,7 @@ export function init(fs: FileSystem) {
   });
 
   betterIpcMain.on("shell:openUrl", (_event, url) => {
-    openUrl(new URL(url));
+    openUrlString(url);
   });
 
   betterIpcMain.on("shell:openFile", (_event, filePath) => {
@@ -634,8 +650,7 @@ export function init(fs: FileSystem) {
     number,
     {
       iterator: AsyncIterator<QualifiedPath | [QualifiedPath, Status]>;
-      sender: WebContents;
-      onDestroyed: () => void;
+      stopWatching: () => void;
     }
   >();
   let nextEnumerationHandle = 1;
@@ -645,22 +660,33 @@ export function init(fs: FileSystem) {
     if (session === undefined) return;
 
     enumerations.delete(handle);
-    session.sender.removeListener("destroyed", session.onDestroyed);
+    session.stopWatching();
 
     // Release the directory and detach the sender listener to prevent leaks.
     void session.iterator.return?.(undefined);
   };
 
   betterIpcMain.handle("fs:enumerate-open", async (event, inputPath, options) => {
-    const iterator = await fs.enumerateDirectory(QualifiedPath.of(inputPath), options);
     const handle = nextEnumerationHandle++;
     const sender = event.sender;
-
-    const onDestroyed = () => evictEnumeration(handle);
-    sender.once("destroyed", onDestroyed);
-
-    enumerations.set(handle, { iterator, sender, onDestroyed });
-    return handle;
+    if (sender.isDestroyed()) throw new Error("Renderer is no longer available");
+    let abandoned = false;
+    const stopWatching = watchRendererLifetime(sender, () => {
+      abandoned = true;
+      evictEnumeration(handle);
+    });
+    try {
+      const iterator = await fs.enumerateDirectory(QualifiedPath.of(inputPath), options);
+      if (abandoned) {
+        await iterator.return?.(undefined);
+        throw new Error("Renderer closed while opening a directory");
+      }
+      enumerations.set(handle, { iterator, stopWatching });
+      return handle;
+    } catch (err) {
+      stopWatching();
+      throw err;
+    }
   });
 
   betterIpcMain.handle("fs:enumerate-next", async (_event, handle: number, max: number) => {
@@ -707,14 +733,12 @@ export function init(fs: FileSystem) {
     | {
         kind: "read";
         reader: ReadableStreamDefaultReader<Uint8Array>;
-        sender: WebContents;
-        onDestroyed: () => void;
+        stopWatching: () => void;
       }
     | {
         kind: "write";
         writer: WritableStreamDefaultWriter<Uint8Array>;
-        sender: WebContents;
-        onDestroyed: () => void;
+        stopWatching: () => void;
       };
 
   const streams = new Map<number, StreamSession>();
@@ -725,7 +749,7 @@ export function init(fs: FileSystem) {
     if (session === undefined) return;
 
     streams.delete(handle);
-    session.sender.removeListener("destroyed", session.onDestroyed);
+    session.stopWatching();
     if (session.kind === "read") {
       // Cancellation may reject if the stream already failed or closed.
       void session.reader.cancel().catch(() => undefined);
@@ -745,21 +769,35 @@ export function init(fs: FileSystem) {
 
     const sender = event.sender;
     const handle = nextStreamHandle++;
-    const onDestroyed = () => evictStream(handle);
-
-    if (mode === "r") {
-      const stream = await fs.createStream(QualifiedPath.of(inputPath), "r", options);
-      sender.once("destroyed", onDestroyed);
-      streams.set(handle, { kind: "read", reader: stream.getReader(), sender, onDestroyed });
-    } else {
-      const stream = await fs.createStream(QualifiedPath.of(inputPath), "w", {
-        start: options?.start,
-      });
-      sender.once("destroyed", onDestroyed);
-      streams.set(handle, { kind: "write", writer: stream.getWriter(), sender, onDestroyed });
+    if (sender.isDestroyed()) throw new Error("Renderer is no longer available");
+    let abandoned = false;
+    const stopWatching = watchRendererLifetime(sender, () => {
+      abandoned = true;
+      evictStream(handle);
+    });
+    try {
+      if (mode === "r") {
+        const stream = await fs.createStream(QualifiedPath.of(inputPath), "r", options);
+        if (abandoned) {
+          await stream.cancel();
+          throw new Error("Renderer closed while opening a read stream");
+        }
+        streams.set(handle, { kind: "read", reader: stream.getReader(), stopWatching });
+      } else {
+        const stream = await fs.createStream(QualifiedPath.of(inputPath), "w", {
+          start: options?.start,
+        });
+        if (abandoned) {
+          await stream.abort();
+          throw new Error("Renderer closed while opening a write stream");
+        }
+        streams.set(handle, { kind: "write", writer: stream.getWriter(), stopWatching });
+      }
+      return handle;
+    } catch (err) {
+      stopWatching();
+      throw err;
     }
-
-    return handle;
   });
 
   betterIpcMain.handle("fs:stream-read", async (_event, handle: number, max: number) => {

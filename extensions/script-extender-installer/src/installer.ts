@@ -6,14 +6,15 @@ import supportData from "./gameSupport";
 import { getScriptExtenderVersion } from "./util";
 
 function testSupported(files: string[], gameId: string): Promise<types.ISupportedResult> {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     if (!supportData[gameId]) {
       return resolve({ supported: false, requiredFiles: [] });
     } // Not a script extender friendly game.
     const scriptExtender = files.find(
-      (file) => path.basename(file) === supportData[gameId].scriptExtExe,
+      (file) =>
+        path.basename(file).toLowerCase() === supportData[gameId].scriptExtExe.toLowerCase(),
     );
-    resolve({ supported: scriptExtender ? true : false, requiredFiles: [] });
+    resolve({ supported: scriptExtender !== undefined, requiredFiles: [] });
   });
 }
 
@@ -29,7 +30,6 @@ async function installScriptExtender(
   );
   if (!scriptExtender)
     throw new util.DataInvalid(`Could not locate ${gameData.scriptExtExe} in the mod archive.`);
-  const idx = scriptExtender.indexOf(path.basename(scriptExtender));
   const rootPath = path.dirname(scriptExtender);
 
   // Get the attribute data we need.
@@ -52,16 +52,17 @@ async function installScriptExtender(
 
   // Remove directories and anything that isn't in the rootPath.
   const filtered = files.filter(
-    (file) => file.indexOf(rootPath) !== -1 && !file.endsWith(path.sep),
+    (file) =>
+      (rootPath === "." || file.startsWith(rootPath + path.sep)) && !file.endsWith(path.sep),
   );
 
   // Build install instructions and attach attributes to it.
   const instructions: types.IInstruction[] = filtered
     .map((file) => {
       const copy: types.IInstruction = {
-        type: "copy" as "copy",
+        type: "copy",
         source: file,
-        destination: path.join(file.substr(idx)),
+        destination: path.relative(rootPath, file),
       };
       return copy;
     })

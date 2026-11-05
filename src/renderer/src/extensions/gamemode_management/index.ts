@@ -1056,7 +1056,7 @@ function init(context: IExtensionContext): boolean {
         .catch((err) => callback(unknownToError(err)));
     });
 
-    const changeGameMode = (
+    const prepareGameMode = (
       oldGameId: string,
       newGameId: string,
       currentProfileId: string,
@@ -1159,6 +1159,18 @@ function init(context: IExtensionContext): boolean {
         });
     };
 
+    const changeGameMode = (
+      oldGameId: string,
+      newGameId: string,
+      currentProfileId: string,
+    ): Promise<void> => {
+      const prepare = async () => prepareGameMode(oldGameId, newGameId, currentProfileId);
+      const { withSuppressedTests } = context.api.ext;
+      return withSuppressedTests !== undefined
+        ? withSuppressedTests(["settings-changed"], prepare)
+        : prepare();
+    };
+
     context.api.onStateChange(
       ["settings", "profiles", "activeProfileId"],
       (prev: string, current: string) => {
@@ -1174,7 +1186,7 @@ function init(context: IExtensionContext): boolean {
         const prom =
           oldGameId !== newGameId
             ? changeGameMode(oldGameId, newGameId, current)
-            : PromiseBB.resolve();
+            : Promise.resolve();
 
         prom.then(() => {
           const game = {

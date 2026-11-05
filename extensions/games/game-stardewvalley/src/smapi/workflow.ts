@@ -2,9 +2,9 @@
  * User-facing SMAPI provisioning workflow.
  */
 import type { types } from "@nexusmods/vortex-api";
-import { util } from "@nexusmods/vortex-api";
+import { selectors, util } from "@nexusmods/vortex-api";
 
-import { SMAPI_URL } from "../common";
+import { GAME_ID, SMAPI_URL } from "../common";
 import { downloadSMAPI } from "./download";
 import { installDownloadedSMAPI, enableSMAPIMod } from "./install";
 import { deploySMAPI } from "./lifecycle";
@@ -22,6 +22,9 @@ export async function downloadAndInstallSMAPI(
   api: types.IExtensionApi,
   update?: boolean,
 ): Promise<void> {
+  const profileId = selectors.lastActiveProfileForGame(api.getState(), GAME_ID);
+  if (profileId === undefined) return;
+  const isCurrent = () => selectors.lastActiveProfileForGame(api.getState(), GAME_ID) === profileId;
   api.dismissNotification?.("smapi-missing");
   api.sendNotification?.({
     id: "smapi-installing",
@@ -33,11 +36,15 @@ export async function downloadAndInstallSMAPI(
 
   try {
     const downloadId = await downloadSMAPI(api);
-    const modId = await installDownloadedSMAPI(api, downloadId);
-    await enableSMAPIMod(api, modId);
+    if (!isCurrent()) return;
+    const modId = await installDownloadedSMAPI(api, downloadId, profileId);
+    if (!isCurrent()) return;
+    await enableSMAPIMod(api, modId, profileId);
+    if (!isCurrent()) return;
 
-    await deploySMAPI(api);
+    await deploySMAPI(api, profileId);
   } catch (err) {
+    if (err instanceof util.UserCanceled) return;
     api.showErrorNotification?.("Failed to download/install SMAPI", err);
     util.opn(SMAPI_URL).catch(() => null);
   } finally {

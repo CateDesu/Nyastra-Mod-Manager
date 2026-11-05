@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { collectionsByMod } from "../../../collections/util/collectionsByMod";
 import type { IModWithState } from "../../types/IModProps";
-import { groupMods, sharedMods } from "./modsTableViews";
+import { allModRows, groupMods, sharedMods } from "./modsTableViews";
 
 const t = ((key: string) => key) as Parameters<typeof groupMods>[2];
 
@@ -77,5 +77,39 @@ describe("groupMods by a column", () => {
   it("leaves the mods ungrouped without the column it names", () => {
     expect(groupMods(CATEGORISED, "category", t)).toBeUndefined();
     expect(groupMods(CATEGORISED, "none", t, category)).toBeUndefined();
+  });
+});
+
+describe("nameless mods and collections", () => {
+  it("labels an archive with empty name fields and an empty installation path by its id", () => {
+    const archive = mod("archive", "", { installationPath: "" });
+    expect(allModRows({ archive })[0].name).toBe("archive");
+  });
+
+  it("sorts a mod without attributes by its id", () => {
+    const nameless = { id: "dl-1", enabled: false } as unknown as IModWithState;
+    expect(
+      allModRows({ b: mod("b", "Beta"), n: nameless, a: mod("a", "Alpha") }).map(
+        ({ name }) => name,
+      ),
+    ).toEqual(["Alpha", "Beta", "dl-1"]);
+  });
+
+  it("uses the id when all name fields are empty", () => {
+    expect(allModRows({ n: mod("n", ""), a: mod("a", "Alpha") }).map(({ name }) => name)).toEqual([
+      "Alpha",
+      "n",
+    ]);
+  });
+
+  it("labels and sorts a collection with no name by its id", () => {
+    const mods = { ...MODS, y: collection("y", "", ["c"]) };
+    expect(groupMods(mods, "collection", t).map(({ label }) => label)).toEqual([
+      "No collection",
+      "Xenon",
+      "y",
+      "Zinc",
+    ]);
+    expect(sharedMods(group("x"), collectionsByMod(mods)).collections).toEqual(["y", "Zinc"]);
   });
 });

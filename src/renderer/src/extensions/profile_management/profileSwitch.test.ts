@@ -370,9 +370,14 @@ describe("profile switch", () => {
   }) => {
     const harness = await makeProfileSwitch({ ...skyrimPending, activeProfileId: "skyrim1" });
 
+    const options: unknown[] = [];
+    harness.api.events.on("deploy-mods", (_callback, _profile, _progress, opts) =>
+      options.push(opts),
+    );
     await harness.switchTo("skyrim2");
 
     expect(harness.deployed).toEqual(["skyrim1", "skyrim2"]);
+    expect(options).toEqual([{ failOnError: true }, { failOnError: true }]);
   });
 
   test("switches to another game's last active profile without deploying", async ({

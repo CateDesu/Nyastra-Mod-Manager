@@ -94,6 +94,7 @@ const searchFilter = (columns: IModsTableColumn[], search: string) => {
 
 /** The Mods page's table: the legacy one, or the new table while it's being built. */
 const NO_ROW_ACTIONS: ITableRowAction[] = [];
+const NO_MODS: { [id: string]: IModWithState } = {};
 
 // The switch and the menu's button; each pinned action adds a 28px button and an 8px gap.
 const ACTIONS_WIDTH = 78;
@@ -207,7 +208,8 @@ export const ModsTableSwitch = ({
   const newTable = useDevSetting("newTable");
 
   const [grouping, setGrouping] = useState<ModsTableGrouping>("none");
-  const rows = useMemo(() => allModRows(mods), [mods]);
+  const tableMods = newTable ? mods : NO_MODS;
+  const rows = useMemo(() => allModRows(tableMods), [tableMods]);
   const [search, setSearch] = useState("");
   const memberships = useMemo(() => collectionsByMod(mods), [mods]);
   const [pendingDisable, setPendingDisable] = useState<IPendingDisable>();
@@ -401,8 +403,8 @@ export const ModsTableSwitch = ({
   // Regroups when the grouped-by column changes, not whenever any column does, as Status does on each switch.
   const groupColumn = groupable.find((column) => column.id === grouping);
   const groups = useMemo(
-    () => groupMods(mods, grouping, t, groupColumn),
-    [mods, grouping, t, groupColumn],
+    () => groupMods(tableMods, grouping, t, groupColumn),
+    [tableMods, grouping, t, groupColumn],
   );
 
   // The columns shown, so a search finds only what's on screen.

@@ -64,7 +64,10 @@ import {
   setModEnabled,
   forgetMod,
 } from "../profile_management/actions/profiles";
-import { enabledModCountForProfile } from "../profile_management/selectors";
+import {
+  enabledModCountForProfile,
+  lastActiveProfileForGame,
+} from "../profile_management/selectors";
 import type { IProfile, IProfileMod } from "../profile_management/types/IProfile";
 import { setAutoDeployment } from "../settings_interface/actions/automation";
 import { setDeploymentNecessary } from "./actions/deployment";
@@ -113,7 +116,7 @@ import {
 } from "./util/activationStore";
 import allTypesSupported from "./util/allTypesSupported";
 import * as basicInstaller from "./util/basicInstaller";
-import BlacklistSet from "./util/BlacklistSet";
+import BlacklistSet, { fileOverrideEntries } from "./util/BlacklistSet";
 import { genSubDirFunc, purgeMods, purgeModsInPath } from "./util/deploy";
 import { reportRecordedFailures, resetDeploymentFailures } from "./util/deploymentFailures";
 import {
@@ -314,29 +317,15 @@ async function deployModType(
     ),
   );
 
-  try {
-    await doSaveActivation(
-      api,
-      game.id,
-      typeId,
-      targetPath,
-      stagingPath,
-      newActivation,
-      activator.id,
-    );
-  } catch (unknownErr) {
-    const err = unknownToError(unknownErr);
-    await api.showDialog(
-      "error",
-      "Saving manifest failed",
-      {
-        text:
-          "Saving the manifest failed (see error below). " + "This could lead to errors later on, ",
-        message: err.message,
-      },
-      [],
-    );
-  }
+  await doSaveActivation(
+    api,
+    game.id,
+    typeId,
+    targetPath,
+    stagingPath,
+    newActivation,
+    activator.id,
+  );
   return newActivation;
 }
 
@@ -468,12 +457,19 @@ function checkIncompatibilities(
   }
 }
 
-function doSortMods(api: IExtensionApi, profile: IProfile, mods: { [modId: string]: IMod }) {
+function doSortMods(
+  api: IExtensionApi,
+  profile: IProfile,
+  mods: { [modId: string]: IMod },
+  includeModId?: string,
+) {
   // sort (all) mods based on their dependencies so the right files get activated
   const modState: { [id: string]: IProfileMod } = profile !== undefined ? profile.modState : {};
   const unsorted = Object.keys(mods)
     .map((key: string) => mods[key])
-    .filter((mod: IMod) => getSafe(modState, [mod.id, "enabled"], false));
+    .filter(
+      (mod: IMod) => mod.id === includeModId || getSafe(modState, [mod.id, "enabled"], false),
+    );
 
   return sortMods(profile.gameId, unsorted, api).catch((unknownErr) => {
     const err = unknownToError(unknownErr);
@@ -675,6 +671,15 @@ function genUpdateModDeployment(installManager: InstallManager) {
     let profile: IProfile =
       profileId === undefined ? activeProfile(state) : state.persistent.profiles?.[profileId];
 
+    const unavailable = (message: string): Promise<void> => {
+      if (profile !== undefined) {
+        api.store.dispatch(setDeploymentNecessary(profile.gameId, true));
+      }
+      return deployOptions?.failOnError
+        ? Promise.reject(new ProcessCanceled(message))
+        : Promise.resolve();
+    };
+
     if (Object.keys(getSafe(state, ["session", "base", "toolsRunning"], {})).length > 0) {
       api.sendNotification({
         type: "info",
@@ -682,7 +687,7 @@ function genUpdateModDeployment(installManager: InstallManager) {
         message: "Can't deploy while the game or a tool is running",
         displayMS: 5000,
       });
-      return Promise.resolve();
+      return unavailable("Can't deploy while the game or a tool is running");
     }
 
     if (profile === undefined) {
@@ -690,7 +695,7 @@ function genUpdateModDeployment(installManager: InstallManager) {
       // can be delayed so it's completely possible there is no profile active at the the time
       // or has been deleted by then. Rare but not a bug
       api.store.dispatch(dismissNotification(notification.id));
-      return Promise.resolve();
+      return unavailable("The deployment profile is no longer available");
     }
     const gameId = profile.gameId;
     const gameDiscovery = state.settings.gameMode.discovered?.[gameId];
@@ -741,7 +746,7 @@ function genUpdateModDeployment(installManager: InstallManager) {
           });
         }
       } // otherwise there should already be a notification
-      return Promise.resolve();
+      return unavailable("No deployment method is available");
     }
 
     const newDeployment: { [typeId: string]: IDeployedFile[] } = {};
@@ -889,6 +894,11 @@ function genUpdateModDeployment(installManager: InstallManager) {
                 newDeployment,
                 deployProgress,
               );
+              const deploymentIncomplete = reportRecordedFailures(api, game.id).length > 0;
+              api.store.dispatch(setDeploymentNecessary(game.id, deploymentIncomplete));
+              if (deploymentIncomplete && deployOptions?.failOnError) {
+                throw new ProcessCanceled("Some files could not be deployed");
+              }
             });
 
             // at this point the deployment lock gets released so another deployment
@@ -906,9 +916,6 @@ function genUpdateModDeployment(installManager: InstallManager) {
             progress(t("Preparing game settings"), 100);
 
             await bakeSettings(api, profile, sortedModList);
-
-            const failures = reportRecordedFailures(api, game.id);
-            api.store.dispatch(setDeploymentNecessary(game.id, failures.length > 0));
 
             emitModsDeployed(api, {
               gameId,
@@ -973,6 +980,10 @@ function genUpdateModDeployment(installManager: InstallManager) {
                 });
               }
             }
+            api.store.dispatch(setDeploymentNecessary(gameId, true));
+            if (deployOptions?.failOnError) {
+              throw err;
+            }
           } finally {
             api.store.dispatch(stopActivity("mods", "deployment"));
             api.store.dispatch(setProgress("mods", "deployment", undefined, 0));
@@ -1028,7 +1039,7 @@ function doSaveActivation(
       .then((result) =>
         result.action === "Retry"
           ? doSaveActivation(api, gameId, typeId, deployPath, stagingPath, files, activatorId)
-          : Promise.resolve(),
+          : Promise.reject(new ProcessCanceled("The deployment manifest could not be saved")),
       );
   });
 }
@@ -1254,44 +1265,52 @@ function onModsEnabled(api: IExtensionApi, deploymentTimer: Debouncer) {
 }
 
 function onDeploySingleMod(api: IExtensionApi) {
-  return async (gameId: string, modId: string, enable?: boolean) => {
-    const state: IState = api.store.getState();
-    const game = getGame(gameId);
-    const discovery = getSafe(state, ["settings", "gameMode", "discovered", gameId], undefined);
-    if (game === undefined || discovery === undefined || discovery.path === undefined) {
-      return;
-    }
-    const mod: IMod = getSafe(state, ["persistent", "mods", game.id, modId], undefined);
-    if (mod === undefined) {
-      return;
-    }
-    const activator = getCurrentActivator(state, gameId, false);
+  return (gameId: string, modId: string, enable?: boolean) =>
+    withActivationLock(async () => {
+      const unavailable = (message: string): never => {
+        api.store.dispatch(setDeploymentNecessary(gameId, true));
+        throw new ProcessCanceled(message);
+      };
+      const state: IState = api.store.getState();
+      const game = getGame(gameId);
+      const discovery = getSafe(state, ["settings", "gameMode", "discovered", gameId], undefined);
+      if (game === undefined || discovery === undefined || discovery.path === undefined) {
+        return unavailable("Game no longer available");
+      }
+      const mod: IMod = getSafe(state, ["persistent", "mods", game.id, modId], undefined);
+      if (mod === undefined) {
+        return unavailable("The mod is no longer available");
+      }
+      if (!mod.installationPath) {
+        return unavailable("The mod has no installation directory");
+      }
+      const activator = getCurrentActivator(state, gameId, false);
 
-    if (activator === undefined) {
-      return;
-    }
+      if (activator === undefined) {
+        return unavailable("No deployment method is available");
+      }
 
-    const dataPath = game.getModPaths(discovery.path)[mod.type || ""];
-    if (!truthy(dataPath)) {
-      return;
-    }
-    const stagingPath: string = installPathForGame(state, gameId);
-    let modPath: string;
+      const dataPath = game.getModPaths(discovery.path)[mod.type || ""];
+      if (!truthy(dataPath)) {
+        return unavailable("The deployment directory is unknown");
+      }
+      const stagingPath: string = installPathForGame(state, gameId);
+      let modPath: string;
 
-    try {
-      modPath = path.join(stagingPath, mod.installationPath);
-    } catch (err) {
-      err["StagingPath"] = stagingPath || "<undefined>";
-      err["InstallPath"] = mod.installationPath || "<undefined>";
-      err["GameId"] = gameId || "<undefined>";
-      api.showErrorNotification("Failed to deploy mod", err, {
-        message: modId,
-      });
-      return;
-    }
+      try {
+        modPath = path.join(stagingPath, mod.installationPath);
+      } catch (err) {
+        err["StagingPath"] = stagingPath || "<undefined>";
+        err["InstallPath"] = mod.installationPath || "<undefined>";
+        err["GameId"] = gameId || "<undefined>";
+        api.showErrorNotification("Failed to deploy mod", err, {
+          message: modId,
+        });
+        api.store.dispatch(setDeploymentNecessary(gameId, true));
+        throw err;
+      }
 
-    const subdir = genSubDirFunc(game, getModType(mod.type));
-    await withActivationLock(async () => {
+      const subdir = genSubDirFunc(game, getModType(mod.type));
       try {
         const normalize = normalizeDeployment(gameId, await getNormalizeFunc(dataPath));
         const lastActivation = await loadActivation(
@@ -1303,18 +1322,35 @@ function onDeploySingleMod(api: IExtensionApi) {
           activator,
         );
         resetDeploymentFailures(api, gameId);
+        let skipFiles: BlacklistSet;
+        if (enable !== false) {
+          const profile = profileById(state, lastActiveProfileForGame(state, gameId));
+          const sorted =
+            profile !== undefined
+              ? await doSortMods(api, profile, state.persistent.mods[gameId], mod.id)
+              : [];
+          const laterSources = new Set(
+            sorted
+              .slice(sorted.findIndex((entry) => entry.id === mod.id) + 1)
+              .map((entry) => entry.installationPath),
+          );
+          laterSources.add(truthy(mod.type) ? `${MERGED_PATH}.${mod.type}` : MERGED_PATH);
+          const laterFiles = lastActivation
+            .filter((file) => (file.target ?? "") === subdir(mod) && laterSources.has(file.source))
+            .map((file) => normalize(path.join(mod.installationPath, file.relPath)));
+          skipFiles = new BlacklistSet(
+            [
+              ...fileOverrideEntries(mod, path.join(dataPath, subdir(mod)), normalize),
+              ...laterFiles,
+            ],
+            game,
+            normalize,
+          );
+        }
         await activator.prepare(dataPath, false, lastActivation, normalize);
-        if (mod !== undefined) {
-          if (enable !== false) {
-            await activator.activate(
-              modPath,
-              mod.installationPath,
-              subdir(mod),
-              new BlacklistSet(mod.fileOverrides ?? [], game, normalize),
-            );
-          } else {
-            await activator.deactivate(modPath, subdir(mod), mod.installationPath);
-          }
+        await activator.deactivate(modPath, subdir(mod), mod.installationPath);
+        if (enable !== false) {
+          await activator.activate(modPath, mod.installationPath, subdir(mod), skipFiles);
         }
         const newActivation = await activator.finalize(gameId, dataPath, stagingPath);
         await doSaveActivation(
@@ -1326,10 +1362,12 @@ function onDeploySingleMod(api: IExtensionApi) {
           newActivation,
           activator.id,
         );
-        reportRecordedFailures(api, gameId);
+        if (reportRecordedFailures(api, gameId).length > 0) {
+          throw new ProcessCanceled("Some files could not be deployed");
+        }
       } catch (unknownErr) {
         if (activator.cancel !== undefined) {
-          activator.cancel(gameId, dataPath, stagingPath);
+          await activator.cancel(gameId, dataPath, stagingPath);
         }
         const err = unknownToError(unknownErr);
         if (err instanceof ProcessCanceled) {
@@ -1345,9 +1383,10 @@ function onDeploySingleMod(api: IExtensionApi) {
             allowReport: !userCanceled,
           });
         }
+        api.store.dispatch(setDeploymentNecessary(gameId, true));
+        throw err;
       }
     });
-  };
 }
 
 function onNeedToDeploy(api: IExtensionApi, current: any) {
@@ -1534,12 +1573,19 @@ function once(api: IExtensionApi) {
     });
   });
 
-  api.events.on("purge-mods", (allowFallback: boolean, callback: (err: Error) => void) => {
-    return purgeMods(api)
-      .catch((err) => (allowFallback ? fallbackPurge(api) : Promise.reject(err)))
-      .then(() => callback(null))
-      .catch((err) => callback(unknownToError(err)));
-  });
+  api.events.on(
+    "purge-mods",
+    (
+      allowFallback: boolean,
+      callback: (err: Error) => void,
+      options?: { failOnError?: boolean },
+    ) => {
+      return purgeMods(api, undefined, undefined, options?.failOnError)
+        .catch((err) => (allowFallback ? fallbackPurge(api) : Promise.reject(err)))
+        .then(() => callback(null))
+        .catch((err) => callback(unknownToError(err)));
+    },
+  );
 
   api.events.on("await-activation", (callback: (err: Error) => void) => {
     deploymentTimer.wait(callback);

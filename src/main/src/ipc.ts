@@ -61,7 +61,7 @@ function mainOn<C extends keyof RendererChannels>(
   return () => ipcMain.off(channel, outerListener);
 }
 
-function mainCallback<C extends keyof CallbackChannels>(
+async function mainCallback<C extends keyof CallbackChannels>(
   channel: C,
   webContents: WebContents,
   timeout: number,
@@ -82,11 +82,7 @@ function mainCallback<C extends keyof CallbackChannels>(
     reject = undefined;
   };
 
-  // A non-positive timeout disables the wall-clock deadline (used by
-  // download:resolve - see downloading/ipc.ts). The renderer always settles the
-  // callback (resolve on success, reject on cancel/skip, network calls carry
-  // their own timeouts), so the only failure mode left to guard against is the
-  // renderer dying, handled by the destroyed listener below.
+  // Untimed download resolutions still end when their renderer goes away.
   const timer =
     timeout > 0
       ? setTimeout(() => {
@@ -106,6 +102,24 @@ function mainCallback<C extends keyof CallbackChannels>(
     }
   };
   webContents.once("destroyed", onDestroyed);
+  const onProcessGone = () => {
+    if (reject) {
+      const rej = reject;
+      settle();
+      rej(new Error(`Callback for channel '${channel}' aborted: renderer process exited`));
+    }
+  };
+  const onNavigation = (
+    details: Electron.Event<Electron.WebContentsDidStartNavigationEventParams>,
+  ) => {
+    if (details.isMainFrame && !details.isSameDocument && reject) {
+      const rej = reject;
+      settle();
+      rej(new Error(`Callback for channel '${channel}' aborted: renderer navigated`));
+    }
+  };
+  webContents.once("render-process-gone", onProcessGone);
+  webContents.on("did-start-navigation", onNavigation);
 
   const off = mainOn(`callback:${channel}`, (event, ...args) => {
     const { sender } = event;
@@ -130,12 +144,16 @@ function mainCallback<C extends keyof CallbackChannels>(
     }
   });
 
-  mainSend(webContents, channel, ...args);
-  return promise.finally(() => {
+  try {
+    mainSend(webContents, channel, ...args);
+    return await promise;
+  } finally {
     off();
     if (timer !== undefined) clearTimeout(timer);
     webContents.off("destroyed", onDestroyed);
-  });
+    webContents.off("render-process-gone", onProcessGone);
+    webContents.off("did-start-navigation", onNavigation);
+  }
 }
 
 function mainHandle<C extends keyof InvokeChannels>(

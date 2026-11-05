@@ -52,10 +52,12 @@ export const MODS_TABLE_PRESETS: IModsTableView[] = [
   { id: "author", label: "Author", grouping: "author" },
 ];
 
+export const displayName = (mod: IMod): string => modName(mod) || mod.id;
+
 const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name);
 
 const toRows = (mods: IModWithState[]): IModRow[] =>
-  mods.map((mod) => ({ mod, name: modName(mod) })).sort(byName);
+  mods.map((mod) => ({ mod, name: displayName(mod) })).sort(byName);
 
 // The mods a collection installed; collections themselves are the groups, not rows.
 const installedMods = (mods: { [id: string]: IModWithState }) =>
@@ -78,7 +80,7 @@ const groupByCollection = (
 
   const collectionGroups = Object.values(mods)
     .filter((mod) => mod.type === COLLECTION_TYPE)
-    .map((collection) => ({ collection, name: modName(collection) }))
+    .map((collection) => ({ collection, name: displayName(collection) }))
     .sort(byName)
     .map(({ collection, name }) => ({
       id: collection.id,
@@ -237,7 +239,7 @@ export const sharedMods = (
     const others = (memberships[mod.id] ?? []).filter(
       (collection) => collection.id !== group.collection?.id,
     );
-    others.forEach((collection) => collections.set(collection.id, modName(collection)));
+    others.forEach((collection) => collections.set(collection.id, displayName(collection)));
     return others.length > 0;
   });
 

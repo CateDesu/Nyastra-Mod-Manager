@@ -1,15 +1,35 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
+import Bluebird from "bluebird";
 import { afterEach, expect, vi } from "vitest";
 
 import { test } from "../../../test-utils/deploymentTest";
 import { UserCanceled } from "../../../util/CustomErrors";
+import * as fileSystem from "../../../util/fs";
 import { transferPath } from "../../../util/transferPath";
 import { fallbackPurgeType, saveActivation } from "./activationStore";
 import * as methods from "./deploymentMethods";
 
 afterEach(() => vi.restoreAllMocks());
+
+test("a failed manifest removal preserves the recovery backup and reports failure", async ({
+  makeDeployment,
+}) => {
+  const h = makeDeployment({ files: { "config.ini": "mod copy" } });
+  const files = await h.deploy();
+  await saveActivation("skyrimse", "", "fixture", h.gameDir, h.stagingDir, files, h.method.id);
+  const remove = fileSystem.removeAsync;
+  const failure = Object.assign(new Error("fixture manifest busy"), { code: "EACCES" });
+  vi.spyOn(fileSystem, "removeAsync").mockImplementation((file, ...args) =>
+    file === h.inGame("vortex.deployment.json") ? Bluebird.reject(failure) : remove(file, ...args),
+  );
+
+  await expect(
+    saveActivation("skyrimse", "", "fixture", h.gameDir, h.stagingDir, [], h.method.id),
+  ).rejects.toBe(failure);
+  expect(fs.existsSync(path.join(h.stagingDir, "vortex.deployment.msgpack"))).toBe(true);
+});
 
 test("canceling an unsafe fallback purge preserves moved files and the manifest", async ({
   makeDeployment,
@@ -54,6 +74,25 @@ test("fallback purge recovers a damaged manifest from the backup written by save
     "mod copy",
   );
   expect(fs.existsSync(h.inGame("vortex.deployment.json"))).toBe(false);
+});
+
+test("declining a readable backup explains the damaged manifest", async ({ makeDeployment }) => {
+  const h = makeDeployment({ files: { "config.ini": "mod copy" } });
+  const files = await h.deploy();
+  vi.spyOn(h.api.store, "getState").mockReturnValue({
+    ...h.api.store.getState(),
+    app: { instanceId: "review" },
+  } as any);
+  await saveActivation("skyrimse", "", "review", h.gameDir, h.stagingDir, files, h.method.id);
+  fs.writeFileSync(h.inGame("vortex.deployment.json"), '{"damaged');
+  vi.spyOn(methods, "getActivator").mockReturnValue(h.method);
+  vi.spyOn(h.api, "showDialog").mockResolvedValue({ action: "Cancel", input: {} });
+  const purge = fallbackPurgeType(h.api, h.method, "skyrimse", "", h.gameDir, h.stagingDir);
+  await expect(purge).rejects.toThrow(
+    'is corrupted.\nYou should delete it, then immediately click the "Purge" button',
+  );
+  await expect(purge).rejects.not.toThrow("Backup couldn't be read");
+  expect(fs.readFileSync(h.inGame("config.ini"), "utf8")).toBe("mod copy");
 });
 
 test("purging a tagged subtree preserves unrelated empty game directories", async ({

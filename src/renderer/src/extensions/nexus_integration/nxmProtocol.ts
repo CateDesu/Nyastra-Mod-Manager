@@ -50,6 +50,7 @@ const DOWNLOAD_URL_CACHE_DURATION = 5 * 60 * 1000;
 interface IQueuedDownload {
   input: string;
   url: NXMUrl;
+  pageId: string;
   resolve: (res: IResolvedURL) => void;
   reject: (err: Error) => void;
   /** The file's update chain, used to describe what a skip is skipping. */
@@ -99,6 +100,7 @@ export class NxmProtocol {
   readonly #urlCache = createKeyedCache<{ urls: string[]; meta: unknown }>(
     DOWNLOAD_URL_CACHE_DURATION,
   );
+  #urlCacheGeneration = 0;
 
   /**
    * `getNexus` is read on each use: the extension registers its protocol handlers during init,
@@ -129,12 +131,17 @@ export class NxmProtocol {
    */
   #dropCachedUrlsOnMembershipChange(): void {
     let premium = isPremium(this.#api.getState());
+    let accountId = userInfo(this.#api.getState())?.userId;
     this.#api.store.subscribe(() => {
-      const current = isPremium(this.#api.getState());
-      if (current === premium) {
+      const state = this.#api.getState();
+      const current = isPremium(state);
+      const currentAccountId = userInfo(state)?.userId;
+      if (current === premium && currentAccountId === accountId) {
         return;
       }
       premium = current;
+      accountId = currentAccountId;
+      this.#urlCacheGeneration++;
       this.#urlCache.clear();
     });
   }
@@ -166,7 +173,7 @@ export class NxmProtocol {
         return await this.#apiDownload(input, url, pageId);
       } catch (err) {
         if (await this.#confirmMembershipEnded(url, err)) {
-          return this.#websiteDownload(input, url);
+          return this.#websiteDownload(input, url, pageId);
         }
         throw err;
       }
@@ -176,7 +183,7 @@ export class NxmProtocol {
       return this.#apiDownload(input, url, pageId);
     }
 
-    return this.#websiteDownload(input, url);
+    return this.#websiteDownload(input, url, pageId);
   };
 
   /**
@@ -249,12 +256,12 @@ export class NxmProtocol {
       if (queued === undefined) {
         return;
       }
-      const { url } = queued;
+      const { url, pageId } = queued;
 
       queued.awaitingLink = true;
 
       opn(
-        `${NEXUS_BASE_URL}/${url.gameId}/mods/${url.modId}?tab=files&file_id=${url.fileId}&nmm=1`,
+        `${NEXUS_BASE_URL}/${pageId}/mods/${url.modId}?tab=files&file_id=${url.fileId}&nmm=1`,
       ).catch(() => null);
     },
 
@@ -382,12 +389,13 @@ export class NxmProtocol {
    * Park the download until the user brings back an authorised link from the website (or cancels
    * or skips it). FreeUserDLDialog renders off the redux queue this dispatches into.
    */
-  #websiteDownload(input: string, url: NXMUrl): Promise<IResolvedURL> {
+  #websiteDownload(input: string, url: NXMUrl, pageId: string): Promise<IResolvedURL> {
     // a promise settles once and #dequeue tolerates a repeat, so cancelling after a skip is safe
     return new Promise<IResolvedURL>((resolve, reject) => {
       const queued: IQueuedDownload = {
         input,
         url,
+        pageId,
         resolve: (res) => {
           this.#dequeue(queued);
           resolve(res);
@@ -396,7 +404,7 @@ export class NxmProtocol {
           this.#dequeue(queued);
           reject(err);
         },
-        queryRelevantUpdates: () => this.#relevantUpdates(url),
+        queryRelevantUpdates: () => this.#relevantUpdates(url, pageId),
         awaitingLink: false,
       };
       this.#freeQueue.push(queued);
@@ -409,8 +417,8 @@ export class NxmProtocol {
    * dependency may reference an older or newer file than the one being skipped and the nxm url
    * alone can't tell us which.
    */
-  async #relevantUpdates(url: NXMUrl): Promise<IFileUpdate[]> {
-    const files = await this.#nexus.getModFiles(url.modId, url.gameId);
+  async #relevantUpdates(url: NXMUrl, pageId: string): Promise<IFileUpdate[]> {
+    const files = await this.#nexus.getModFiles(url.modId, pageId);
 
     const previous = new Map<number, IFileUpdate>(); // new_file_id -> update
     files.file_updates.forEach((update) => previous.set(update.new_file_id, update));
@@ -500,6 +508,7 @@ export class NxmProtocol {
       return { urls: cached.urls, updatedUrl: input, meta: cached.meta };
     }
 
+    const cacheGeneration = this.#urlCacheGeneration;
     let found: IFoundDownload;
     try {
       found =
@@ -516,7 +525,9 @@ export class NxmProtocol {
       meta: { source: "nexus", nexus: { ids: found.ids } } as IResolvedURL["meta"],
     };
 
-    this.#urlCache.set(cacheKey, { urls: resolved.urls, meta: resolved.meta });
+    if (cacheGeneration === this.#urlCacheGeneration) {
+      this.#urlCache.set(cacheKey, { urls: resolved.urls, meta: resolved.meta });
+    }
     return resolved;
   }
 
@@ -589,12 +600,16 @@ export class NxmProtocol {
     throw error;
   }
 
-  /** Hand an incoming link to the queued download that sent the user to fetch it. */
+  /** Hand an authorised link to the queued download that sent the user to fetch it. */
   #deliverAwaitedLink(nxmUrl: NXMUrl, url: string): boolean {
+    if (nxmUrl.key === undefined) {
+      return false;
+    }
+    const pageId = nxmPageId(this.#api.getState(), nxmUrl.gameId);
     const queued = this.#freeQueue.find(
       (awaited) =>
         awaited.awaitingLink &&
-        awaited.url.gameId === nxmUrl.gameId &&
+        awaited.pageId === pageId &&
         awaited.url.modId === nxmUrl.modId &&
         awaited.url.fileId === nxmUrl.fileId,
     );

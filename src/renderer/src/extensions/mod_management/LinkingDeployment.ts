@@ -371,7 +371,7 @@ abstract class LinkingActivator implements IDeploymentMethod {
                   const relPathWithSource = path.join(sourceName, relPath);
                   const relPathWithSourceNorm = this.mNormalize(relPathWithSource);
                   const relPathNorm = this.mNormalize(path.join(deployPath, relPath));
-                  if (!blackList.has(relPathWithSourceNorm)) {
+                  if (!blackList.has(this.getDeployedPath(relPathWithSourceNorm))) {
                     // mods are activated in order of ascending priority so
                     // overwriting is fine here
                     this.mContext.newDeployment[relPathNorm] = {

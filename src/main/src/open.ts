@@ -12,6 +12,15 @@ export function openUrl(url: URL): void {
   });
 }
 
+export function openUrlString(raw: string): void {
+  const url = URL.parse(raw);
+  if (url === null) {
+    log("warn", "not opening an invalid URL", { url: raw });
+    return;
+  }
+  openUrl(url);
+}
+
 /**
  * Opens the file or folder using the default application for the file extension.
  *

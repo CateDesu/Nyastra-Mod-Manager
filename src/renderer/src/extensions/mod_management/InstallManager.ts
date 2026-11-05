@@ -208,6 +208,8 @@ import { reconcileOrphanedArchive } from "./util/reconcileOrphanedArchive";
 import { selectRequeueCandidates } from "./util/requeueCandidates";
 import { OPTIONAL_PHASE, rulePhase } from "./util/rulePhase";
 import testModReference, {
+  completeModRef,
+  lookupToModRef,
   downloadHasReferenceTag,
   downloadReferenceTags,
   downloadToModRef,
@@ -1527,6 +1529,10 @@ class InstallManager {
                   const match = metaLookupMatch(modInfo, path.basename(archivePath), installGameId);
                   if (match !== undefined) {
                     fullInfo.meta = match.value;
+                    details.modReference = completeModRef(
+                      details.modReference,
+                      lookupToModRef(match.value, archiveMD5, installGameId),
+                    );
                   }
 
                   modId = this.deriveInstallName(baseName, fullInfo);
@@ -2475,12 +2481,13 @@ class InstallManager {
     const state = api.getState();
     const stagingFolder = installPathForGame(state, gameId);
     const mod = state.persistent.mods[gameId]?.[modId];
-    if (mod?.installationPath === undefined) {
+    if (!mod?.installationPath) {
       log("debug", "failed to calculate modSize", "mod is not in state");
       return Promise.resolve();
     }
     const modPath = path.join(stagingFolder, mod.installationPath);
-    return Promise.resolve(calculateFolderSize(modPath))
+    return Promise.resolve(fs.statAsync(modPath))
+      .then(() => calculateFolderSize(modPath))
       .then((totalSize) => {
         if (!ownsInstall()) return;
         api.store.dispatch(setModAttribute(gameId, mod.id, "modSize", totalSize));

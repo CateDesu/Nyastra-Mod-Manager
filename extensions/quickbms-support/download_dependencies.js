@@ -7,9 +7,11 @@ const QUICK_BMS_URL = "https://aluigi.altervista.org/papers/quickbms.zip";
 
 async function downloadDependencies() {
   try {
-    await fs.promises.stat("dependencies");
-    console.log("dependencies already installed");
-    return;
+    const executable = await fs.promises.stat(path.join("dist", "quickbms_4gb_files.exe"));
+    if (executable.isFile() && executable.size > 0) {
+      console.log("dependencies already installed");
+      return;
+    }
   } catch (err) {
     if (err.code !== "ENOENT") throw err;
   }

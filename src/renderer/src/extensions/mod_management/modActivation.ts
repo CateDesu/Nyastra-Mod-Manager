@@ -2,7 +2,7 @@ import * as path from "path";
 
 import { log } from "../../logging";
 import type { IExtensionApi } from "../../types/IExtensionContext";
-import { UserCanceled } from "../../util/CustomErrors";
+import { ProcessCanceled, UserCanceled } from "../../util/CustomErrors";
 import * as fs from "../../util/fs";
 import getNormalizeFunc, { type Normalize } from "../../util/getNormalizeFunc";
 import { truthy } from "../../util/util";
@@ -10,6 +10,7 @@ import { MERGED_PATH } from "./modMerging";
 import type { IDeployedFile, IDeploymentMethod } from "./types/IDeploymentMethod";
 import type { IMod } from "./types/IMod";
 import type BlacklistSet from "./util/BlacklistSet";
+import { fileOverrideEntries } from "./util/BlacklistSet";
 import { normalizeDeployment } from "./util/deploymentNormalize";
 import renderModName from "./util/modName";
 
@@ -78,20 +79,16 @@ async function deployMods(
 
     for (let idx = 0; idx < mods.length; idx++) {
       const mod = mods[idx];
+      if (!mod.installationPath) {
+        throw new ProcessCanceled("The mod has no installation directory");
+      }
       if (progressCB !== undefined) {
         progressCB(renderModName(mod), Math.round((idx * 50) / mods.length));
       }
       const modPath = path.join(installationPath, mod.installationPath);
-      if (mod.fileOverrides !== undefined) {
-        mod.fileOverrides
-          .map((file) => {
-            const relPath = path.relative(destinationPath, file);
-            const relPathWithSource = path.join(mod.installationPath, relPath);
-            const normRelPathWithSource = normalize(relPathWithSource);
-            return normRelPathWithSource;
-          })
-          .forEach((file) => skipFiles.add(file));
-      }
+      fileOverrideEntries(mod, path.join(destinationPath, subDir(mod)), normalize).forEach((file) =>
+        skipFiles.add(file),
+      );
       await method.activate(modPath, mod.installationPath, subDir(mod), skipFiles);
     }
 

@@ -9,6 +9,7 @@ import {
   readFile,
   rename,
   rm,
+  rmdir,
   stat,
   symlink,
   writeFile,
@@ -45,6 +46,7 @@ export class NodeFileSystemBackendImpl implements NodeFileSystemBackend {
     try {
       await cp(source, target, {
         recursive: true,
+        verbatimSymlinks: true,
         force: options?.overwrite ?? false,
         errorOnExist: true,
       });
@@ -143,7 +145,11 @@ export class NodeFileSystemBackendImpl implements NodeFileSystemBackend {
 
   async delete(path: ResolvedPath): Promise<void> {
     try {
-      await rm(path, { recursive: false });
+      if ((await lstat(path)).isDirectory()) {
+        await rmdir(path);
+      } else {
+        await rm(path, { recursive: false });
+      }
     } catch (err) {
       throw parseError(err, { path }, ({ data }) => {
         if (data.kind === "fs:no-permissions") {
@@ -245,6 +251,18 @@ export class NodeFileSystemBackendImpl implements NodeFileSystemBackend {
     mode: string,
     options?: { start?: number; end?: number },
   ): Promise<ReadableStream<Uint8Array> | WritableStream<Uint8Array>> {
+    const start = options?.start === undefined ? 0 : options.start;
+    const end = options?.end === undefined ? Infinity : options.end;
+    if (
+      !Number.isSafeInteger(start) ||
+      start < 0 ||
+      (mode === "r" && ((end !== Infinity && !Number.isSafeInteger(end)) || end < start))
+    ) {
+      throw new VortexError(`Invalid stream range for '${path}'`, {
+        kind: "argument-invalid",
+        argument: "options",
+      });
+    }
     if (mode === "w") {
       await this.createDirectory(dirname(path));
     }

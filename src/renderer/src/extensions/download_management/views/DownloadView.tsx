@@ -49,7 +49,7 @@ import MainPage from "../../../views/MainPage";
 import type { IGameStored } from "../../gamemode_management/types/IGameStored";
 import type { IInstallOptions } from "../../mod_management/types/IInstallOptions";
 import { lookupFromDownload } from "../../mod_management/util/dependencies";
-import { convertGameIdReverse } from "../../nexus_integration/util/convertGameId";
+import { convertGameIdReverse, nxmPageId } from "../../nexus_integration/util/convertGameId";
 import { setShowDLDropzone, setShowDLGraph } from "../actions/settings";
 import { finishDownload, setDownloadTime } from "../actions/state";
 import type { IDownload } from "../types/IDownload";
@@ -816,9 +816,8 @@ class DownloadView extends ComponentEx<IDownloadViewProps, IComponentState> {
     if (ids === undefined) {
       return;
     }
-    const url =
-      path.join("www.nexusmods.com", ids.gameId, "mods", ids.modId.toString()) +
-      `?tab=files&file_id=${ids.fileId}&nmm=1`;
+    const domain = nxmPageId(this.context.api.store.getState(), ids.gameId);
+    const url = `https://www.nexusmods.com/${domain}/mods/${ids.modId}?tab=files&file_id=${ids.fileId}&nmm=1`;
     opn(url).catch((err) => null);
     return;
   };
