@@ -22,3 +22,9 @@ export function insertStateValue(
     current = child as Record<string, unknown>;
   }
 }
+/** Parents load before child overrides, using the persisted key order. */
+export function orderStateRows<T extends { key: string[] }>(rows: T[]): T[] {
+  return rows.sort((a, b) =>
+    Buffer.compare(Buffer.from(a.key.join("###")), Buffer.from(b.key.join("###"))),
+  );
+}

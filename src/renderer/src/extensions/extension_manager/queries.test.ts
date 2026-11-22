@@ -426,6 +426,21 @@ describe("getMissingOptionalExtensions", () => {
 });
 
 describe("findUpdatableExtensions", () => {
+  it.each([
+    ["1.0.0-beta.1", "1.0.0", true],
+    ["1.0.0-beta.1", "1.0.0-beta.2", true],
+    ["1.0.0", "1.0.0-beta.2", false],
+    ["1.0.0-beta.2", "1.0.0-beta.1", false],
+    ["1.0.0+old", "1.0.0+new", false],
+    ["release 1.0", "release 1.1", true],
+  ])("compares %s against %s", (current, available, expected) => {
+    const installed = {
+      "ext-1": makeExtensionState({ modId: 123, version: current }),
+    };
+    const catalog = [makeAvailableExtension({ modId: 123, version: available })];
+    expect(findUpdatableExtensions(installed, catalog)).toHaveLength(expected ? 1 : 0);
+  });
+
   it("finds extensions with newer versions available", () => {
     const installed = {
       "ext-1": makeExtensionState({ modId: 123, version: "1.0.0" }),

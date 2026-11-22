@@ -1,13 +1,22 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import * as path from "node:path";
 
 import type { DuckDBConnection, DuckDBResultReader } from "@duckdb/node-api";
 import { unknownToError } from "@vortex/shared";
 import { DataInvalid, VortexError } from "@vortex/shared/errors";
-import type { IPersistor } from "@vortex/shared/state";
+import { isClobberedKeySegment, type IPersistor } from "@vortex/shared/state";
 
 import { getVortexPath } from "../getVortexPath";
 import { log } from "../logging";
 import DuckDBSingleton from "./DuckDBSingleton";
+import {
+  isEncodedStatePath,
+  readStateRows,
+  stateStorageRoot,
+  writeStateRows,
+  type StateRow,
+} from "./stateRows";
+import { insertStateValue } from "./stateTree";
 
 const SEPARATOR: string = "###";
 
@@ -110,6 +119,8 @@ class LevelPersist implements IPersistor {
   #mConnection: DuckDBConnection;
   #mAlias: string;
   #mInTransaction: boolean = false;
+  #mOperations: Promise<unknown> = Promise.resolve();
+  #mOperationContext = new AsyncLocalStorage<{ active: boolean }>();
 
   constructor(connection: DuckDBConnection, alias: string) {
     this.#mConnection = connection;
@@ -167,6 +178,7 @@ class LevelPersist implements IPersistor {
   }
 
   public async close(): Promise<void> {
+    await this.#mOperations;
     await DuckDBSingleton.getInstance().detachDatabase(this.#mAlias);
   }
 
@@ -229,93 +241,257 @@ class LevelPersist implements IPersistor {
     }));
   }
 
+  private serialize<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.#mOperationContext.getStore()?.active) return operation();
+    const next = this.#mOperations.then(async () => {
+      const context = { active: true };
+      try {
+        return await this.#mOperationContext.run(context, operation);
+      } finally {
+        // Callbacks created here can outlive their transaction.
+        context.active = false;
+      }
+    });
+    this.#mOperations = next.catch(() => undefined);
+    return next;
+  }
+
+  /** Keep a complete read together with participating writes. */
+  public withSerializedRead<T>(operation: () => Promise<T>): Promise<T> {
+    return this.serialize(operation);
+  }
+
+  /** Serialize read/modify/write operations, including callers outside the renderer. */
+  public withTransaction<T>(operation: () => Promise<T>): Promise<T> {
+    return this.serialize(async () => {
+      // Startup import and healing already own an explicit transaction.
+      if (this.#mInTransaction) return operation();
+      await this.beginTransaction();
+      try {
+        const result = await operation();
+        await this.commitTransaction();
+        return result;
+      } catch (error) {
+        try {
+          await this.rollbackTransaction();
+        } catch (rollbackError) {
+          log("warn", "Failed to rollback transaction", {
+            error: unknownToError(rollbackError).message,
+          });
+        }
+        throw error;
+      }
+    });
+  }
+
   public async setItem(statePath: string[], newState: string | null): Promise<void> {
-    // No internal BEGIN/COMMIT here. The previous implementation issued
-    // three statements (SELECT-then-UPDATE-or-INSERT) and self-wrapped in a
-    // transaction to keep them atomic against concurrent writers to the
-    // same key. The new shape is a single statement - raw-mode level_pivot
-    // tables have no UNIQUE constraint and the Sink unconditionally calls
-    // batch.put, so plain INSERT already overwrites an existing row, and
-    // DuckDB's auto-commit makes a one-statement INSERT atomic on its own.
-    // Pinned by the upsert tests in the level_pivot extension's
-    // level_pivot.test. Callers that need to batch multiple setItem /
-    // removeItem calls atomically wrap them in beginTransaction /
-    // commitTransaction explicitly (see ReduxPersistorIPC.processOperations
-    // and Application.importBackup).
     await this.timedWrite("setItem", 1, () =>
-      this.#mConnection.run(`INSERT INTO ${this.#mAlias}.kv VALUES ($1, $2)`, [
-        statePath.join(SEPARATOR),
-        newState,
-      ]),
+      this.withTransaction(() => this.changeItems([{ key: statePath, value: newState }])),
     );
   }
 
-  // Removes the exact key and any descendants (keys whose stored form is
-  // `<key>###...`). Subtree removal is needed because some persistence paths
-  // store an object as a single JSON blob at an intermediate path, while
-  // others decompose it into one row per leaf - a parent-only delete would
-  // leave the blob row orphaned (the "infinite repair loop" failure mode).
-  // starts_with is a literal prefix match, so segments containing LIKE
-  // metacharacters (`_`, `%`) - common in keys like `skyrim_se` - cannot
-  // over-match. SEPARATOR collisions are structurally impossible: keys
-  // cannot contain `###` except as a separator.
   public async removeItem(statePath: string[]): Promise<void> {
-    const key = statePath.join(SEPARATOR);
     await this.timedWrite("removeItem", 1, () =>
-      this.#mConnection.run(
-        `DELETE FROM ${this.#mAlias}.kv WHERE key = $1 OR starts_with(key, $2)`,
-        [key, `${key}${SEPARATOR}`],
-      ),
+      this.withTransaction(() => this.changeItems([{ key: statePath }])),
     );
   }
 
-  /**
-   * Bulk variant of setItem: a single multi-row INSERT covering every item.
-   * Relies on the same upsert behaviour as setItem. The caller is expected
-   * to chunk large diffs to bound failure granularity (see
-   * ReduxPersistorIPC.processOperations).
-   */
   public async bulkSetItem(items: ReadonlyArray<{ key: string[]; value: string }>): Promise<void> {
-    if (items.length === 0) {
-      return;
-    }
-    // Build "VALUES ($1, $2), ($3, $4), ..." with positional params.
-    const placeholders: string[] = [];
-    const params: string[] = [];
-    for (const [i, item] of items.entries()) {
-      placeholders.push(`($${2 * i + 1}, $${2 * i + 2})`);
-      params.push(item.key.join(SEPARATOR), item.value);
-    }
+    if (items.length === 0) return;
     await this.timedWrite("bulkSetItem", items.length, () =>
-      this.#mConnection.run(
-        `INSERT INTO ${this.#mAlias}.kv VALUES ${placeholders.join(", ")}`,
-        params,
-      ),
+      this.withTransaction(() => this.changeItems(items)),
     );
   }
 
-  /**
-   * Bulk variant of removeItem: a single DELETE statement covering every
-   * key. Each input key removes the exact match and any descendants - same
-   * subtree semantics as removeItem (see comment there). The caller is
-   * expected to chunk large lists; with BULK_CHUNK_SIZE=256 the parameter
-   * count stays at 2*256=512.
-   */
   public async bulkRemoveItem(keys: ReadonlyArray<string[]>): Promise<void> {
-    if (keys.length === 0) {
+    if (keys.length === 0) return;
+    await this.timedWrite("bulkRemoveItem", keys.length, () =>
+      this.withTransaction(() => this.changeItems(keys.map((key) => ({ key })))),
+    );
+  }
+
+  private async ancestorRows(keys: ReadonlyArray<string[]>): Promise<StateRow[]> {
+    const candidates = new Set<string>();
+    for (const key of keys) {
+      for (let depth = 2; depth < key.length; depth++) {
+        const prefix = key.slice(0, depth);
+        if (!isEncodedStatePath(prefix)) break;
+        candidates.add(prefix.join(SEPARATOR));
+      }
+    }
+    if (candidates.size === 0) return [];
+    const params = [...candidates];
+    const reader = await this.#mConnection.runAndReadAll(
+      `SELECT key, value FROM ${this.#mAlias}.kv WHERE key IN (${params.map((_, i) => `$${i + 1}`).join(", ")})`,
+      params,
+    );
+    return reader
+      .getRows()
+      .map((row) => ({ key: (row[0] as string).split(SEPARATOR), value: row[1] as string }));
+  }
+
+  private async subtreeRows(root: string[]): Promise<StateRow[]> {
+    const key = root.join(SEPARATOR);
+    const reader = await this.#mConnection.runAndReadAll(
+      `SELECT key, value FROM ${this.#mAlias}.kv WHERE key = $1 OR starts_with(key, $2)`,
+      [key, `${key}${SEPARATOR}`],
+    );
+    return reader
+      .getRows()
+      .map((row) => ({ key: (row[0] as string).split(SEPARATOR), value: row[1] as string }))
+      .filter((row) => root.every((segment, i) => row.key[i] === segment));
+  }
+
+  /** Read the same ancestor and child precedence used by hydration. */
+  public async readStateValue(key: string[]): Promise<unknown> {
+    return this.serialize(async () => {
+      const ancestors = await this.ancestorRows([key]);
+      const root =
+        ancestors.sort((a, b) => a.key.length - b.key.length)[0]?.key ?? stateStorageRoot(key);
+      let value = readStateRows(await this.subtreeRows(root), root).value;
+      for (const segment of key.slice(root.length)) {
+        if (value === null || typeof value !== "object" || !Object.hasOwn(value, segment))
+          return undefined;
+        value = (value as Record<string, unknown>)[segment];
+      }
+      return value;
+    });
+  }
+
+  private async changeItems(
+    items: ReadonlyArray<{ key: string[]; value?: string | null }>,
+  ): Promise<void> {
+    const ancestors = await this.ancestorRows(items.map((item) => item.key));
+    const overlaps = items.some((item, i) =>
+      items.some(
+        (other, j) =>
+          i !== j &&
+          other.key.length < item.key.length &&
+          other.key.every((segment, k) => segment === item.key[k]),
+      ),
+    );
+    if (
+      ancestors.length === 0 &&
+      !overlaps &&
+      items.every((item) => isEncodedStatePath(item.key))
+    ) {
+      // The ordinary leaf layout keeps bounded bulk SQL. Sets replace old descendants too.
+      const sets = items[0]?.value !== undefined;
+      await this.deleteRows(
+        items.filter((item) => !sets || item.key.length > 1).map((item) => item.key),
+        sets,
+      );
+      await this.insertRows(
+        items.filter(
+          (item): item is { key: string[]; value: string | null } => item.value !== undefined,
+        ),
+      );
       return;
     }
-    const clauses: string[] = [];
-    const params: string[] = [];
-    for (const [i, keyParts] of keys.entries()) {
-      const exact = 2 * i + 1;
-      const prefix = 2 * i + 2;
-      clauses.push(`key = $${exact} OR starts_with(key, $${prefix})`);
-      const key = keyParts.join(SEPARATOR);
-      params.push(key, `${key}${SEPARATOR}`);
+    for (const item of items) {
+      const currentAncestors = await this.ancestorRows([item.key]);
+      const encoded = isEncodedStatePath(item.key);
+      const root =
+        currentAncestors.sort((a, b) => a.key.length - b.key.length)[0]?.key ??
+        stateStorageRoot(item.key);
+      if (currentAncestors.length === 0 && encoded) {
+        await this.deleteRows([item.key], item.value !== undefined);
+        if (item.value !== undefined) await this.insertRows([{ key: item.key, value: item.value }]);
+        continue;
+      }
+      const rows = await this.subtreeRows(root);
+      if (
+        root.length < 2 ||
+        rows.some((row) =>
+          row.key.some(
+            (segment) =>
+              isClobberedKeySegment(segment) || Buffer.from(segment).toString("utf8") !== segment,
+          ),
+        )
+      )
+        throw new DataInvalid("Cannot rewrite state containing unreadable keys");
+      const tree = readStateRows(rows, root);
+      const relative = ["value", ...item.key.slice(root.length)];
+      if (item.value === undefined) {
+        let parent: unknown = tree;
+        for (const segment of relative.slice(0, -1)) {
+          parent =
+            parent !== null && typeof parent === "object" && Object.hasOwn(parent, segment)
+              ? (parent as Record<string, unknown>)[segment]
+              : undefined;
+        }
+        if (parent !== null && typeof parent === "object")
+          Reflect.deleteProperty(parent, relative.at(-1)!);
+      } else {
+        let value: unknown;
+        try {
+          value =
+            item.value === null ? null : item.value.length === 0 ? "" : JSON.parse(item.value);
+        } catch {
+          value = undefined;
+        }
+        insertStateValue(tree, relative, value);
+      }
+      const invalid = rows.filter((row) => {
+        if (item.key.every((segment, i) => row.key[i] === segment)) return false;
+        try {
+          if (row.value.length > 0) JSON.parse(row.value);
+          return false;
+        } catch {
+          return true;
+        }
+      });
+      if (item.value !== undefined && item.value !== null) {
+        try {
+          if (item.value.length > 0) JSON.parse(item.value);
+        } catch {
+          invalid.push({ key: item.key, value: item.value });
+        }
+      }
+      const replacements = writeStateRows(tree.value, root, invalid);
+      await this.replaceRawRows(root, replacements);
     }
-    await this.timedWrite("bulkRemoveItem", keys.length, () =>
-      this.#mConnection.run(`DELETE FROM ${this.#mAlias}.kv WHERE ${clauses.join(" OR ")}`, params),
+  }
+
+  /** Replace reconstructed raw rows without interpreting their JSON again. */
+  public async replaceRawRows(root: string[], rows: ReadonlyArray<StateRow>): Promise<void> {
+    await this.withTransaction(async () => {
+      await this.deleteRows([root]);
+      for (let start = 0; start < rows.length; start += 256)
+        await this.insertRows(rows.slice(start, start + 256));
+    });
+  }
+
+  private async insertRows(
+    items: ReadonlyArray<{ key: string[]; value: string | null }>,
+  ): Promise<void> {
+    if (items.length === 0) return;
+    const params: Array<string | null> = [];
+    const placeholders = items.map((item, i) => {
+      params.push(item.key.join(SEPARATOR), item.value);
+      return `($${2 * i + 1}, $${2 * i + 2})`;
+    });
+    await this.#mConnection.run(
+      `INSERT INTO ${this.#mAlias}.kv VALUES ${placeholders.join(", ")}`,
+      params,
+    );
+  }
+
+  private async deleteRows(input: ReadonlyArray<string[]>, descendantsOnly = false): Promise<void> {
+    const keys = descendantsOnly ? input.filter((key) => !key.at(-1)?.endsWith("#")) : input;
+    if (keys.length === 0) return;
+    const params: string[] = [];
+    const clauses = keys.map((key) => {
+      const exact = params.push(key.join(SEPARATOR));
+      if (key.at(-1)?.endsWith("#")) return `key = $${exact}`;
+      const prefix = params.push(`${key.join(SEPARATOR)}${SEPARATOR}`);
+      return descendantsOnly
+        ? `(key != $${exact} AND starts_with(key, $${prefix}))`
+        : `key = $${exact} OR starts_with(key, $${prefix})`;
+    });
+    await this.#mConnection.run(
+      `DELETE FROM ${this.#mAlias}.kv WHERE ${clauses.join(" OR ")}`,
+      params,
     );
   }
 

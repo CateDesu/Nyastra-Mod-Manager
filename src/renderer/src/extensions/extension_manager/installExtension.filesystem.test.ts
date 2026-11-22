@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import type * as NativeFS from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -6,7 +7,32 @@ import path from "node:path";
 import SevenZip from "node-7z";
 import { afterEach, beforeEach, describe, expect, vi } from "vitest";
 
-const paths = vi.hoisted(() => ({ root: "" }));
+const paths = vi.hoisted(() => ({
+  root: "",
+  failPublication: false,
+  failRestore: false,
+  competitor: false,
+}));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof NativeFS>();
+  const wrapped = {
+    ...actual,
+    rename: async (source: string, destination: string) => {
+      if (paths.failPublication && source.endsWith(".installing")) {
+        throw Object.assign(new Error("Publication denied"), { code: "EACCES" });
+      }
+      if (paths.failRestore && path.basename(source).startsWith(".extension.bak-")) {
+        throw Object.assign(new Error("Restoration denied"), { code: "EBUSY" });
+      }
+      const result = await actual.rename(source, destination);
+      if (paths.competitor && path.basename(destination).startsWith(".extension.bak-")) {
+        await actual.mkdir(source);
+      }
+      return result;
+    },
+  };
+  return { ...wrapped, default: wrapped };
+});
 vi.mock("../../util/getVortexPath", () => ({ default: () => paths.root }));
 vi.mock("../../util/errorHandling", async (importOriginal) => ({
   ...(await importOriginal<typeof ErrorHandling>()),
@@ -42,6 +68,9 @@ describe("extension installation filesystem boundaries", () => {
   });
 
   afterEach(async () => {
+    paths.failPublication = false;
+    paths.failRestore = false;
+    paths.competitor = false;
     vi.unstubAllGlobals();
     await rm(directory, { recursive: true, force: true });
   });
@@ -50,12 +79,13 @@ describe("extension installation filesystem boundaries", () => {
     id: string | undefined,
     filename = "extension.zip",
     contents = "module.exports = () => true;",
+    version = "1.0.0",
   ) => {
     const source = await mkdtemp(path.join(directory, "source-"));
     await writeFile(path.join(source, "index.js"), contents);
     await writeFile(
       path.join(source, "info.json"),
-      JSON.stringify({ id, name: "Fixture extension", version: "1.0.0" }),
+      JSON.stringify({ id, name: "Fixture extension", version }),
     );
     const filenameOut = path.join(directory, filename);
     await new SevenZip().add(
@@ -71,6 +101,78 @@ describe("extension installation filesystem boundaries", () => {
     h.api.getLoadedExtensions = () => [];
     return h;
   };
+
+  test.each(["restore-failure", "competing-directory"])(
+    "retains both versions and catalog after %s",
+    async (failure) => {
+      const h = makeApi();
+      await installExtension(
+        h.api,
+        await archive("existing", "old.zip", "module.exports = () => 'old';"),
+      );
+      const before = h.getState().app.extensions;
+      const next = await archive("existing", "new.zip", "module.exports = () => 'new';", "2.0.0");
+      paths.failPublication = failure === "restore-failure";
+      paths.failRestore = failure === "restore-failure";
+      paths.competitor = failure === "competing-directory";
+      await expect(installExtension(h.api, next)).rejects.toBeInstanceOf(AggregateError);
+      expect(h.getState().app.extensions).toEqual(before);
+      const plugins = path.join(paths.root, "plugins");
+      const entries = await readdir(plugins);
+      const retained = await Promise.all(
+        entries
+          .filter((name) => name.includes(".bak-") || name.endsWith(".installing"))
+          .map(async (name) => readFile(path.join(plugins, name, "index.js"), "utf8")),
+      );
+      expect(retained).toEqual(
+        expect.arrayContaining(["module.exports = () => 'old';", "module.exports = () => 'new';"]),
+      );
+      const destination = path.join(plugins, "existing");
+      if (failure === "competing-directory") expect(await readdir(destination)).toEqual([]);
+      paths.failPublication = false;
+      paths.failRestore = false;
+      paths.competitor = false;
+      const invalid = path.join(directory, "invalid.zip");
+      await writeFile(invalid, "invalid archive");
+      await expect(installExtension(h.api, invalid)).rejects.toBeDefined();
+      expect(h.getState().app.extensions).toEqual(before);
+      if (failure === "competing-directory") expect(await readdir(destination)).toEqual([]);
+      else
+        expect(await readFile(path.join(destination, "index.js"), "utf8")).toBe(
+          "module.exports = () => 'old';",
+        );
+    },
+  );
+
+  test("retains the installed extension when replacement publication fails", async () => {
+    const h = makeApi();
+    await installExtension(
+      h.api,
+      await archive("existing", "old.zip", "module.exports = () => 'old';"),
+      {
+        catalogEntry: makeAvailableExtension({ modId: 321, fileId: 1, version: "1.0.0" }),
+      },
+    );
+    const before = h.getState().app.extensions;
+    const replacement = await archive("existing", "new.zip");
+    paths.failPublication = true;
+    await expect(
+      installExtension(h.api, replacement, {
+        catalogEntry: makeAvailableExtension({ modId: 321, fileId: 2, version: "2.0.0" }),
+      }),
+    ).rejects.toMatchObject({ code: "EACCES" });
+    expect(await readFile(path.join(paths.root, "plugins", "existing", "index.js"), "utf8")).toBe(
+      "module.exports = () => 'old';",
+    );
+    expect(h.getState().app.extensions).toEqual(before);
+    paths.failPublication = false;
+    paths.failRestore = false;
+    paths.competitor = false;
+    await installExtension(h.api, replacement);
+    expect(await readFile(path.join(paths.root, "plugins", "existing", "index.js"), "utf8")).toBe(
+      "module.exports = () => true;",
+    );
+  });
 
   for (const id of ["", ".", "..", "..zip", "...zip"]) {
     test(`rejects the reserved destination from extension id ${JSON.stringify(id)}`, async () => {

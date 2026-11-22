@@ -1,4 +1,4 @@
-import { CAUSE_SEPARATOR, type VortexErrorKind } from "./errors/base";
+import { CAUSE_SEPARATOR, VortexError, type VortexErrorKind } from "./errors/base";
 import { parseError } from "./errors/parser";
 
 /** Extracts an error message from an unknown value in a catch statement */
@@ -39,21 +39,20 @@ export function unknownToError(err: unknown): Error {
   return new Error("unknown error");
 }
 
-/** Extracts the code property from a potential error object */
+/** Extracts an OS error code, including errors transported over IPC. */
 export function getErrorCode(err: unknown): string | null {
   if (!(err instanceof Error)) {
     return null;
   }
 
-  if (!("code" in err)) {
-    return null;
+  if ("code" in err && typeof err.code === "string") {
+    return err.code;
   }
-
-  if (typeof err.code !== "string") {
-    return null;
-  }
-
-  return err.code;
+  return err instanceof VortexError &&
+    "originalCode" in err.data &&
+    typeof err.data.originalCode === "string"
+    ? err.data.originalCode
+    : null;
 }
 
 /**

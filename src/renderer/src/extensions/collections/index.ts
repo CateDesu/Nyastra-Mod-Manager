@@ -1434,13 +1434,17 @@ function once(api: IExtensionApi, collectionsCB: () => ICallbackMap) {
     }
   });
 
-  api.events.on("did-install-mod", async (gameId: string, archiveId: string, modId: string) => {
-    // automatically enable collections once they're installed
-    // Use the driver's target profile if available, otherwise fall back to last active profile
-    const targetProfile = driver.profile;
-    const profileId = targetProfile?.id ?? selectors.lastActiveProfileForGame(state(), gameId);
-    const profile = targetProfile ?? selectors.profileById(state(), profileId);
-    if (profile === undefined) {
+  async function onModInstalled(
+    gameId: string,
+    _archiveId: string,
+    modId: string,
+    _attributes: unknown,
+    installProfileId?: string,
+  ) {
+    const profileId =
+      installProfileId ?? driver.profile?.id ?? selectors.lastActiveProfileForGame(state(), gameId);
+    const profile = selectors.profileById(state(), profileId);
+    if (profile?.gameId !== gameId || profile.pendingRemove) {
       return;
     }
     const mod = getSafe(state().persistent.mods, [gameId, modId], undefined);
@@ -1452,14 +1456,15 @@ function once(api: IExtensionApi, collectionsCB: () => ICallbackMap) {
       if (driver.collection === undefined) {
         const awaitProfileSwitch = api.ext?.awaitProfileSwitch ?? (() => Promise.resolve());
         await awaitProfileSwitch();
-        driver.query(profile, mod);
+        const owner = selectors.profileById(state(), profileId);
+        if (owner?.gameId === gameId && !owner.pendingRemove) driver.query(owner, mod);
       } else {
         api.sendNotification({
           type: "info",
           message: "Collection can't be installed as another one is being installed already",
         });
       }
-    } else if (driver.collection !== undefined) {
+    } else if (driver.collection !== undefined && driver.profile?.gameId === gameId) {
       const { collection, revisionId } = driver;
 
       const dependency = (collection?.rules ?? []).find((rule) => {
@@ -1499,7 +1504,8 @@ function once(api: IExtensionApi, collectionsCB: () => ICallbackMap) {
         );
       }
     }
-  });
+  }
+  api.events.on("did-install-mod", onModInstalled);
 
   api.onAsync("will-remove-mods", makeWillRemoveMods(api));
   api.onAsync("did-remove-mods", makeDidRemoveMods());
@@ -1553,6 +1559,7 @@ function once(api: IExtensionApi, collectionsCB: () => ICallbackMap) {
             dlId,
             {
               allowAutoEnable: false,
+              profileId: profile.id,
             },
             cb,
           ),

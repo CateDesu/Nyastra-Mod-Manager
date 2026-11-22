@@ -1,5 +1,7 @@
+import assert from "node:assert/strict";
+
 import { VortexError } from "@vortex/shared";
-import { toWireError } from "@vortex/shared/errors";
+import { deserializeVortexError, toWireError } from "@vortex/shared/errors";
 import { describe, expect, it, vi } from "vitest";
 
 // Capture the listener registered via ipcRenderer.on so the test can invoke it
@@ -138,5 +140,42 @@ describe("rendererCallback envelope", () => {
     const entry = sentPayloads[0];
     if (entry === undefined) throw new Error("expected one sent payload");
     expect(entry.args[1]).toMatchObject({ error: { data: { kind: "unknown" } } });
+  });
+});
+
+describe("callback failure round trips", () => {
+  it("replies when a Promise-returning handler throws before returning", async () => {
+    sentPayloads.length = 0;
+    rendererCallback("example:ping", () => {
+      throw new Error("synchronous failure");
+    });
+    const listener = invokeListeners.get("example:ping")!;
+    expect(() => listener(fakeEvent, 23)).not.toThrow();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(sentPayloads).toHaveLength(1);
+    expect(sentPayloads[0]?.args).toMatchObject([
+      23,
+      { error: { message: expect.stringContaining("synchronous failure") } },
+    ]);
+  });
+
+  it("returns the original callback error after main relays it back", async () => {
+    sentPayloads.length = 0;
+    const original = new VortexError("cancelled", { kind: "user-canceled", skipped: false });
+    rendererCallback("example:ping", async () => {
+      throw original;
+    });
+    invokeListeners.get("example:ping")!(fakeEvent, 24);
+    await new Promise((resolve) => setImmediate(resolve));
+    const reply = structuredClone(sentPayloads[0]?.args[1]);
+    assert(typeof reply === "object" && reply !== null && "error" in reply);
+    const error = reply.error;
+    assert(typeof error === "object" && error !== null && "data" in error);
+    const data = error.data;
+    assert(typeof data === "object" && data !== null);
+    const serialized = toWireError(original);
+    assert.deepStrictEqual(error, { ...serialized, data: { ...data, ...serialized.data } });
+    nextInvokeReply = { error: toWireError(deserializeVortexError(error)) };
+    await expect(rendererInvoke("app:getName")).rejects.toBe(original);
   });
 });

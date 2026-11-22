@@ -52,12 +52,24 @@ function createNonBulkPersistor(): IPersistor & {
 }
 
 function createMockLevelPersist() {
-  return {
+  const mock = {
     beginTransaction: vi.fn().mockResolvedValue(undefined),
     commitTransaction: vi.fn().mockResolvedValue(undefined),
     rollbackTransaction: vi.fn().mockResolvedValue(undefined),
     getDirtyTables: vi.fn().mockResolvedValue([]),
+    withTransaction: async <T>(fn: () => Promise<T>): Promise<T> => {
+      await mock.beginTransaction();
+      try {
+        const result = await fn();
+        await mock.commitTransaction();
+        return result;
+      } catch (error) {
+        await mock.rollbackTransaction();
+        throw error;
+      }
+    },
   };
+  return mock;
 }
 
 function createMockInvalidator() {

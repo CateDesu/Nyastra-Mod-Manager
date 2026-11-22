@@ -16,6 +16,7 @@ import * as path from "node:path";
 import { Worker } from "node:worker_threads";
 
 import { getErrorMessageOrDefault, VortexError } from "@vortex/shared";
+import { deserializeVortexError } from "@vortex/shared/errors";
 import type { HashAlgorithm } from "@vortex/shared/ipc";
 
 import type { HashJob, HashResult } from "./protocol";
@@ -73,7 +74,7 @@ export class HashWorkerPool {
   readonly #pool: PoolWorker[] = [];
   readonly #queue: Job[] = [];
   #nextId = 0;
-  #shuttingDown = false;
+  #shutdown?: Promise<void>;
 
   constructor(createWorker: () => HashWorker = defaultCreateWorker, size: number = POOL_SIZE) {
     this.#createWorker = createWorker;
@@ -85,6 +86,8 @@ export class HashWorkerPool {
    * parallel up to the pool size; the rest queue.
    */
   hashFile(algorithm: HashAlgorithm, filePath: string): Promise<HashFileResult> {
+    if (this.#shutdown !== undefined)
+      return Promise.reject(hashWorkerError("Hash worker pool shut down"));
     return new Promise<HashFileResult>((resolve, reject) => {
       const job: Job = { id: this.#nextId++, algorithm, filePath, resolve, reject };
       this.#queue.push(job);
@@ -107,9 +110,17 @@ export class HashWorkerPool {
 
   /** Terminate all workers. Call during app shutdown. */
   async shutdown(): Promise<void> {
-    this.#shuttingDown = true;
+    if (this.#shutdown !== undefined) return this.#shutdown;
     const workers = this.#pool.splice(0, this.#pool.length);
-    await Promise.all(workers.map((pw) => pw.worker.terminate()));
+    const error = hashWorkerError("Hash worker pool shut down");
+    for (const job of this.#queue.splice(0)) job.reject(error);
+    for (const pw of workers) pw.job?.reject(error);
+    this.#shutdown = Promise.all(workers.map((pw) => pw.worker.terminate())).then(() => undefined);
+    try {
+      await this.#shutdown;
+    } finally {
+      this.#shutdown = undefined;
+    }
   }
 
   // Assign the next queued job to a now-idle worker, or leave it idle.
@@ -127,19 +138,23 @@ export class HashWorkerPool {
 
   #handleFailure(pw: PoolWorker, err: Error): void {
     const idx = this.#pool.indexOf(pw);
-    if (idx !== -1) {
-      this.#pool.splice(idx, 1);
-    }
+    if (idx === -1) return;
+    this.#pool.splice(idx, 1);
     const job = pw.job;
     pw.job = undefined;
     if (job !== undefined) {
       job.reject(err);
     }
-    if (this.#shuttingDown) {
+    if (this.#queue.length === 0) {
       return;
     }
-    this.#ensurePool();
-    this.#drain();
+    try {
+      this.#ensurePool();
+      this.#drain();
+    } catch (cause) {
+      const failure = hashWorkerError(getErrorMessageOrDefault(cause), cause);
+      for (const queued of this.#queue.splice(0)) queued.reject(failure);
+    }
   }
 
   #spawnWorker(): void {
@@ -147,26 +162,24 @@ export class HashWorkerPool {
     const pw: PoolWorker = { worker, job: undefined };
     worker.on("message", (result: HashResult) => {
       const job = pw.job;
-      if (job !== undefined && job.id === result.id) {
-        if (result.error !== undefined) {
-          job.reject(hashWorkerError(result.error));
-        } else {
-          job.resolve({ hash: result.hash ?? "", numBytes: result.numBytes ?? 0 });
-        }
+      if (!this.#pool.includes(pw) || job === undefined || job.id !== result.id) return;
+      if (result.error !== undefined) {
+        job.reject(
+          typeof result.error === "string"
+            ? hashWorkerError(result.error)
+            : deserializeVortexError(result.error),
+        );
+      } else {
+        job.resolve({ hash: result.hash ?? "", numBytes: result.numBytes ?? 0 });
       }
-      // A worker answers each job with exactly one message, so any message means
-      // it is now idle. Hand it the next job even if the id was unexpected, so a
-      // stray message can never permanently park this pool slot.
       this.#assignNext(pw);
     });
     worker.on("error", (err: Error) => this.#handleFailure(pw, hashWorkerError(err.message, err)));
     worker.on("exit", (code: number) => {
-      if (code !== 0) {
-        this.#handleFailure(
-          pw,
-          hashWorkerError(`hash worker stopped unexpectedly (exit code ${code})`),
-        );
-      }
+      this.#handleFailure(
+        pw,
+        hashWorkerError(`hash worker stopped unexpectedly (exit code ${code})`),
+      );
     });
     // Don't let idle workers keep the main process alive at shutdown; any
     // in-flight job at quit time is abandoned, which is acceptable.

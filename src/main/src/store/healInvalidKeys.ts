@@ -89,14 +89,11 @@ export async function healInvalidKeys(persist: LevelPersist): Promise<HealResult
   try {
     for (const prefix of prefixes.values()) {
       const underPrefix = allKVs.filter(
-        (kv) => kv.key.length > prefix.length && prefix.every((seg, i) => kv.key[i] === seg),
+        (kv) => kv.key.length >= prefix.length && prefix.every((seg, i) => kv.key[i] === seg),
       );
       const good = underPrefix.filter((kv) => !isCorrupt(kv.key));
 
-      await persist.removeItem(prefix);
-      if (good.length > 0) {
-        await persist.bulkSetItem(good);
-      }
+      await persist.replaceRawRows(prefix, good);
 
       result.removed += underPrefix.length - good.length;
       result.rewritten += good.length;

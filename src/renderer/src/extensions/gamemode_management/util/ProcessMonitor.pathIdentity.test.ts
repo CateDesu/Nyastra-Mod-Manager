@@ -296,9 +296,11 @@ for (const field of ["path", "cmd"] as const) {
       expect(nativeClosed).toBe(true);
       expect(childErrors).toEqual([]);
       expectChecked(harness);
-      expect((await NativePromise.all(harness.callbacks)).map((outcome) => outcome.ok)).toEqual([
-        true,
-      ]);
+      const callbacks = await NativePromise.all(harness.callbacks);
+      expect(callbacks).toHaveLength(1);
+      for (const outcome of callbacks) {
+        if ("error" in outcome) throw outcome.error;
+      }
       expect(await NativePromise.all(harness.checks)).toEqual([{ ok: true, value: undefined }]);
       const running = harness.getRunning();
       const samePath = scenario === "same path";

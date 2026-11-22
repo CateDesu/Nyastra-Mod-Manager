@@ -9,7 +9,7 @@
 
 import { parentPort } from "node:worker_threads";
 
-import { getErrorMessageOrDefault } from "@vortex/shared";
+import { toWireError } from "@vortex/shared/errors";
 
 import { hashFileStream } from "./compute";
 import type { HashJob, HashResult } from "./protocol";
@@ -25,7 +25,7 @@ async function handleJob(job: HashJob): Promise<void> {
     const { hash, numBytes } = await hashFileStream(job.algorithm, job.filePath);
     result = { id: job.id, hash, numBytes };
   } catch (err) {
-    result = { id: job.id, error: getErrorMessageOrDefault(err) };
+    result = { id: job.id, error: toWireError(err) };
   }
   port.postMessage(result);
 }

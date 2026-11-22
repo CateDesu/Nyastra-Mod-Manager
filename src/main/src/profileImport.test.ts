@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -74,7 +74,19 @@ describe("imported profile preparation", () => {
         "persistent###mods###re9###mod###state": "installed",
         "confidential###account###nexus###APIKey": "current-login",
       });
+      db.values.set(
+        "app",
+        JSON.stringify({
+          extensions: { old: { enabled: false, path: "/previous/Vortex/plugins/game-re9" } },
+        }),
+      );
+      db.values.set("persistent###downloads###old", "unreadable unrelated value");
+      db.values.set("app###extensions###extension###metadata", "{}");
       await finishProfileImport(db.persistor, root);
+      expect(db.read("app###extensions###old###enabled")).toBe(false);
+      expect(db.read("app###extensions###old###path")).toBe(path.join(root, "plugins", "game-re9"));
+      expect(db.values.get("persistent###downloads###old")).toBe("unreadable unrelated value");
+      expect(db.values.get("app###extensions###extension###metadata")).toBe("{}");
       expect(db.read("app###extensions###extension###path")).toBe(
         path.join(root, "plugins", "game-re9"),
       );
@@ -104,20 +116,23 @@ describe("imported profile preparation", () => {
     },
   );
 
-  it("rolls back an existing import repair without clearing its login or advancing the marker", async () => {
-    const marker = path.join(root, "nyastra-import-complete.json");
-    await writeFile(marker, JSON.stringify({ version: 1, source: "/previous/Vortex" }));
-    await mkdir(path.join(root, "plugins", "game-re9"), { recursive: true });
-    const db = database({
-      "app###extensions###ext###path": "/previous/Vortex/plugins/game-re9",
-      "confidential###account###nexus###APIKey": "current-login",
-    });
-    const before = new Map(db.values);
-    db.persistor.setItem.mockRejectedValueOnce(new Error("disk failure"));
-    await expect(finishProfileImport(db.persistor, root)).rejects.toThrow("disk failure");
-    expect(db.values).toEqual(before);
-    expect(JSON.parse(await readFile(marker, "utf8"))).toMatchObject({ version: 1 });
-  });
+  it.each([1, 2])(
+    "rolls back version %s repair without clearing its login or advancing the marker",
+    async (version) => {
+      const marker = path.join(root, "nyastra-import-complete.json");
+      await writeFile(marker, JSON.stringify({ version, source: "/previous/Vortex" }));
+      await mkdir(path.join(root, "plugins", "game-re9"), { recursive: true });
+      const db = database({
+        "app###extensions###ext###path": "/previous/Vortex/plugins/game-re9",
+        "confidential###account###nexus###APIKey": "current-login",
+      });
+      const before = new Map(db.values);
+      db.persistor.setItem.mockRejectedValueOnce(new Error("disk failure"));
+      await expect(finishProfileImport(db.persistor, root)).rejects.toThrow("disk failure");
+      expect(db.values).toEqual(before);
+      expect(JSON.parse(await readFile(marker, "utf8"))).toMatchObject({ version });
+    },
+  );
 
   it("preserves mod paths and instance ownership while clearing inherited credentials", async () => {
     await writeFile(
@@ -183,4 +198,119 @@ describe("imported profile preparation", () => {
     expect(db.persistor.rollbackTransaction).toHaveBeenCalledOnce();
     expect(await readFile(path.join(root, "nyastra-import.json"), "utf8")).toContain("previous");
   });
+});
+
+describe("copied extension source identities", () => {
+  it.each(["pending", "completed1", "completed2"])(
+    "repairs both roots for %s without resetting an existing login",
+    async (kind) => {
+      const source = path.join(root, "source");
+      const alias = path.join(root, "alias");
+      const target = path.join(root, "target");
+      await mkdir(source);
+      await symlink(source, alias);
+      await mkdir(target);
+      await mkdir(path.join(target, "plugins", "example"), { recursive: true });
+      const marker = path.join(
+        target,
+        kind === "pending" ? "nyastra-import.json" : "nyastra-import-complete.json",
+      );
+      await writeFile(
+        marker,
+        JSON.stringify({
+          version: kind === "completed2" ? 2 : 1,
+          source: alias,
+          sourceCanonical: source,
+        }),
+      );
+      const db = database({
+        "app###extensions###canonical###path": path.join(source, "plugins", "example"),
+        "app###extensions###canonical###enabled": false,
+        "app###extensions###canonical###remove": true,
+        "app###extensions###lexical###path": path.join(alias, "plugins", "example"),
+        "app###extensions###outside###path": path.join(source, "plugins-other", "example"),
+        "settings###gameMode###discovered###game###extensionPath": path.join(
+          source,
+          "plugins",
+          "example",
+        ),
+        "settings###mods###installPath###game": "/external/staging",
+        "confidential###account###key": "current",
+        "app###instanceId": "owner",
+      });
+      await finishProfileImport(db.persistor, target);
+      expect(db.read("app###extensions###canonical###path")).toBe(
+        path.join(target, "plugins", "example"),
+      );
+      expect(db.read("app###extensions###lexical###path")).toBe(
+        path.join(target, "plugins", "example"),
+      );
+      expect(db.read("app###extensions###canonical###enabled")).toBe(false);
+      expect(db.read("app###extensions###canonical###remove")).toBe(true);
+      expect(db.read("app###extensions###outside###path")).toBe(
+        path.join(source, "plugins-other", "example"),
+      );
+      expect(db.read("settings###gameMode###discovered###game###extensionPath")).toBe(
+        path.join(target, "plugins", "example"),
+      );
+      expect(db.read("settings###mods###installPath###game")).toBe("/external/staging");
+      expect(db.read("app###instanceId")).toBe("owner");
+      if (kind !== "pending") expect(db.read("confidential###account###key")).toBe("current");
+      db.persistor.setItem.mockClear();
+      await finishProfileImport(db.persistor, target);
+      expect(db.persistor.setItem).not.toHaveBeenCalled();
+    },
+  );
+  it("uses the captured identity when an alias disappears or changes", async () => {
+    const source = path.join(root, "old-source"),
+      alias = path.join(root, "alias"),
+      target = path.join(root, "target");
+    await mkdir(target);
+    await mkdir(path.join(target, "plugins", "example"), { recursive: true });
+    await symlink(root, alias);
+    await writeFile(
+      path.join(target, "nyastra-import-complete.json"),
+      JSON.stringify({ version: 2, source: alias, sourceCanonical: source }),
+    );
+    const db = database({
+      "app###extensions###ext###path": path.join(source, "plugins", "example"),
+      "confidential###key": "current",
+    });
+    await finishProfileImport(db.persistor, target);
+    expect(db.read("app###extensions###ext###path")).toBe(path.join(target, "plugins", "example"));
+    expect(db.read("confidential###key")).toBe("current");
+  });
+  it("keeps an unavailable legacy identity and current credentials without guessing", async () => {
+    const marker = path.join(root, "nyastra-import-complete.json");
+    const contents = JSON.stringify({ version: 2, source: path.join(root, "missing-alias") });
+    await writeFile(marker, contents);
+    await mkdir(path.join(root, "plugins", "example"), { recursive: true });
+    const db = database({
+      "app###extensions###ext###path": "/unknown/plugins/example",
+      "confidential###key": "current",
+    });
+    await finishProfileImport(db.persistor, root);
+    expect(db.read("app###extensions###ext###path")).toBe("/unknown/plugins/example");
+    expect(db.read("confidential###key")).toBe("current");
+    expect(await readFile(marker, "utf8")).toBe(contents);
+  });
+});
+
+it("does not rebase a copied path that now crosses an external symlink", async () => {
+  const source = path.join(root, "old");
+  await mkdir(path.join(root, "plugins"));
+  await mkdir(path.join(root, "external", "example"), { recursive: true });
+  await symlink(path.join(root, "external"), path.join(root, "plugins", "bridge"));
+  await writeFile(
+    path.join(root, "nyastra-import-complete.json"),
+    JSON.stringify({ version: 2, source, sourceCanonical: source }),
+  );
+  const previous = path.join(source, "plugins", "bridge", "example");
+  const db = database({
+    "app###extensions###ext###path": previous,
+    "app###extensions###ext###enabled": false,
+  });
+  await finishProfileImport(db.persistor, root);
+  expect(db.read("app###extensions###ext###path")).toBe(previous);
+  expect(db.read("app###extensions###ext###enabled")).toBe(false);
 });

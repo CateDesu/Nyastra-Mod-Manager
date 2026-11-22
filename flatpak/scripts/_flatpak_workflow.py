@@ -120,24 +120,39 @@ def update_user_appstream() -> None:
 
 def reset_user_remote(remote_name: str, repo_dir: Path) -> None:
     subprocess.run(
-        ["flatpak", "remote-delete", "--user", remote_name],
-        capture_output=True,
-    )
-    subprocess.run(
         [
             "flatpak",
             "remote-add",
             "--user",
+            "--if-not-exists",
             "--no-gpg-verify",
             remote_name,
             str(repo_dir),
         ],
         check=True,
     )
+    subprocess.run(
+        [
+            "flatpak",
+            "remote-modify",
+            "--user",
+            "--no-gpg-verify",
+            "--enable",
+            "--url",
+            repo_dir.resolve().as_uri(),
+            remote_name,
+        ],
+        check=True,
+    )
 
 
-def install_user_app_from_remote(*, root: Path, remote_name: str, app_id: str) -> None:
-    run_command(["flatpak", "install", "--user", "-y", remote_name, app_id], cwd=root)
+def install_user_app_from_remote(
+    *, root: Path, remote_name: str, app_id: str, reinstall: bool = False
+) -> None:
+    cmd = ["flatpak", "install", "--user", "-y"]
+    if reinstall:
+        cmd.append("--reinstall")
+    run_command([*cmd, remote_name, app_id], cwd=root)
 
 
 def install_user_app_from_build(
@@ -147,11 +162,14 @@ def install_user_app_from_build(
     repo_dir: Path,
     remote_name: str,
     app_id: str,
+    reinstall: bool = False,
 ) -> None:
     export_build_to_repo(root=root, repo_dir=repo_dir, build_dir=build_dir)
     update_user_appstream()
     reset_user_remote(remote_name, repo_dir)
-    install_user_app_from_remote(root=root, remote_name=remote_name, app_id=app_id)
+    install_user_app_from_remote(
+        root=root, remote_name=remote_name, app_id=app_id, reinstall=reinstall
+    )
 
 
 def _resolve_path(root: Path, path_value: str) -> Path:

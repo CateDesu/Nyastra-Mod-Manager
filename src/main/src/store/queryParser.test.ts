@@ -53,4 +53,57 @@ describe("queryParser", () => {
 
     expect(queries[0]!.alias).toBe("myModel");
   });
+
+  it.each(["db", "db_9", `catalog'"$&`])(
+    "binds dependency declarations to catalog %s",
+    (catalog) => {
+      fs.writeFileSync(
+        path.join(tmpDir, "select", "test.sql"),
+        [
+          "-- @type select",
+          "-- @name first",
+          "-- @param id INTEGER",
+          "-- @depends-on {{persistor_catalog}}.profiles_pivot",
+          '-- @depends-on other."table AS name"',
+          "SELECT '$id' AS literal FROM {{persistor_catalog}}.profiles_pivot WHERE id = $id;",
+          "-- @name second",
+          "SELECT 2;",
+          "-- @name third",
+          "-- @depends-on {{persistor_catalog}}.mods_pivot",
+          "SELECT 3;",
+        ].join("\n"),
+      );
+      const identifier = `"${catalog.replaceAll('"', '""')}"`;
+      const [first, second, third] = parseAllQueries(tmpDir, catalog);
+      expect(first!.dependencies).toEqual([
+        `${identifier}.profiles_pivot`,
+        'other."table AS name"',
+      ]);
+      expect(first!.sql).toBe(
+        `SELECT '$id' AS literal FROM ${identifier}.profiles_pivot WHERE id = $id;`,
+      );
+      expect(first!.params).toEqual([{ name: "id", duckdbType: "INTEGER" }]);
+      expect(second!.dependencies).toBeUndefined();
+      expect(third!.dependencies).toEqual([`${identifier}.mods_pivot`]);
+    },
+  );
+
+  it("preserves dependency-like lines inside the SQL body", () => {
+    const sql = [
+      "SELECT $$literal",
+      "-- @depends-on ignored.literal",
+      "$$ AS value",
+      "/* comment",
+      "-- @depends-on ignored.comment",
+      "*/ FROM db.mods;",
+      "-- @depends-on ignored.trailing",
+    ].join("\n");
+    fs.writeFileSync(
+      path.join(tmpDir, "select", "test.sql"),
+      `-- @type select\n-- @name body\n-- @depends-on db.mods\n${sql}\n`,
+    );
+    const [query] = parseAllQueries(tmpDir);
+    expect(query!.sql).toBe(sql);
+    expect(query!.dependencies).toEqual(["db.mods"]);
+  });
 });

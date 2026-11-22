@@ -256,7 +256,7 @@ describe("nxm protocol resolver", () => {
       const { harness, resolve } = makeNxm();
       harness.getDownloadURLs.mockRejectedValue(new RateLimitError());
 
-      await expect(resolve(MOD_URL)).rejects.toBeInstanceOf(RateLimitError);
+      await expect(resolve(MOD_URL)).rejects.toMatchObject({ statusCode: 429 });
       expect(harness.errorNotifications).toHaveLength(0);
       expect(harness.notifications).toEqual([expect.objectContaining({ type: "warning" })]);
     });

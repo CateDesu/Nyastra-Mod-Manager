@@ -6,7 +6,7 @@ import { terminate } from "../errorHandling";
 import { log } from "../logging";
 import type LevelPersist from "./LevelPersist";
 import type QueryInvalidator from "./QueryInvalidator";
-import { insertStateValue } from "./stateTree";
+import { insertStateValue, orderStateRows } from "./stateTree";
 
 function insertValueAtLeaf<T extends Record<string, unknown>, V>(
   target: T,
@@ -37,7 +37,7 @@ class ReduxPersistorIPC {
 
   constructor() {}
 
-  public setQueryInvalidator(levelPersist: LevelPersist, invalidator: QueryInvalidator): void {
+  public setQueryInvalidator(levelPersist: LevelPersist, invalidator?: QueryInvalidator): void {
     this.#mLevelPersist = levelPersist;
     this.#mInvalidator = invalidator;
   }
@@ -126,35 +126,18 @@ class ReduxPersistorIPC {
   ): Promise<void> {
     const levelPersist = this.#mLevelPersist;
     const invalidator = this.#mInvalidator;
-    const useTransaction = levelPersist !== undefined && invalidator !== undefined;
+    const useTransaction = levelPersist !== undefined;
 
     try {
-      if (useTransaction) {
-        await levelPersist.beginTransaction();
-      }
-
-      await this.applyOperationsInRuns(persistor, operations);
-
-      if (useTransaction) {
-        // Read while the transaction is active and notify only after commit.
-        const dirtyTables = await levelPersist.getDirtyTables();
-        await levelPersist.commitTransaction();
-
-        if (dirtyTables.length > 0) {
-          invalidator.notifyDirtyTables(dirtyTables);
-        }
-      }
+      const write = async () => {
+        await this.applyOperationsInRuns(persistor, operations);
+        return useTransaction ? levelPersist.getDirtyTables() : [];
+      };
+      const dirtyTables = useTransaction
+        ? await levelPersist.withTransaction(write)
+        : await write();
+      if (useTransaction && dirtyTables.length > 0) invalidator?.notifyDirtyTables(dirtyTables);
     } catch (unknownError) {
-      if (useTransaction) {
-        try {
-          await levelPersist.rollbackTransaction();
-        } catch (rollbackErr) {
-          log("warn", "Failed to rollback transaction", {
-            error: unknownToError(rollbackErr).message,
-          });
-        }
-      }
-
       const err = unknownToError(unknownError);
 
       // Handle disk full error (covers LevelDB and DuckDB/OS-level patterns)
@@ -268,7 +251,7 @@ class ReduxPersistorIPC {
     }
 
     const result: { [key: string]: Serializable } = {};
-    kvPairs.forEach((pair) => {
+    orderStateRows(kvPairs).forEach((pair) => {
       insertValueAtLeaf(result, pair.key, pair.value, hive);
     });
     return result;

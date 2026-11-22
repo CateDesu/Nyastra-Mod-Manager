@@ -5,6 +5,8 @@ import * as semver from "semver";
 import type { IAvailableExtension, IRegisteredExtension } from "@/types/extensions";
 import type { IExtensionOptional, IExtensionState } from "@/types/IState";
 
+import { canonicalDestination } from "./importedExtensionPaths";
+
 type CatalogQuery = { modId: number; fileId?: number };
 type InstalledQuery = { modId: number; fileId?: number } | { path: string };
 
@@ -21,11 +23,15 @@ export function findInstalled(
   installedExtensions: Record<string, IExtensionState>,
   query: InstalledQuery,
 ): { key: string; extension: IExtensionState } | undefined {
-  const queryPath = "path" in query ? path.normalize(query.path) : undefined;
+  const queryPath = "path" in query ? canonicalDestination(query.path) : undefined;
 
   const result = Object.entries(installedExtensions).find(([_, extension]) => {
     if (queryPath !== undefined)
-      return extension.path !== undefined && path.normalize(extension.path) === queryPath;
+      return (
+        extension.path !== undefined &&
+        path.basename(path.resolve(extension.path)) === path.basename(queryPath) &&
+        canonicalDestination(extension.path) === queryPath
+      );
     return matchesQuery(query as CatalogQuery, extension);
   });
 
@@ -139,8 +145,8 @@ export function findUpdatableExtensions(
     const available = findInCatalog(catalog, { modId: installed.modId });
     if (available === undefined) continue;
 
-    const installedVersion = semver.coerce(installed.version);
-    const availableVersion = semver.coerce(available.version);
+    const installedVersion = semver.valid(installed.version) ?? semver.coerce(installed.version);
+    const availableVersion = semver.valid(available.version) ?? semver.coerce(available.version);
 
     if (installedVersion === null || availableVersion === null) {
       continue;

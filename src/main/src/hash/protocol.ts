@@ -5,6 +5,7 @@
  * file contents.
  */
 
+import type { SerializedVortexError } from "@vortex/shared/errors";
 import type { HashAlgorithm } from "@vortex/shared/ipc";
 
 export interface HashJob {
@@ -17,5 +18,5 @@ export interface HashResult {
   id: number;
   hash?: string;
   numBytes?: number;
-  error?: string;
+  error?: string | SerializedVortexError;
 }

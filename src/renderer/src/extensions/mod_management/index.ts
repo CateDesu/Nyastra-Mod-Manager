@@ -152,13 +152,14 @@ interface IAppContext {
   isProfileChanging: boolean;
 }
 
+type InstallDownloadCallback = (err: Error | null, modId?: string) => void;
+
 declare module "../../types/IExtensionContext" {
   interface ApiEvents {
     "start-install-download": (
       downloadId: string,
-      // legacy callers pass a bare allowAutoEnable flag, normalized by the handler
-      options?: IInstallOptions | boolean,
-      callback?: (err: Error | null, modId?: string) => void,
+      options?: IInstallOptions | boolean | InstallDownloadCallback,
+      callback?: InstallDownloadCallback,
     ) => void;
     "will-remove-mods": (gameId: string, modIds: string[], options?: IRemoveModOptions) => void;
     "will-remove-mod": (gameId: string, modId: string, options?: IRemoveModOptions) => void;
@@ -1729,16 +1730,17 @@ function once(api: IExtensionApi) {
     "start-install-download",
     (
       downloadId: string,
-      optionsIn?: IInstallOptions | boolean,
-      callback?: (error, id: string) => void,
+      optionsIn?: IInstallOptions | boolean | InstallDownloadCallback,
+      callback?: InstallDownloadCallback,
     ) => {
       const options =
-        optionsIn === undefined
+        optionsIn === undefined || typeof optionsIn === "function"
           ? {}
           : typeof optionsIn === "boolean"
             ? { allowAutoEnable: optionsIn }
             : optionsIn;
-      void onStartInstallDownload(api, installManager, downloadId, options, callback);
+      const onComplete = typeof optionsIn === "function" ? optionsIn : callback;
+      void onStartInstallDownload(api, installManager, downloadId, options, onComplete);
     },
   );
 

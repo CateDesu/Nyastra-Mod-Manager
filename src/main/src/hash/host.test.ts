@@ -54,6 +54,10 @@ class FakeWorker implements HashWorker {
     }
   }
 
+  emitExit(code: number): void {
+    for (const listener of this.#exitListeners) listener(code);
+  }
+
   get lastJob(): HashJob {
     return this.jobAt(this.posted.length - 1);
   }
@@ -127,7 +131,7 @@ describe("HashWorkerPool", () => {
     await expect(p3).resolves.toEqual({ hash: "h3", numBytes: 3 });
   });
 
-  it("rejects only the crashed worker's job and replaces the worker", async () => {
+  it("rejects only the crashed worker's job and replaces it on new demand", async () => {
     const { factory, workers } = trackingFactory();
     const pool = new HashWorkerPool(factory, 2);
 
@@ -139,12 +143,16 @@ describe("HashWorkerPool", () => {
     w0.emitError(new Error("boom"));
 
     await expect(p1).rejects.toThrow("boom");
-    // A replacement worker was spawned to restore the pool.
-    expect(workers).toHaveLength(3);
+    expect(workers).toHaveLength(2);
 
     // The other in-flight job is unaffected.
     w1.emitMessage({ id: w1.lastJob.id, hash: "h2", numBytes: 2 });
     await expect(p2).resolves.toEqual({ hash: "h2", numBytes: 2 });
+
+    const next = pool.hashFile("md5", "/3");
+    expect(workers).toHaveLength(3);
+    w1.emitMessage({ id: w1.lastJob.id, hash: "h3", numBytes: 3 });
+    await expect(next).resolves.toEqual({ hash: "h3", numBytes: 3 });
   });
 
   it("rejects the job and drops it from the queue when a worker cannot be spawned", async () => {
@@ -175,37 +183,132 @@ describe("HashWorkerPool", () => {
     await expect(p2).resolves.toEqual({ hash: "ok", numBytes: 1 });
   });
 
-  it("does not park a worker when a message arrives with an unexpected id", async () => {
+  it("ignores unexpected replies while retaining the active job", async () => {
     const { factory, workers } = trackingFactory();
     const pool = new HashWorkerPool(factory, 1);
-
-    const p1 = pool.hashFile("md5", "/1");
-    const p2 = pool.hashFile("md5", "/2");
-
+    const first = pool.hashFile("md5", "/1");
+    const second = pool.hashFile("md5", "/2");
     const worker = nthWorker(workers, 0);
+    const firstId = worker.lastJob.id;
+    worker.emitMessage({ id: firstId + 999, hash: "stray", numBytes: 0 });
     expect(worker.posted).toHaveLength(1);
-
-    // A stray message whose id matches no outstanding job must still free the
-    // slot so the queued job is picked up.
-    worker.emitMessage({ id: worker.lastJob.id + 999, hash: "stray", numBytes: 0 });
-    expect(worker.posted).toHaveLength(2);
-    expect(worker.jobAt(1).filePath).toBe("/2");
-
-    worker.emitMessage({ id: worker.lastJob.id, hash: "ok", numBytes: 5 });
-    await expect(p2).resolves.toEqual({ hash: "ok", numBytes: 5 });
-
-    // p1's job was abandoned by the protocol violation; it stays pending.
-    void p1;
+    worker.emitMessage({ id: firstId, hash: "one", numBytes: 1 });
+    await expect(first).resolves.toEqual({ hash: "one", numBytes: 1 });
+    worker.emitMessage({ id: worker.lastJob.id, hash: "two", numBytes: 2 });
+    await expect(second).resolves.toEqual({ hash: "two", numBytes: 2 });
   });
 
-  it("terminates every worker on shutdown", async () => {
+  it("replaces a worker after a clean exit", async () => {
+    const { factory, workers } = trackingFactory();
+    const pool = new HashWorkerPool(factory, 1);
+    const first = pool.hashFile("md5", "/1");
+    const rejected = expect(first).rejects.toThrow("exit code 0");
+    const second = pool.hashFile("md5", "/2");
+    nthWorker(workers, 0).emitExit(0);
+    expect(workers).toHaveLength(2);
+    const replacement = nthWorker(workers, 1);
+    replacement.emitMessage({ id: replacement.lastJob.id, hash: "two", numBytes: 2 });
+    await rejected;
+    await expect(second).resolves.toEqual({ hash: "two", numBytes: 2 });
+  });
+
+  it("ignores an exit and late reply from an already failed worker", async () => {
+    const { factory, workers } = trackingFactory();
+    const pool = new HashWorkerPool(factory, 1);
+    const first = pool.hashFile("md5", "/1");
+    const rejected = expect(first).rejects.toThrow("boom");
+    const second = pool.hashFile("md5", "/2");
+    const failed = nthWorker(workers, 0);
+    failed.emitError(new Error("boom"));
+    failed.emitExit(1);
+    failed.emitMessage({ id: failed.lastJob.id, hash: "late", numBytes: 1 });
+    expect(workers).toHaveLength(2);
+    const replacement = nthWorker(workers, 1);
+    replacement.emitMessage({ id: replacement.lastJob.id, hash: "two", numBytes: 2 });
+    await rejected;
+    await expect(second).resolves.toEqual({ hash: "two", numBytes: 2 });
+  });
+
+  it("rejects queued work if replacement creation fails", async () => {
+    const worker = new FakeWorker();
+    let calls = 0;
+    const pool = new HashWorkerPool(() => {
+      if (++calls > 1) throw new Error("replacement failed");
+      return worker;
+    }, 1);
+    const first = pool.hashFile("md5", "/1");
+    const second = pool.hashFile("md5", "/2");
+    const firstRejected = expect(first).rejects.toThrow("boom");
+    const secondRejected = expect(second).rejects.toThrow("replacement failed");
+    expect(() => worker.emitError(new Error("boom"))).not.toThrow();
+    await firstRejected;
+    await secondRejected;
+  });
+
+  it("settles active and queued jobs and terminates every worker on shutdown", async () => {
     const { factory, workers } = trackingFactory();
     const pool = new HashWorkerPool(factory, 3);
 
-    void pool.hashFile("md5", "/1");
+    const pending = Promise.allSettled(
+      ["1", "2", "3", "4"].map((file) => pool.hashFile("md5", file)),
+    );
     expect(workers).toHaveLength(3);
 
-    await pool.shutdown();
+    const shutdown = pool.shutdown();
+    await expect(pool.hashFile("md5", "during shutdown")).rejects.toThrow("shut down");
+    await shutdown;
+    expect((await pending).every((result) => result.status === "rejected")).toBe(true);
     expect(workers.every((w) => w.terminated)).toBe(true);
+    const restarted = pool.hashFile("md5", "later");
+    const fresh = nthWorker(workers, 3);
+    fresh.emitMessage({ id: fresh.lastJob.id, hash: "ok", numBytes: 1 });
+    await expect(restarted).resolves.toEqual({ hash: "ok", numBytes: 1 });
+    await pool.shutdown();
+  });
+
+  it("stops replacing failed workers once queued work has settled", async () => {
+    const { factory, workers } = trackingFactory();
+    const pool = new HashWorkerPool(factory, 1);
+    const results = Promise.allSettled([pool.hashFile("md5", "/1"), pool.hashFile("md5", "/2")]);
+    nthWorker(workers, 0).emitExit(0);
+    nthWorker(workers, 1).emitExit(0);
+    expect((await results).map((result) => result.status)).toEqual(["rejected", "rejected"]);
+    expect(workers).toHaveLength(2);
+
+    const next = pool.hashFile("md5", "/3");
+    const recovered = nthWorker(workers, 2);
+    recovered.emitMessage({ id: recovered.lastJob.id, hash: "ok", numBytes: 3 });
+    await expect(next).resolves.toEqual({ hash: "ok", numBytes: 3 });
+    await pool.shutdown();
+  });
+
+  it("does not replace an idle worker that exits", async () => {
+    const { factory, workers } = trackingFactory();
+    const pool = new HashWorkerPool(factory, 1);
+    const result = pool.hashFile("md5", "/1");
+    const worker = nthWorker(workers, 0);
+    worker.emitMessage({ id: worker.lastJob.id, hash: "ok", numBytes: 1 });
+    await result;
+    worker.emitExit(0);
+    expect(workers).toHaveLength(1);
+    await pool.shutdown();
+  });
+
+  it("accepts legacy error replies and reuses the worker for queued work", async () => {
+    const { factory, workers } = trackingFactory();
+    const pool = new HashWorkerPool(factory, 1);
+    const failed = pool.hashFile("md5", "/missing");
+    const rejected = expect(failed).rejects.toMatchObject({
+      message: "legacy file error",
+      data: { kind: "setup-error", component: "hash-worker" },
+    });
+    const next = pool.hashFile("md5", "/valid");
+    const worker = nthWorker(workers, 0);
+    worker.emitMessage({ id: worker.lastJob.id, error: "legacy file error" });
+    worker.emitMessage({ id: worker.lastJob.id, hash: "valid", numBytes: 5 });
+    await rejected;
+    await expect(next).resolves.toEqual({ hash: "valid", numBytes: 5 });
+    expect(workers).toHaveLength(1);
+    await pool.shutdown();
   });
 });

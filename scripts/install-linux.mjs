@@ -7,6 +7,7 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   openSync,
   readFileSync,
   readdirSync,
@@ -20,10 +21,130 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { importLinuxProfile } from "./import-linux-profile.mjs";
+import {
+  checkFluffyRecovery,
+  importLinuxProfile,
+  recoverFluffyConfiguration,
+} from "./import-linux-profile.mjs";
 
 const desktopId = "io.github.CateDesu.NyastraModManager.desktop";
 const mimeType = "x-scheme-handler/nxm";
+
+function entryExists(filename) {
+  try {
+    lstatSync(filename);
+    return true;
+  } catch (error) {
+    if (error.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+function directoryIdentity(filename) {
+  const info = lstatSync(filename, { bigint: true });
+  if (!info.isDirectory()) throw new Error(`Not an installation directory: ${filename}`);
+  return { dev: String(info.dev), ino: String(info.ino) };
+}
+
+function sameDirectory(filename, expected) {
+  if (!expected || !entryExists(filename)) return false;
+  const info = lstatSync(filename, { bigint: true });
+  return (
+    info.isDirectory() && String(info.dev) === expected.dev && String(info.ino) === expected.ino
+  );
+}
+
+function validateInstalledApp(installedApp) {
+  directoryIdentity(installedApp);
+  if (!existsSync(path.join(installedApp, "resources/app.asar"))) {
+    throw new Error(`Refusing to replace an unrecognized directory: ${installedApp}`);
+  }
+}
+
+function recoverLegacyRuntime(installRoot, installedApp, selected) {
+  const previous = path.resolve(selected);
+  if (
+    !path.isAbsolute(selected) ||
+    path.dirname(previous) !== installRoot ||
+    !/^\.app-previous-[1-9]\d*$/.test(path.basename(previous))
+  ) {
+    throw new Error("Choose an absolute .app-previous-PID directory inside the installation");
+  }
+  validateInstalledApp(previous);
+  const identity = directoryIdentity(previous);
+  const executable = ["nyastra-mod-manager", "vortex", "Vortex"]
+    .map((name) => path.join(previous, name))
+    .find((filename) => existsSync(filename) && statSync(filename).isFile());
+  if (!executable) throw new Error(`No program executable found in ${previous}`);
+  accessSync(executable, constants.X_OK);
+  if (entryExists(installedApp))
+    throw new Error(`Recovery destination already exists: ${installedApp}`);
+  restoreRuntime(previous, installedApp, identity);
+  console.log(`Recovered runtime: ${installedApp}`);
+}
+
+function restoreRuntime(previous, installedApp, identity) {
+  if (!sameDirectory(previous, identity)) throw new Error(`Saved runtime changed: ${previous}`);
+  // Both directories share a filesystem. mv refuses an entry created after our check.
+  command("mv", ["--no-clobber", "--no-target-directory", "--", previous, installedApp]);
+  if (entryExists(previous) || !sameDirectory(installedApp, identity)) {
+    throw new Error(`Runtime recovery did not publish the selected directory: ${previous}`);
+  }
+}
+
+function interruptedInstalls(installRoot, installedApp) {
+  const transactions = [];
+  for (const entry of readdirSync(installRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !/^\.app-install-[1-9]\d*-[a-zA-Z0-9]{6}$/.test(entry.name))
+      continue;
+    const staging = path.join(installRoot, entry.name);
+    const marker = path.join(staging, "transaction.json");
+    if (!entryExists(marker) || !lstatSync(marker).isFile()) continue;
+    let record;
+    try {
+      record = JSON.parse(readFileSync(marker, "utf8"));
+    } catch {
+      continue;
+    }
+    if (record?.version !== 1 || !sameDirectory(staging, record.staging)) continue;
+    const previous = path.join(staging, "previous");
+    const candidate = path.join(staging, "app");
+    if (entryExists(candidate) && !record.candidate) continue;
+    if (
+      (entryExists(previous) && !sameDirectory(previous, record.previous)) ||
+      (entryExists(candidate) && !sameDirectory(candidate, record.candidate))
+    ) {
+      throw new Error(`Installation recovery needs manual review: ${staging}`);
+    }
+    transactions.push({ staging, record });
+  }
+  if (!entryExists(installedApp)) {
+    const recoverable = transactions.filter(({ staging, record }) =>
+      sameDirectory(path.join(staging, "previous"), record.previous),
+    );
+    if (recoverable.length > 1) throw new Error("Multiple interrupted runtimes need manual review");
+    if (recoverable.length === 1) {
+      const previous = path.join(recoverable[0].staging, "previous");
+      validateInstalledApp(previous);
+      restoreRuntime(previous, installedApp, recoverable[0].record.previous);
+    }
+  }
+  return transactions;
+}
+
+function cleanupInstall({ staging, record }) {
+  if (!sameDirectory(staging, record.staging)) return;
+  for (const name of ["previous", "app"]) {
+    const filename = path.join(staging, name);
+    if (
+      entryExists(filename) &&
+      !sameDirectory(filename, record[name === "app" ? "candidate" : name])
+    ) {
+      throw new Error(`Refusing to remove a replaced installation directory: ${filename}`);
+    }
+  }
+  rmSync(staging, { recursive: true, force: true });
+}
 
 function command(name, args, optional = false) {
   const result = spawnSync(name, args, { encoding: "utf8", timeout: 15000 });
@@ -131,14 +252,23 @@ async function install() {
   const args = process.argv.slice(2);
   let sourceDirectory;
   let importProfile;
+  let recoverRuntime;
+  let recoverFluffy;
   while (args.length) {
     const argument = args.shift();
     if (argument === "--import-profile" && args[0] && !importProfile) importProfile = args.shift();
+    else if (argument === "--recover-runtime" && args[0] && !recoverRuntime)
+      recoverRuntime = args.shift();
+    else if (argument === "--recover-fluffy" && args[0] && !recoverFluffy)
+      recoverFluffy = args.shift();
     else if (!argument.startsWith("-") && !sourceDirectory) sourceDirectory = argument;
     else
       throw new Error(
-        "Usage: node scripts/install-linux.mjs [app-directory] [--import-profile /path/to/profile]",
+        "Usage: node scripts/install-linux.mjs [app-directory] [--import-profile /path/to/profile] or --recover-runtime /path or --recover-fluffy /path",
       );
+  }
+  if ((recoverRuntime || recoverFluffy) && (importProfile || (recoverRuntime && recoverFluffy))) {
+    throw new Error("Run one recovery command on its own, then retry installation");
   }
 
   const repoRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -146,10 +276,12 @@ async function install() {
   const sourceExecutable = ["nyastra-mod-manager", "vortex", "Vortex"]
     .map((name) => path.join(appDirectory, name))
     .find((filename) => existsSync(filename) && statSync(filename).isFile());
-  if (!sourceExecutable) throw new Error(`No program executable found in ${appDirectory}`);
-  accessSync(sourceExecutable, constants.X_OK);
-  if (!existsSync(path.join(appDirectory, "resources/app.asar"))) {
-    throw new Error(`Incomplete packaged program in ${appDirectory}`);
+  if (!recoverRuntime && !recoverFluffy) {
+    if (!sourceExecutable) throw new Error(`No program executable found in ${appDirectory}`);
+    accessSync(sourceExecutable, constants.X_OK);
+    if (!existsSync(path.join(appDirectory, "resources/app.asar"))) {
+      throw new Error(`Incomplete packaged program in ${appDirectory}`);
+    }
   }
 
   const home = homedir();
@@ -161,7 +293,7 @@ async function install() {
   }
   const installRoot = path.join(dataHome, "nyastra-mod-manager");
   const installedApp = path.join(installRoot, "app");
-  const executable = path.join(installedApp, path.basename(sourceExecutable));
+  const executable = path.join(installedApp, path.basename(sourceExecutable || "vortex"));
   const wrapper = path.join(home, ".local/bin/nyastra-mod-manager");
   const applications = path.join(dataHome, "applications");
   const desktop = path.join(applications, desktopId);
@@ -183,16 +315,31 @@ async function install() {
         `Unable to lock the installation: ${locked.error?.message || locked.stderr.trim()}`,
       );
     }
-    const previousHandler = command("xdg-mime", ["query", "default", mimeType]);
-    const previousMime = previousHandler ? undefined : mimeSnapshots(configHome, applications);
-    if (existsSync(installedApp)) {
-      if (lstatSync(installedApp).isSymbolicLink() || !statSync(installedApp).isDirectory()) {
-        throw new Error(`Refusing to replace a non-directory installation: ${installedApp}`);
-      }
-      if (!existsSync(path.join(installedApp, "resources/app.asar"))) {
-        throw new Error(`Refusing to replace an unrecognized directory: ${installedApp}`);
+    if (recoverRuntime) {
+      recoverLegacyRuntime(installRoot, installedApp, recoverRuntime);
+      return;
+    }
+    if (recoverFluffy) {
+      recoverFluffyConfiguration(configHome, recoverFluffy);
+      return;
+    }
+    const abandoned = interruptedInstalls(installRoot, installedApp);
+    if (!entryExists(installedApp) && entryExists(wrapper)) {
+      const legacy = readdirSync(installRoot, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory() && /^\.app-previous-[1-9]\d*$/.test(entry.name))
+        .map((entry) => path.join(installRoot, entry.name))
+        .filter((directory) => existsSync(path.join(directory, "resources/app.asar")));
+      if (legacy.length > 0) {
+        throw new Error(
+          `An older interrupted installation needs recovery. Inspect: ${legacy.join(", ")}. ` +
+            "Run this installer with --recover-runtime /absolute/path/to/.app-previous-PID, then retry.",
+        );
       }
     }
+    if (importProfile) checkFluffyRecovery(configHome);
+    if (entryExists(installedApp)) validateInstalledApp(installedApp);
+    const previousHandler = command("xdg-mime", ["query", "default", mimeType]);
+    const previousMime = previousHandler ? undefined : mimeSnapshots(configHome, applications);
     const source = realpathSync(appDirectory);
     const destination = path.join(realpathSync(installRoot), "app");
     const selfInstall = source === destination;
@@ -223,26 +370,35 @@ async function install() {
       previousFiles.push({ filename, saved });
     }
 
-    const staging = path.join(installRoot, `.app-install-${process.pid}`);
-    const previousApp = path.join(installRoot, `.app-previous-${process.pid}`);
+    let transaction;
+    let staging;
+    let previousApp;
     let movedPrevious = false;
     let movedNew = false;
-    let stagingCreated = false;
     let registrationAttempted = false;
     let extensionResult;
     let imported;
     const changedFiles = new Set();
     try {
       if (!selfInstall) {
-        mkdirSync(staging, { mode: 0o700 });
-        stagingCreated = true;
+        staging = mkdtempSync(path.join(installRoot, `.app-install-${process.pid}-`));
+        previousApp = path.join(staging, "previous");
+        transaction = { staging, record: { version: 1, staging: directoryIdentity(staging) } };
+        const marker = path.join(staging, "transaction.json");
+        writeAtomic(marker, JSON.stringify(transaction.record), 0o600);
+        mkdirSync(path.join(staging, "app"), { mode: 0o700 });
+        transaction.record.candidate = directoryIdentity(path.join(staging, "app"));
+        writeAtomic(marker, JSON.stringify(transaction.record), 0o600);
         cpSync(source, path.join(staging, "app"), {
           recursive: true,
           dereference: false,
           verbatimSymlinks: true,
-          errorOnExist: true,
+          errorOnExist: false,
           force: false,
         });
+        if (entryExists(installedApp))
+          transaction.record.previous = directoryIdentity(installedApp);
+        writeAtomic(marker, JSON.stringify(transaction.record), 0o600);
         if (existsSync(installedApp)) {
           renameSync(installedApp, previousApp);
           movedPrevious = true;
@@ -310,20 +466,25 @@ StartupNotify=true
           if (saved) cpSync(saved, filename, { dereference: false, verbatimSymlinks: true });
         });
       }
-      if (movedNew) recover(() => rmSync(installedApp, { recursive: true, force: true }));
-      if (movedPrevious) recover(() => renameSync(previousApp, installedApp));
+      if (movedNew)
+        recover(() => {
+          if (!entryExists(installedApp)) return;
+          if (!sameDirectory(installedApp, transaction.record.candidate))
+            throw new Error(`Runtime rollback preserved a replacement at ${installedApp}`);
+          rmSync(installedApp, { recursive: true, force: true });
+        });
+      if (movedPrevious)
+        recover(() => restoreRuntime(previousApp, installedApp, transaction.record.previous));
       if (previousHandler) command("xdg-mime", ["default", previousHandler, mimeType], true);
       else if (registrationAttempted) recover(() => restoreUnsetMime(previousMime));
       throw error;
     } finally {
-      if (stagingCreated) rmSync(staging, { recursive: true, force: true });
+      // Keep the journal and old runtime if rollback could not restore it.
+      if (transaction && !entryExists(previousApp)) cleanupInstall(transaction);
     }
-    if (movedPrevious) rmSync(previousApp, { recursive: true, force: true });
-    for (const entry of readdirSync(installRoot, { withFileTypes: true })) {
-      if (!entry.isDirectory() || !/^\.app-(?:install|previous)-[1-9]\d*$/.test(entry.name))
-        continue;
+    for (const old of [...abandoned, ...(transaction ? [transaction] : [])]) {
       try {
-        rmSync(path.join(installRoot, entry.name), { recursive: true, force: true });
+        cleanupInstall(old);
       } catch (error) {
         console.warn(`Old build cleanup failed: ${error.message}`);
       }

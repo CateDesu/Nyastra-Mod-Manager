@@ -21,8 +21,13 @@ vi.mock("node:fs/promises", async (importOriginal) => {
       hooks.removing(String(args[0]));
       return actual.rm(...args);
     },
-    rename: (...args: Parameters<typeof actual.rename>) =>
-      hooks.rename(String(args[1]), actual.rename(...args)),
+    rename: (...args: Parameters<typeof actual.rename>) => {
+      if (String(args[0]).endsWith(".installing")) {
+        hooks.removing(String(args[1]));
+        return hooks.rename(String(args[1]), actual.rename(...args));
+      }
+      return actual.rename(...args);
+    },
   };
   return { ...wrapped, default: wrapped };
 });

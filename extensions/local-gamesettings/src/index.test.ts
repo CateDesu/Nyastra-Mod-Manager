@@ -9,9 +9,13 @@ const paths = vi.hoisted(() => ({ documents: "", userData: "" }));
 
 vi.mock("@nexusmods/vortex-api", async () => {
   const filesystem = await import("node:fs/promises");
+  const files = filesystem;
   const { default: PromiseBB } = await import("bluebird");
   return {
     fs: {
+      openAsync: (file: string, flags: string) => PromiseBB.resolve(files.open(file, flags)),
+      fsyncAsync: (handle: any) => PromiseBB.resolve(handle.sync()),
+      closeAsync: (handle: any) => PromiseBB.resolve(handle.close()),
       copyAsync: (source: string, destination: string) =>
         PromiseBB.resolve(filesystem.copyFile(source, destination)),
       statAsync: (file: string) => PromiseBB.resolve(filesystem.stat(file)),
@@ -108,8 +112,11 @@ describe("profile game settings on Linux", () => {
           events: {
             on: (name: string, callback: (...args: any[]) => void) => events.set(name, callback),
           },
-          emitAndAwait: vi.fn<(...args: unknown[]) => Promise<void>>(async () => undefined),
+          emitAndAwait: vi.fn<(...args: unknown[]) => Promise<unknown[]>>(async () => [
+            { settingsBaked: true },
+          ]),
           showErrorNotification,
+          onStateChange: vi.fn(),
         },
         registerProfileFeature: vi.fn<(...args: unknown[]) => void>(),
         registerTest: vi.fn<(...args: unknown[]) => void>(),
@@ -140,3 +147,95 @@ describe("profile game settings on Linux", () => {
     },
   );
 });
+
+it("preserves the private snapshot when leaving a game with missing live settings", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "nyastra-settings-deselect-"));
+  roots.push(root);
+  paths.documents = path.join(root, "documents");
+  paths.userData = path.join(root, "data");
+  const game = path.join(paths.documents, "My Games", "Skyrim Special Edition");
+  const saved = path.join(paths.userData, "skyrimse", "profiles", "profile");
+  await Promise.all([game, saved].map((dir) => mkdir(dir, { recursive: true })));
+  await writeFile(path.join(game, "SkyrimPrefs.ini.base"), "unsaved live preferences");
+  await writeFile(path.join(saved, "Skyrim.ini"), "saved settings");
+  await writeFile(path.join(saved, "SkyrimPrefs.ini"), "saved preferences");
+  const state = {
+    settings: {
+      profiles: { activeProfileId: "profile" },
+      gameMode: { discovered: { skyrimse: { store: "steam" } } },
+    },
+    persistent: {
+      profiles: {
+        profile: { id: "profile", gameId: "skyrimse", features: { local_game_settings: true } },
+      },
+      mods: { skyrimse: {} },
+    },
+  };
+  const events = new Map<string, (...args: any[]) => void>();
+  const context = {
+    api: {
+      store: { getState: () => state, dispatch: vi.fn() },
+      getState: () => state,
+      events: {
+        on: (name: string, callback: (...args: any[]) => void) => events.set(name, callback),
+      },
+      emitAndAwait: vi.fn(async () => [{ settingsBaked: true }]),
+      showErrorNotification: vi.fn(),
+      onStateChange: vi.fn(),
+    },
+    registerProfileFeature: vi.fn(),
+    registerTest: vi.fn(),
+    once: (callback: () => unknown) => callback(),
+  };
+  init(context as unknown as types.IExtensionContext);
+  const queue: Array<() => PromiseLike<void>> = [];
+  events.get("profile-will-change")(undefined, (callback: () => PromiseLike<void>) =>
+    queue.push(callback),
+  );
+  await queue[0]();
+  expect(await readFile(path.join(saved, "Skyrim.ini"), "utf8")).toBe("saved settings");
+  expect(await readFile(path.join(saved, "SkyrimPrefs.ini"), "utf8")).toBe("saved preferences");
+  expect(context.api.showErrorNotification).not.toHaveBeenCalled();
+  await writeFile(path.join(game, "Skyrim.ini"), "repaired settings");
+  await writeFile(path.join(game, "Skyrim.ini.base"), "repaired settings");
+  await writeFile(path.join(game, "SkyrimPrefs.ini"), "unsaved live preferences");
+  queue.length = 0;
+  events.get("profile-will-change")(undefined, (callback: () => PromiseLike<void>) =>
+    queue.push(callback),
+  );
+  await queue[0]();
+  expect(await readFile(path.join(saved, "Skyrim.ini"), "utf8")).toBe("repaired settings");
+  expect(await readFile(path.join(saved, "SkyrimPrefs.ini"), "utf8")).toBe(
+    "unsaved live preferences",
+  );
+  expect(context.api.showErrorNotification).not.toHaveBeenCalled();
+});
+
+it.each(["/games/skyrim/Enderal", "/games/Skyrim/Enderal"])(
+  "selects Skyrim private settings for the Enderal overlay at %s",
+  async (gamePath) => {
+    const { initGameSupport, mygamesPath, gameSettingsFiles } = await import("./util/gameSupport");
+    const prefix = "/isolated/prefix";
+    initGameSupport({
+      store: {
+        getState: () => ({
+          settings: {
+            gameMode: {
+              discovered: {
+                enderalspecialedition: { path: gamePath, protonPrefix: prefix, store: "steam" },
+              },
+            },
+          },
+        }),
+      },
+    } as unknown as types.IExtensionApi);
+    expect(mygamesPath("enderalspecialedition")).toBe(
+      path.join(prefix, "drive_c/users/steamuser/Documents/My Games/Skyrim Special Edition"),
+    );
+    expect(gameSettingsFiles("enderalspecialedition", null)).toEqual([
+      { name: "Skyrim.ini", optional: false },
+      { name: "SkyrimPrefs.ini", optional: false },
+      { name: "SkyrimCustom.ini", optional: true },
+    ]);
+  },
+);

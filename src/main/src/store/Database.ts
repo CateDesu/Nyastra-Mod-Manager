@@ -37,8 +37,7 @@ export class Database {
   }
 
   async transaction(fn: (tx: TransactionContext) => Promise<void>): Promise<void> {
-    await this.#levelPersist.beginTransaction();
-    try {
+    const dirtyTables = await this.#levelPersist.withTransaction(async () => {
       const tx: TransactionContext = {
         createTable: <T extends Record<string, unknown>>(name: string) =>
           new Table<T>(this.#connection, name),
@@ -47,15 +46,10 @@ export class Database {
       };
       await fn(tx);
 
-      const dirtyTables = await this.#levelPersist.getDirtyTables();
-      await this.#levelPersist.commitTransaction();
-
-      if (this.#invalidator && dirtyTables.length > 0) {
-        this.#invalidator.notifyDirtyTables(dirtyTables);
-      }
-    } catch (err) {
-      await this.#levelPersist.rollbackTransaction();
-      throw err;
+      return this.#levelPersist.getDirtyTables();
+    });
+    if (this.#invalidator && dirtyTables.length > 0) {
+      this.#invalidator.notifyDirtyTables(dirtyTables);
     }
   }
 }

@@ -11,6 +11,16 @@ interface RegisteredQuery {
   referencedTables: string[];
 }
 
+function dependencyName(reference: string): string {
+  // Native qualified references include aliases. Keep quoted identifier contents intact.
+  const name = reference.match(
+    /^(?:"(?:[^"]|"")*"|[^\s."]+)(?:\.(?:"(?:[^"]|"")*"|[^\s."]+))*/,
+  )?.[0];
+  return (name ?? reference).replace(/"((?:[^"]|"")*)"/g, (_match, identifier: string) =>
+    identifier.replaceAll('""', '"'),
+  );
+}
+
 /**
  * Central runtime registry for named SQL queries.
  *
@@ -57,16 +67,18 @@ class QueryRegistry {
       });
 
       // Extract table references from the query SQL
-      let referencedTables: string[];
+      let nativeTables: readonly string[] = [];
       try {
-        referencedTables = [...this.#mConnection.getTableNames(q.sql, true)];
+        nativeTables = this.#mConnection.getTableNames(q.sql, true);
       } catch {
-        // Fallback: if getTableNames fails, use empty list
-        referencedTables = [];
         log("warn", "query-registry: could not extract table names", {
           name: q.name,
         });
       }
+      // Native discovery can omit parameterized queries. Declarations supplement it.
+      const referencedTables = [
+        ...new Set([...nativeTables, ...(q.dependencies ?? [])].map(dependencyName)),
+      ];
 
       const registered: RegisteredQuery = {
         name: q.name,

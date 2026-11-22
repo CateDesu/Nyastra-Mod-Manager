@@ -16,6 +16,7 @@ export interface ParsedQuery {
   description: string;
   filePath: string;
   alias?: string;
+  dependencies?: string[];
 }
 
 const ALIAS_RE = /^--\s*@alias\s+(\S+)\s*$/;
@@ -27,6 +28,7 @@ const ALIAS_RE = /^--\s*@alias\s+(\S+)\s*$/;
  *   -- @name query_name            (starts a new query)
  *   -- @description ...            (optional description)
  *   -- @param param_name TYPE      (optional, for select queries)
+ *   -- @depends-on catalog.table   (optional header, repeat for missed dependencies)
  *   SQL body...
  */
 function parseFile(filePath: string, content: string): ParsedQuery[] {
@@ -38,6 +40,7 @@ function parseFile(filePath: string, content: string): ParsedQuery[] {
   let currentDescription = "";
   let currentAlias: string | undefined;
   let currentParams: ParsedQueryParam[] = [];
+  let currentDependencies: string[] = [];
   let currentSqlLines: string[] = [];
 
   function flushQuery() {
@@ -52,6 +55,7 @@ function parseFile(filePath: string, content: string): ParsedQuery[] {
           description: currentDescription,
           filePath,
           ...(currentAlias !== undefined ? { alias: currentAlias } : {}),
+          ...(currentDependencies.length > 0 ? { dependencies: currentDependencies } : {}),
         });
       }
     }
@@ -59,6 +63,7 @@ function parseFile(filePath: string, content: string): ParsedQuery[] {
     currentDescription = "";
     currentAlias = undefined;
     currentParams = [];
+    currentDependencies = [];
     currentSqlLines = [];
   }
 
@@ -102,6 +107,15 @@ function parseFile(filePath: string, content: string): ParsedQuery[] {
       if (currentName !== undefined) {
         currentAlias = aliasMatch[1];
       }
+      continue;
+    }
+
+    const dependencyMatch =
+      currentName !== undefined && currentSqlLines.every((sqlLine) => sqlLine.trim() === "")
+        ? trimmed.match(/^--\s*@depends-on\s+(.+?)\s*$/)
+        : null;
+    if (dependencyMatch !== null) {
+      currentDependencies.push(dependencyMatch[1]!);
       continue;
     }
 
@@ -152,17 +166,20 @@ export function parseAllQueries(queriesDir: string, catalogAlias = "db"): Parsed
   const allQueries: ParsedQuery[] = [];
   const nameSet = new Map<string, string>(); // name -> filePath
 
+  const bindCatalog = (sql: string) =>
+    sql
+      .replaceAll("{{persistor_catalog_literal}}", () => `'${catalogAlias.replaceAll("'", "''")}'`)
+      .replaceAll("{{persistor_catalog}}", () => `"${catalogAlias.replaceAll('"', '""')}"`);
+
   for (const filePath of sqlFiles) {
     const content = fs.readFileSync(filePath, "utf-8");
     const queries = parseFile(filePath, content);
 
     for (const query of queries) {
-      query.sql = query.sql
-        .replaceAll(
-          "{{persistor_catalog_literal}}",
-          () => `'${catalogAlias.replaceAll("'", "''")}'`,
-        )
-        .replaceAll("{{persistor_catalog}}", () => `"${catalogAlias.replaceAll('"', '""')}"`);
+      query.sql = bindCatalog(query.sql);
+      if (query.dependencies !== undefined) {
+        query.dependencies = query.dependencies.map(bindCatalog);
+      }
       const existing = nameSet.get(query.name);
       if (existing !== undefined) {
         throw new Error(

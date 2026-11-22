@@ -40,6 +40,7 @@ import {
   registerHive,
   finalizeMainWrite,
 } from "./store/mainPersistence";
+import { normalizeStateBlobs } from "./store/normalizeStateBlobs";
 import SubPersistor from "./store/SubPersistor";
 import { isTelemetryEnabled, setTelemetryEnabled, setTelemetryInstanceId } from "./telemetry/state";
 import TrayIcon from "./TrayIcon";
@@ -601,6 +602,13 @@ class Application {
         const matches = keys.filter((key) => _.isEqual(key.slice(0, pathArray.length), pathArray));
 
         try {
+          if (matches.length === 0) {
+            const value = await persist.readStateValue(pathArray);
+            if (value !== undefined) {
+              process.stdout.write(`${pathArray.join(".")} = ${JSON.stringify(value)}\n`);
+              return;
+            }
+          }
           const output = await Promise.all(
             matches.map(async (match) => {
               const value = await persist.getItem(match);
@@ -643,20 +651,12 @@ class Application {
 
   private async handleDel(delPaths: string[], dbPath: string): Promise<void> {
     const persist = await LevelPersist.create(dbPath);
-    const keys = await persist.getAllKeys();
-
     try {
       const promises = delPaths.map(async (getPath) => {
         const pathArray = this.splitPath(getPath);
-        const matches = keys.filter((key) => _.isEqual(key.slice(0, pathArray.length), pathArray));
-
         try {
-          await Promise.all(
-            matches.map(async (match) => {
-              await persist.removeItem(match);
-              process.stdout.write(`removed ${match.join(".")}\n`);
-            }),
-          );
+          await persist.removeItem(pathArray);
+          process.stdout.write(`removed ${pathArray.join(".")}\n`);
         } catch (err) {
           process.stderr.write(getErrorMessageOrDefault(err) + "\n");
         }
@@ -814,6 +814,9 @@ class Application {
           error: getErrorMessageOrDefault(err),
         });
       }
+
+      // Descendant diffs must not leave old values in an ancestor object row.
+      await normalizeStateBlobs(finalPersistor);
 
       // 6. Initialize the IPC-based persistence system
       await finishProfileImport(finalPersistor, dataPath);

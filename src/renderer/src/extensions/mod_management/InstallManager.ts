@@ -159,6 +159,7 @@ import {
 } from "../download_management/util/archiveOwnership";
 import getDownloadGames from "../download_management/util/getDownloadGames";
 import { appendReferenceTagActions } from "../download_management/util/referenceTags";
+import { SITE_ID } from "../gamemode_management/constants";
 import { discoveryByGame } from "../gamemode_management/selectors";
 import type { IModType } from "../gamemode_management/types/IModType";
 import { getGame } from "../gamemode_management/util/getGame";
@@ -1330,8 +1331,9 @@ class InstallManager {
 
     const state = api.getState();
     const batchContext = getBatchContext(["install-dependencies", "install-recommendations"], "");
+    const targetProfileId = info.profileId ?? info.downloadProfileId;
     const profileId =
-      info.profileId ?? batchContext?.get<string>("profileId") ?? activeProfile(state)?.id;
+      targetProfileId ?? batchContext?.get<string>("profileId") ?? activeProfile(state)?.id;
     const currentProfile = profileById(state, profileId);
     // lets attribute extractors take the tag from the rule being installed rather than from
     // whichever collection stamped the archive
@@ -1410,7 +1412,7 @@ class InstallManager {
                       new ProcessCanceled("You need to select a game before installing this mod"),
                     );
                   }
-                  if (installGameId === "site" && baseName.toLowerCase().includes("extension")) {
+                  if (installGameId === SITE_ID && baseName.toLowerCase().includes("extension")) {
                     // Assumption here is that anything we try to install from the "Modding Tools"/"site" domain
                     //  that contains "extension" in its archive name is an extension... If a non-extension tool
                     //  contains "extension" in its archive name... well, that's not good but there's nothing we can
@@ -1420,13 +1422,16 @@ class InstallManager {
                     return Promise.resolve(installGameId);
                   }
                   if (games.find((iter) => iter.id === installGameId) === undefined) {
-                    // Game extension for this download is not installed, this is theoretically fine as
-                    //  it may be a requirement which fits multiple game extensions. Assume the game extension
-                    //  and/or user know what they're doing.
-                    log("warn", "Game extension for download not installed", {
-                      installGameId,
-                      modId,
-                    });
+                    if (installGameId !== SITE_ID) {
+                      log("warn", "Game extension for download not installed", {
+                        installGameId,
+                        modId,
+                      });
+                      throw new ProcessCanceled(
+                        `Game support is not installed for "${installGameId}"`,
+                      );
+                    }
+                    // Site tools can still be installed for the current game.
                     if (currentProfile === undefined) {
                       return Promise.reject(
                         new ProcessCanceled("You need to manage a game before installing this mod"),
@@ -1440,15 +1445,16 @@ class InstallManager {
                       new ProcessCanceled("You need to manage a game before installing this mod"),
                     );
                   }
-                  if (info.profileId !== undefined) {
-                    const targetProfile = profileById(state, info.profileId);
-                    if (targetProfile?.gameId !== installGameId) {
+                  if (targetProfileId !== undefined) {
+                    const targetProfile = profileById(state, targetProfileId);
+                    if (targetProfile?.gameId !== installGameId || targetProfile.pendingRemove) {
                       throw new ProcessCanceled(
                         "The target profile is no longer available for this game",
                       );
                     }
                     installProfile = targetProfile;
-                    batchContext?.set("profileId", targetProfile.id);
+                    if (info.profileId !== undefined)
+                      batchContext?.set("profileId", targetProfile.id);
                   } else if (installGameId !== currentProfile?.gameId) {
                     const installProfileId = lastActiveProfileForGame(state, installGameId);
                     batchContext?.set("profileId", installProfileId);
@@ -1483,23 +1489,17 @@ class InstallManager {
                     checkInstall();
                     archiveMD5 = hash.md5sum;
                     archiveSize = hash.numBytes;
-                    try {
-                      _.merge(fullInfo, {
-                        download: {
-                          fileMD5: archiveMD5,
-                          size: archiveSize,
-                        },
-                      });
-                    } catch (err) {
-                      checkInstall();
-                      // no operation
-                    }
+                    fullInfo.download = {
+                      ...fullInfo.download,
+                      fileMD5: archiveMD5,
+                      size: archiveSize,
+                    };
                     return gameId;
                   });
                 })
                 .then((gameId) => {
                   checkInstall();
-                  if (installGameId === "site") {
+                  if (installGameId === SITE_ID) {
                     // install an already-downloaded extension
                     return api
                       .emitAndAwait("install-extension-from-download", archiveId)
@@ -1570,6 +1570,7 @@ class InstallManager {
                     } else {
                       const installOptions: IInstallOptions = {
                         ...info,
+                        profileId: targetProfileId,
                         unattended,
                         variantNumber: ++variantCounter,
                         fileList,
@@ -1947,7 +1948,11 @@ class InstallManager {
                   if (archiveId) {
                     const currentDownload = api.getState().persistent.downloads.files[archiveId];
                     if (currentDownload) {
-                      fullInfo.download = currentDownload;
+                      fullInfo.download = {
+                        ...currentDownload,
+                        fileMD5: archiveMD5,
+                        size: archiveSize,
+                      };
                     }
                   }
                   return filterModInfo(fullInfo, destinationPath);
@@ -1990,7 +1995,14 @@ class InstallManager {
                     }
                   }
                   checkInstall();
-                  api.events.emit("did-install-mod", installGameId, archiveId, modId, modInfo);
+                  api.events.emit(
+                    "did-install-mod",
+                    installGameId,
+                    archiveId,
+                    modId,
+                    modInfo,
+                    installProfile?.id,
+                  );
                   checkInstall();
                   promiseCallback?.(null, modId);
                   return null;

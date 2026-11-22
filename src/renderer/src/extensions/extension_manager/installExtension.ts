@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { realpathSync } from "node:fs";
-import { stat, rename, rm, readdir, readFile, mkdir } from "node:fs/promises";
+import { realpathSync, unlinkSync, mkdirSync, lstatSync, rmdirSync } from "node:fs";
+import { stat, lstat, rename, rm, readdir, readFile, mkdir } from "node:fs/promises";
 import type * as NodeModule from "node:module";
 import * as path from "node:path";
 
@@ -8,13 +8,13 @@ import { getErrorMessageOrDefault, unknownToError } from "@vortex/shared";
 import SevenZip from "node-7z";
 import * as semver from "semver";
 
-import { addExtension, forgetExtension, removeExtension } from "../../actions";
+import { replaceExtension, removeExtension } from "../../actions";
 import { isValidBcp47 } from "../../bcp47";
 import ExtensionManager from "../../ExtensionManager";
 import { log } from "../../logging";
 import type { ExtensionType, ExtensionInfo, IAvailableExtension } from "../../types/extensions";
 import type { IExtensionApi, IExtensionContext } from "../../types/IExtensionContext";
-import type { IExtensionState, IState } from "../../types/IState";
+import type { IExtensionState } from "../../types/IState";
 import { DataInvalid, UserCanceled } from "../../util/CustomErrors";
 import { withTrackedActivity } from "../../util/errorHandling";
 import getVortexPath from "../../util/getVortexPath";
@@ -25,7 +25,9 @@ import {
   type ExtensionInstallSource,
 } from "../analytics/mixpanel/extensionInstallAnalytics";
 import { parseExtensionInfo } from "./extensionInfo";
+import { canonicalDestination, isLinkedImportDirectory } from "./importedExtensionPaths";
 import { findInstalled, findPreviousVersions } from "./queries";
+import { recordReplacement, recoverReplacements, releaseReplacement } from "./replacementRecovery";
 
 interface ExtensionDependency {
   id: string;
@@ -243,38 +245,34 @@ function sanitize(input: string): string {
   }
 }
 
-function canonicalDestination(destPath: string): string {
+async function publishDirectory(source: string, destination: string): Promise<void> {
+  mkdirSync(destination);
+  const reservation = lstatSync(destination, { bigint: true });
   try {
-    return path.join(realpathSync(path.dirname(destPath)), path.basename(destPath));
-  } catch {
-    return path.resolve(destPath);
+    await rename(source, destination);
+  } catch (error) {
+    const current = lstatSync(destination, { bigint: true });
+    if (current.dev === reservation.dev && current.ino === reservation.ino) rmdirSync(destination);
+    throw error;
   }
 }
 
-/**
- * Clears the post-install `remove: true` flag for entries whose folder the new
- * install just renamed into place. Entries pointing at distinct, still-on-disk
- * folders keep their flag so the next startup's cleanup deletes them (#23295).
- */
-export function clearStaleRemovalFlags(
-  api: IExtensionApi,
-  removedKeys: string[],
-  destPath: string,
-): void {
-  const state: IState = api.getState();
-  const extState = state.app.extensions ?? {};
-  // Compare paths, not key strings: info.json `id` can decouple the state key
-  // from the folder basename, and the archive-name fallback differs again.
-  const normalizedDest = canonicalDestination(destPath);
-  removedKeys.forEach((key) => {
-    const prevPath = extState[key]?.path;
-    if (prevPath !== undefined && canonicalDestination(prevPath) === normalizedDest) {
-      api.store.dispatch(forgetExtension(key));
-    }
+export function extensionOwners(
+  catalog: Record<string, Pick<IExtensionState, "path">>,
+  destination: string,
+): string[] {
+  const target = canonicalDestination(destination);
+  return Object.keys(catalog).filter((key) => {
+    const filename = catalog[key].path;
+    return filename !== undefined && canonicalDestination(filename) === target;
   });
 }
 
-function removeOldVersion(api: IExtensionApi, catalogEntry: IAvailableExtension): string[] {
+function removeOldVersion(
+  api: IExtensionApi,
+  catalogEntry: IAvailableExtension,
+  destination: string,
+): string[] {
   const state = api.getState();
   const previousVersions = findPreviousVersions(state.app.extensions ?? {}, catalogEntry);
 
@@ -284,7 +282,14 @@ function removeOldVersion(api: IExtensionApi, catalogEntry: IAvailableExtension)
     });
   }
 
-  previousVersions.forEach(({ key }) => api.store.dispatch(removeExtension(key)));
+  previousVersions.forEach(({ key, extension }) => {
+    if (
+      extension.path === undefined ||
+      canonicalDestination(extension.path) !== canonicalDestination(destination)
+    ) {
+      api.store.dispatch(removeExtension(key));
+    }
+  });
   return previousVersions.map(({ key }) => key);
 }
 
@@ -424,8 +429,16 @@ async function installExtensionImpl(
   data?: InstallData,
 ): Promise<void> {
   let destPath: string;
+  let retainCandidate = false;
   const tempPath = path.join(extensionsPath, `.extension-${randomUUID()}.installing`);
 
+  if (isLinkedImportDirectory(extensionsPath))
+    throw new DataInvalid("The imported plugins directory is a symbolic link");
+  if (recoverReplacements(extensionsPath, api.getState().app.extensions ?? {}, false).size > 0) {
+    throw new DataInvalid(
+      "An interrupted extension replacement needs deliberate recovery before retrying",
+    );
+  }
   const extractor = new SevenZip();
 
   await mkdir(extensionsPath, { recursive: true });
@@ -508,58 +521,110 @@ async function installExtensionImpl(
           const live = refreshEntry(api, data.refresh);
           if (live === undefined || live.remove || live.enabled === false) throw new UserCanceled();
         }
-        let removedKeys =
-          data?.catalogEntry && !data.refresh ? removeOldVersion(api, data.catalogEntry) : [];
-
-        // we don't actually expect the output directory to exist
-        await rm(destPath, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
-        await rename(tempPath, destPath);
-
-        // Keep choices made while native replacement was outstanding.
-        const policy = data?.refresh === undefined ? undefined : refreshEntry(api, data.refresh);
-        if (data?.refresh !== undefined && data.catalogEntry !== undefined) {
-          removedKeys = removeOldVersion(api, data.catalogEntry);
+        if (
+          recoverReplacements(extensionsPath, api.getState().app.extensions ?? {}, false).has(
+            canonicalDestination(destPath),
+          )
+        ) {
+          throw new DataInvalid("Extension replacement needs deliberate recovery");
         }
-        // Retire every old owner of the committed directory, including manual installs.
-        clearStaleRemovalFlags(api, Object.keys(api.getState().app.extensions ?? {}), destPath);
-
-        const state: IExtensionState = {
+        const previousPath = path.join(extensionsPath, `.extension.bak-${randomUUID()}`);
+        let journal: string | undefined;
+        let hasPrevious = false;
+        const previous = await lstat(destPath).catch((err) => {
+          if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+          return undefined;
+        });
+        const candidateState: IExtensionState = {
           name: data?.catalogEntry?.name ?? extensionInfo?.name ?? path.basename(destPath),
           author: data?.catalogEntry?.author ?? extensionInfo?.author ?? "<unknown>",
           description: extensionInfo?.description ?? "<missing>",
           version: data?.catalogEntry?.version ?? extensionInfo?.version ?? "0.0.1",
-
           endorsed: "Undecided",
-          remove: data?.refresh === undefined ? false : (policy?.remove ?? true),
-          enabled: data?.refresh === undefined ? true : (policy?.enabled ?? false),
+          remove: false,
+          enabled: true,
           path: destPath,
-
           infoJsonId: extensionInfo?.id,
-
           modId: data?.catalogEntry?.modId,
           fileId: data?.catalogEntry?.fileId,
           type: data?.catalogEntry?.type ?? guessedType,
         };
+        if (previous !== undefined) {
+          journal = recordReplacement(
+            extensionsPath,
+            destPath,
+            previousPath,
+            tempPath,
+            api.getState().app.extensions ?? {},
+            candidateState,
+          );
+          retainCandidate = true;
+        }
+        try {
+          if (previous !== undefined) {
+            await rename(destPath, previousPath);
+            hasPrevious = true;
+          }
+          try {
+            await publishDirectory(tempPath, destPath);
+            retainCandidate = false;
+          } catch (err) {
+            if (hasPrevious) {
+              try {
+                await publishDirectory(previousPath, destPath);
+                if (journal !== undefined) unlinkSync(journal);
+                retainCandidate = false;
+              } catch (restoreError) {
+                throw new AggregateError(
+                  [err, restoreError],
+                  `Extension replacement failed. Previous files remain at ${previousPath}`,
+                  { cause: restoreError },
+                );
+              }
+            }
+            throw err;
+          }
+          let removedKeys =
+            data?.catalogEntry && !data.refresh
+              ? removeOldVersion(api, data.catalogEntry, destPath)
+              : [];
 
-        api.store.dispatch(addExtension(state));
+          // Keep choices made while native replacement was outstanding.
+          const policy = data?.refresh === undefined ? undefined : refreshEntry(api, data.refresh);
+          if (data?.refresh !== undefined && data.catalogEntry !== undefined) {
+            removedKeys = removeOldVersion(api, data.catalogEntry, destPath);
+          }
+          // Retire every old owner of the committed directory, including manual installs.
+          const replaceKeys = extensionOwners(api.getState().app.extensions ?? {}, destPath);
 
-        emitExtensionInstalled(api, state, {
-          source: data?.analytics?.source,
-          isUpdate: removedKeys.length > 0,
-          gameDomain: data?.analytics?.gameDomain,
-          gameName: data?.analytics?.gameName,
-        });
+          const state: IExtensionState = {
+            ...candidateState,
+            remove: data?.refresh === undefined ? false : (policy?.remove ?? true),
+            enabled: data?.refresh === undefined ? true : (policy?.enabled ?? false),
+          };
 
-        if (
-          state.remove ||
-          state.enabled === false ||
-          state.type === "theme" ||
-          state.type === "translation"
-        )
-          return undefined;
+          api.store.dispatch(replaceExtension(state, replaceKeys));
 
-        // Capture this commit's requirements before another archive replaces its bytes.
-        return { state, dependencies: scanDependencies(api, state.path) };
+          emitExtensionInstalled(api, state, {
+            source: data?.analytics?.source,
+            isUpdate: removedKeys.length > 0,
+            gameDomain: data?.analytics?.gameDomain,
+            gameName: data?.analytics?.gameName,
+          });
+
+          if (
+            state.remove ||
+            state.enabled === false ||
+            state.type === "theme" ||
+            state.type === "translation"
+          )
+            return undefined;
+
+          // Capture this commit's requirements before another archive replaces its bytes.
+          return { state, dependencies: scanDependencies(api, state.path) };
+        } finally {
+          if (journal !== undefined) releaseReplacement(journal);
+        }
       });
 
       if (installed !== undefined) {
@@ -571,7 +636,9 @@ async function installExtensionImpl(
         );
       }
     },
-  ).finally(() => rm(tempPath, { recursive: true, force: true, maxRetries: 3 }));
+  ).finally(() =>
+    retainCandidate ? undefined : rm(tempPath, { recursive: true, force: true, maxRetries: 3 }),
+  );
 }
 
 export default installExtension;

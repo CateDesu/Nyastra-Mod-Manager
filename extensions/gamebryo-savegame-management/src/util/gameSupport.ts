@@ -143,7 +143,7 @@ const gameSupport = util.makeOverlayableDictionary<string, IGameSupport>(
     if (
       discovery?.path !== undefined &&
       gameId === "enderalspecialedition" &&
-      discovery.path.includes("skyrim")
+      discovery.path.toLowerCase().includes("skyrim")
     ) {
       return "enderalseOverlay";
     } else {

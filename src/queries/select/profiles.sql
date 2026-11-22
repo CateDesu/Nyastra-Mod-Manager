@@ -3,6 +3,7 @@
 -- @name recently_managed_games
 -- @description Gets the 3 most recently managed games (excluding current)
 -- @param current_game_id VARCHAR
+-- @depends-on {{persistor_catalog}}.profiles_pivot
 SELECT
     p.gameId AS game_id
 FROM {{persistor_catalog}}.profiles_pivot p

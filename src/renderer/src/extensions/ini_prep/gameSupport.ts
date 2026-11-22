@@ -11,6 +11,7 @@ import type { IDiscoveryResult } from "../gamemode_management/types/IDiscoveryRe
 interface IGameSupport {
   iniFiles: string[];
   iniFormat: string;
+  optionalFiles?: string[];
 }
 
 const gameSupport = makeOverlayableDictionary<string, IGameSupport>(
@@ -30,6 +31,7 @@ const gameSupport = makeOverlayableDictionary<string, IGameSupport>(
       iniFormat: "winapi",
     },
     skyrimse: {
+      optionalFiles: ["SkyrimCustom.ini"],
       iniFiles: [
         path.join("{mygames}", "Skyrim Special Edition", "Skyrim.ini"),
         path.join("{mygames}", "Skyrim Special Edition", "SkyrimPrefs.ini"),
@@ -53,6 +55,7 @@ const gameSupport = makeOverlayableDictionary<string, IGameSupport>(
       iniFormat: "winapi",
     },
     fallout3: {
+      optionalFiles: ["FalloutCustom.ini"],
       iniFiles: [
         path.join("{mygames}", "Fallout3", "Fallout.ini"),
         path.join("{mygames}", "Fallout3", "FalloutPrefs.ini"),
@@ -61,6 +64,7 @@ const gameSupport = makeOverlayableDictionary<string, IGameSupport>(
       iniFormat: "winapi",
     },
     fallout4: {
+      optionalFiles: ["Fallout4Custom.ini"],
       iniFiles: [
         path.join("{mygames}", "Fallout4", "Fallout4.ini"),
         path.join("{mygames}", "Fallout4", "Fallout4Prefs.ini"),
@@ -76,6 +80,7 @@ const gameSupport = makeOverlayableDictionary<string, IGameSupport>(
       iniFormat: "winapi",
     },
     falloutnv: {
+      optionalFiles: ["FalloutCustom.ini"],
       iniFiles: [
         path.join("{mygames}", "FalloutNV", "Fallout.ini"),
         path.join("{mygames}", "FalloutNV", "FalloutPrefs.ini"),
@@ -84,6 +89,7 @@ const gameSupport = makeOverlayableDictionary<string, IGameSupport>(
       iniFormat: "winapi",
     },
     starfield: {
+      optionalFiles: ["Starfield.ini"],
       iniFiles: [
         path.join("{mygames}", "Starfield", "Starfield.ini"),
         path.join("{mygames}", "Starfield", "StarfieldPrefs.ini"),
@@ -162,6 +168,7 @@ const gameSupport = makeOverlayableDictionary<string, IGameSupport>(
     },
     enderalOverride: {
       enderalspecialedition: {
+        optionalFiles: ["SkyrimCustom.ini"],
         iniFiles: [
           path.join("{mygames}", "Skyrim Special Edition", "Skyrim.ini"),
           path.join("{mygames}", "Skyrim Special Edition", "SkyrimPrefs.ini"),
@@ -173,6 +180,21 @@ const gameSupport = makeOverlayableDictionary<string, IGameSupport>(
   },
   (gameId: string, store: string) => store,
 );
+
+function gameStore(gameMode: string, discovery: IDiscoveryResult): string {
+  if (
+    gameMode === "enderalspecialedition" &&
+    discovery?.path !== undefined &&
+    discovery.path.toLowerCase().includes("skyrim")
+  ) {
+    return "enderalOverride";
+  }
+  return discovery?.store;
+}
+
+export function optionalIniFiles(gameMode: string, discovery: IDiscoveryResult): string[] {
+  return gameSupport.get(gameMode, "optionalFiles", gameStore(gameMode, discovery)) ?? [];
+}
 
 export function iniFiles(gameMode: string, discovery: IDiscoveryResult) {
   const entry =
@@ -187,20 +209,8 @@ export function iniFiles(gameMode: string, discovery: IDiscoveryResult) {
       ? getMyGamesPath(entry.compatDataPath)
       : path.join(getVortexPath("documents"), "My Games");
 
-  let store = discovery?.store;
-
-  // override for the case where enderal se is installed as a total conversion
-  // instead of the stand-alone version
-  if (
-    gameMode === "enderalspecialedition" &&
-    discovery?.path !== undefined &&
-    discovery?.path.toLowerCase().includes("skyrim")
-  ) {
-    store = "enderaloverride";
-  }
-
-  return (gameSupport.get(gameMode, "iniFiles", store) ?? []).map((filePath) =>
-    format(filePath, { mygames, game: discovery.path }),
+  return (gameSupport.get(gameMode, "iniFiles", gameStore(gameMode, discovery)) ?? []).map(
+    (filePath) => format(filePath, { mygames, game: discovery.path }),
   );
 }
 

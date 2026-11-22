@@ -18,7 +18,6 @@ import { parseAllQueries } from "./queryParser";
 import QueryRegistry from "./QueryRegistry";
 import QueryWatcher from "./QueryWatcher";
 import ReduxPersistorIPC from "./ReduxPersistorIPC";
-import { insertStateValue } from "./stateTree";
 import SubPersistor from "./SubPersistor";
 
 let mainPersistor: ReduxPersistorIPC | undefined;
@@ -39,6 +38,7 @@ export function initMainPersistence(levelPersistor: LevelPersist): ReduxPersisto
 
   levelPersist = levelPersistor;
   mainPersistor = new ReduxPersistorIPC();
+  mainPersistor.setQueryInvalidator(levelPersistor);
 
   mainPersistor.setPersistorFactory((hive: string) => {
     if (levelPersist === undefined) {
@@ -161,47 +161,12 @@ export async function readPersistedValue<T>(hive: string, path: string[]): Promi
   }
 
   try {
-    const subPersistor = new SubPersistor(levelPersist, hive);
-    const value = await subPersistor.getItem(path);
-    if (value !== undefined && value !== "") {
-      return JSON.parse(value) as T;
-    }
-    return undefined;
-  } catch {
-    // Non-leaf values need reconstruction from separately stored children.
-  }
-
-  try {
-    const prefix = [hive, ...path].join("###");
-    const kvs = await levelPersist.getAllKVs(prefix);
-    if (kvs.length === 0) {
-      return undefined;
-    }
-
-    const pathDepth = path.length + 1; // +1 for the hive prefix
-    const result: Record<string, unknown> = {};
-    for (const { key, value } of kvs) {
-      const remainingKey = key.slice(pathDepth);
-      if (remainingKey.length === 0) {
-        continue;
-      }
-
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(value);
-      } catch {
-        parsed = value;
-      }
-      insertStateValue(result, remainingKey, parsed);
-    }
-
-    return result as T;
+    return (await levelPersist.readStateValue([hive, ...path])) as T | undefined;
   } catch (err) {
-    const message = getErrorMessageOrDefault(err);
     log("warn", "Could not read persisted value", {
       hive,
       path,
-      error: message,
+      error: getErrorMessageOrDefault(err),
     });
     return undefined;
   }
@@ -218,7 +183,11 @@ export async function writePersistedValue<T>(
 
   try {
     const subPersistor = new SubPersistor(levelPersist, hive);
-    await subPersistor.setItem(path, JSON.stringify(value));
+    const dirtyTables = await levelPersist.withTransaction(async () => {
+      await subPersistor.setItem(path, JSON.stringify(value));
+      return levelPersist!.getDirtyTables();
+    });
+    if (dirtyTables.length > 0) queryInvalidator?.notifyDirtyTables(dirtyTables);
   } catch (err) {
     const message = getErrorMessageOrDefault(err);
     log("warn", "Could not write persisted value", {
@@ -266,21 +235,25 @@ export async function registerAllPersistedHives(): Promise<{
     return {};
   }
 
-  const hives = await getPersistedHives();
-  log("info", "Discovered persisted hives", { hives });
+  const persistence = levelPersist;
+  const redux = mainPersistor;
+  return persistence.withSerializedRead(async () => {
+    const hives = await getPersistedHives();
+    log("info", "Discovered persisted hives", { hives });
 
-  const result: { [hive: string]: Serializable } = {};
+    const result: { [hive: string]: Serializable } = {};
 
-  for (const hive of hives) {
-    try {
-      const subPersistor = new SubPersistor(levelPersist, hive);
-      result[hive] = await mainPersistor.insertPersistor(hive, subPersistor);
-    } catch (err) {
-      const message = getErrorMessageOrDefault(err);
-      log("warn", "Could not register hive", { hive, error: message });
-      result[hive] = {};
+    for (const hive of hives) {
+      try {
+        const subPersistor = new SubPersistor(persistence, hive);
+        result[hive] = await redux.insertPersistor(hive, subPersistor);
+      } catch (err) {
+        const message = getErrorMessageOrDefault(err);
+        log("warn", "Could not register hive", { hive, error: message });
+        result[hive] = {};
+      }
     }
-  }
 
-  return result;
+    return result;
+  });
 }

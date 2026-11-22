@@ -51,7 +51,7 @@ function getWorker(): Worker {
     if (worker === spawned) failAll(err);
   });
   spawned.on("exit", (code) => {
-    if (code !== 0 && worker === spawned) {
+    if (worker === spawned) {
       failAll(new Error(`bsdiff worker stopped unexpectedly (exit code ${code})`));
     }
   });

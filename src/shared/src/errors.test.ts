@@ -3,11 +3,41 @@ import { describe, it, expect } from "vitest";
 import {
   computeErrorFingerprint,
   computeIdentityFingerprint,
+  getErrorCode,
   getErrorStatusCode,
   isEnvironmentalError,
   sanitizeFramePath,
 } from "./errors";
 import { CAUSE_SEPARATOR, VortexError } from "./errors/base";
+import { deserializeVortexError, toWireError } from "./errors/serialization";
+
+describe("getErrorCode", () => {
+  it.each(["ENOENT", "EACCES", "EMFILE"])(
+    "preserves %s across structured error transport",
+    (code) => {
+      const native = Object.assign(new Error("file operation failed"), {
+        code,
+        errno: -2,
+        syscall: "open",
+        path: "/temporary/file",
+      });
+      const transported = deserializeVortexError(structuredClone(toWireError(native)));
+      expect(getErrorCode(native)).toBe(code);
+      expect(getErrorCode(transported)).toBe(code);
+    },
+  );
+
+  it("retains legacy code precedence and ignores untyped values", () => {
+    const error = Object.assign(
+      new VortexError("test", { kind: "os:generic", originalCode: "EBUSY" }),
+      { code: "EACCES" },
+    );
+    expect(getErrorCode(error)).toBe("EACCES");
+    expect(getErrorCode({ code: "ENOENT" })).toBeNull();
+    expect(getErrorCode(new Error("ENOENT"))).toBeNull();
+    expect(getErrorCode(new VortexError("test", { kind: "unknown", originalCode: 5 }))).toBeNull();
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Helpers

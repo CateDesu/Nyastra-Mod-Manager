@@ -44,3 +44,29 @@ describe("app reducer forgetExtension", () => {
     expect(Object.keys(result.extensions)).toEqual(["abc123"]);
   });
 });
+
+it("replaces destination owners in one action while retaining policy", () => {
+  const state = {
+    ...appReducer.defaults,
+    extensions: {
+      first: makeExtensionState({ name: "old", path: "/plugins/example" }),
+      duplicate: makeExtensionState({ name: "duplicate", path: "/plugins/example" }),
+      other: makeExtensionState({ name: "other" }),
+    },
+  };
+  const replacement = makeExtensionState({
+    name: "new",
+    path: "/plugins/example",
+    enabled: false,
+    remove: true,
+  });
+  const result = appReducer.reducers[actions.replaceExtension.getType()](state, {
+    extension: replacement,
+    replaceKeys: ["first", "duplicate"],
+  });
+  expect(result.extensions.first).toBeUndefined();
+  expect(result.extensions.duplicate).toBeUndefined();
+  expect(result.extensions.other).toEqual(state.extensions.other);
+  expect(Object.values(result.extensions)).toContainEqual(replacement);
+  expect(Object.keys(result.extensions)).toHaveLength(2);
+});

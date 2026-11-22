@@ -40,6 +40,12 @@ if (${JSON.stringify(mode)} === "early-fatal") {
   fs.appendFileSync(log, "uncaught exception\\n");
 }
 if (${JSON.stringify(mode)} === "early-exit") setTimeout(() => process.exit(1), 700);
+if (${JSON.stringify(mode)} === "stubborn-helper") {
+  const helper = require("node:child_process").spawn(process.execPath, ["-e",
+    "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);"
+  ], { stdio: "ignore" });
+  fs.writeFileSync(${JSON.stringify(record + ".helper")}, String(helper.pid));
+}
 setInterval(() => {}, 1000);
 `,
     { mode: 0o755 },
@@ -49,6 +55,14 @@ setInterval(() => {}, 1000);
     async assertStopped() {
       const pid = Number(await readFile(record, "utf8"));
       assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+      if (mode === "stubborn-helper") {
+        const helper = Number(await readFile(record + ".helper", "utf8"));
+        const status = await readFile(`/proc/${helper}/status`, "utf8").catch((error) => {
+          if (error.code === "ENOENT") return "";
+          throw error;
+        });
+        assert.ok(!status || /^State:\s+Z/m.test(status), "helper is still running");
+      }
     },
   };
 }
@@ -70,3 +84,9 @@ for (const mode of ["early-fatal", "late-fatal", "early-exit"]) {
     await program.assertStopped();
   });
 }
+
+await test("startup stops helpers after their launcher exits", { timeout: 15_000 }, async (t) => {
+  const program = await fixture(t, "stubborn-helper");
+  await program.run();
+  await program.assertStopped();
+});

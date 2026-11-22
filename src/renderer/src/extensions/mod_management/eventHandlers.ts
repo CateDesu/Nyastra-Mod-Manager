@@ -9,7 +9,7 @@ import {
 import * as _ from "lodash";
 import type { RuleType } from "modmeta-db";
 
-import { startActivity, stopActivity } from "../../actions/session";
+import { setDownloadGameFilter, startActivity, stopActivity } from "../../actions/session";
 import type { IDialogResult } from "../../types/IDialog";
 import type { IExtensionApi } from "../../types/IExtensionContext";
 import type { IModTable, IProfile, IState } from "../../types/IState";
@@ -26,18 +26,23 @@ import type { Normalize } from "../../util/getNormalizeFunc";
 import getNormalizeFunc from "../../util/getNormalizeFunc";
 import { log } from "../../util/log";
 import { showError } from "../../util/message";
-import { downloadPathForGame } from "../../util/selectors";
-import { knownGames } from "../../util/selectors";
+import { discoveryByGame, downloadPathForGame, knownGames } from "../../util/selectors";
 import { getSafe } from "../../util/storeHelper";
 import { batchDispatch, truthy } from "../../util/util";
 import { emitModRemoved } from "../analytics/mixpanel/modChangeAnalytics";
 import type { IDownload } from "../download_management/types/IDownload";
 import getDownloadGames from "../download_management/util/getDownloadGames";
+import { SITE_ID } from "../gamemode_management/constants";
 import { getGame } from "../gamemode_management/util/getGame";
 import { getModType } from "../gamemode_management/util/modTypeExtensions";
-import { convertGameIdReverse } from "../nexus_integration/util/convertGameId";
+import { convertGameIdReverse, convertNXMIdReverse } from "../nexus_integration/util/convertGameId";
 import { setModsEnabled } from "../profile_management/actions/profiles";
-import { activeGameId, activeProfile } from "../profile_management/selectors";
+import {
+  activeGameId,
+  activeProfile,
+  lastActiveProfileForGame,
+  profileById,
+} from "../profile_management/selectors";
 import { setDeploymentNecessary } from "./actions/deployment";
 import { addMod, removeMod } from "./actions/mods";
 import { setActivator } from "./actions/settings";
@@ -977,7 +982,7 @@ export async function onStartInstallDownload(
   installManager: InstallManager,
   downloadId: string,
   options: IInstallOptions,
-  callback?: (error, id: string) => void,
+  callback?: (error: Error | null, id?: string) => void,
 ) {
   const store = api.store;
   const state: IState = store.getState();
@@ -1016,20 +1021,67 @@ export async function onStartInstallDownload(
   }
 
   const downloadGames = getDownloadGames(download);
-  // Convert to internal IDs (e.g., skyrimspecialedition -> skyrimse)
-  const knownGamesList = knownGames(state);
-  const convertedGameId =
-    downloadGames.length > 0
-      ? convertGameIdReverse(knownGamesList, downloadGames[0]) || downloadGames[0]
-      : downloadGames[0];
+  const games = knownGames(state);
+  const archiveGameId = downloadGames[0];
+  const convertedGameId = convertGameIdReverse(games, archiveGameId);
+  const info = download.modInfo;
+  const nexusIds = info?.nexus?.ids;
+  const nexusMod =
+    convertedGameId !== SITE_ID &&
+    (info?.source === "nexus" || (nexusIds?.modId != null && nexusIds.fileId != null)) &&
+    nexusIds?.collectionId == null &&
+    nexusIds?.collectionSlug == null &&
+    info?.collectionId == null &&
+    info?.collectionSlug == null;
+  const resolveGame = (id: string) => {
+    if (typeof id !== "string" || id.length === 0) return undefined;
+    const converted = convertGameIdReverse(games, id);
+    if (converted !== id.toLowerCase()) return converted;
+    return convertNXMIdReverse(games, id);
+  };
+  const useTargetProfile =
+    nexusMod || (options.profileId !== undefined && convertedGameId !== SITE_ID);
+  const targetGameId = useTargetProfile ? resolveGame(archiveGameId) : convertedGameId;
+  const requestedProfile =
+    useTargetProfile && options.profileId !== undefined
+      ? profileById(state, options.profileId)
+      : activeProfile(state);
+  const requestedGameId = requestedProfile?.gameId;
+  const compatibleGames = useTargetProfile
+    ? downloadGames.map(resolveGame).filter(truthy)
+    : downloadGames;
+  const authoredCompatibility = games.find((game) => game.id === requestedGameId)?.details
+    ?.compatibleDownloads;
+  const compatible =
+    compatibleGames.includes(requestedGameId) ||
+    (useTargetProfile &&
+      targetGameId !== undefined &&
+      Array.isArray(authoredCompatibility) &&
+      authoredCompatibility.some((id) => resolveGame(id) === targetGameId));
+  const forcedGameId = compatible ? requestedGameId : targetGameId;
 
-  const activeGameIdValue = activeGameId(state);
-  const forcedGameId = downloadGames.includes(activeGameIdValue)
-    ? activeGameIdValue
-    : convertedGameId;
+  if (
+    nexusMod &&
+    (targetGameId === undefined || forcedGameId === undefined || forcedGameId === SITE_ID)
+  ) {
+    const message = "This download has no target game and cannot be installed.";
+    if (callback !== undefined) callback(new DataInvalid(message), undefined);
+    else api.showErrorNotification("Installation failed", message, { allowReport: false });
+    return;
+  }
+  if (
+    useTargetProfile &&
+    options.profileId !== undefined &&
+    (!compatible || requestedProfile?.pendingRemove === true)
+  ) {
+    const error = new ProcessCanceled("The target profile is no longer available for this game");
+    if (callback !== undefined) callback(error, undefined);
+    else api.showErrorNotification("Installation failed", error, { allowReport: false });
+    return;
+  }
 
   if (!truthy(download.localPath)) {
-    api.events.emit("refresh-downloads", convertedGameId, () => {
+    api.events.emit("refresh-downloads", targetGameId, () => {
       api.showErrorNotification(
         "Download invalid",
         "Sorry, the meta data for this download is incomplete. Vortex has " +
@@ -1037,23 +1089,65 @@ export async function onStartInstallDownload(
         { allowReport: false },
       );
     });
+    callback?.(new UserCanceled(), undefined);
     return Promise.resolve();
   }
 
-  const downloadPath = downloadPathForGame(state, convertedGameId);
-  const fullPath: string = path.join(downloadPath, download.localPath);
+  const pathGameId = nexusMod ? archiveGameId : convertedGameId;
+  let storageGameId = pathGameId;
+  let archiveDir = downloadPathForGame(state, pathGameId);
+  let fullPath = path.join(archiveDir, download.localPath);
+  // Keep the selected profile through the archive check and the install queue.
+  const profileForDownload =
+    requestedGameId === forcedGameId
+      ? requestedProfile
+      : profileById(state, lastActiveProfileForGame(state, forcedGameId));
+  const downloadProfileId =
+    nexusMod &&
+    options.profileId === undefined &&
+    profileForDownload?.gameId === forcedGameId &&
+    !profileForDownload.pendingRemove
+      ? profileForDownload.id
+      : undefined;
+  const profileId = options.profileId ?? downloadProfileId;
 
   try {
     // Small delay to ensure file handles are released and filesystem buffers are flushed
     await new Promise((resolve) => setTimeout(resolve, 100));
 
-    // Verify file exists and is accessible by checking its stats
-    const stats = await fs.statAsync(fullPath);
-
-    // Additional verification: ensure file is readable and has expected size
-    if (stats.size === 0) {
-      throw new Error("File appears to be empty or still being written");
-    }
+    const checkArchive = async () => {
+      const stats = await fs.statAsync(fullPath);
+      if (!stats.isFile() || stats.size === 0) {
+        throw new DataInvalid("The downloaded archive is empty or incomplete.");
+      }
+      // A domain and its internal game ID can each have a file with this name.
+      if (pathGameId !== targetGameId && download.fileMD5) {
+        const { md5sum } = await api.genMd5Hash(fullPath);
+        if (md5sum.toLowerCase() !== download.fileMD5.toLowerCase()) {
+          throw new DataInvalid("The archive does not match this download.");
+        }
+      }
+      return stats;
+    };
+    const stats = await checkArchive().catch(async (err) => {
+      if (
+        pathGameId === targetGameId ||
+        (getErrorCode(err) !== "ENOENT" && !(err instanceof DataInvalid))
+      )
+        throw err;
+      if (!download.fileMD5) {
+        throw new DataInvalid(
+          "The original archive is unavailable. Download it again to install it.",
+        );
+      }
+      storageGameId = targetGameId;
+      archiveDir = downloadPathForGame(state, storageGameId);
+      fullPath = path.join(archiveDir, download.localPath);
+      return checkArchive().catch((alternateError) => {
+        if (getErrorCode(alternateError) === "ENOENT") throw err;
+        throw alternateError;
+      });
+    });
 
     log("debug", "Download file verified as accessible for installation", {
       downloadId,
@@ -1065,6 +1159,14 @@ export async function onStartInstallDownload(
     log("warn", message, { downloadId, filePath: path.basename(fullPath) });
     if (callback !== undefined) {
       callback(new DataInvalid(message), undefined);
+    } else if (getErrorCode(accessError) === "ENOENT") {
+      api.showErrorNotification(
+        "Download missing",
+        "The archive could not be found. Download it again to install it.",
+        { allowReport: false },
+      );
+    } else if (accessError instanceof DataInvalid) {
+      api.showErrorNotification("Download invalid", accessError, { allowReport: false });
     } else {
       api.showErrorNotification(
         "Download File Locked",
@@ -1076,14 +1178,90 @@ export async function onStartInstallDownload(
     return;
   }
 
+  const archiveIsCurrent = (current: IState) => {
+    const live = current.persistent.downloads.files[downloadId];
+    return (
+      live?.state === "finished" &&
+      live.localPath === download.localPath &&
+      live.startTime === download.startTime &&
+      live.modInfo?.nexus?.ids?.gameId === nexusIds?.gameId &&
+      live.modInfo?.nexus?.ids?.modId === nexusIds?.modId &&
+      live.modInfo?.nexus?.ids?.fileId === nexusIds?.fileId &&
+      live.fileMD5 === download.fileMD5 &&
+      live.size === download.size &&
+      _.isEqual(live.game, download.game) &&
+      downloadPathForGame(current, storageGameId) === archiveDir
+    );
+  };
+  const profileIsCurrent = (current: IState) => {
+    if (profileId === undefined) return true;
+    const profile = profileById(current, profileId);
+    return profile?.gameId === forcedGameId && profile.pendingRemove !== true;
+  };
+  const current = api.getState();
+  if (nexusMod) {
+    if (!archiveIsCurrent(current) || !profileIsCurrent(current)) {
+      callback?.(new UserCanceled(), undefined);
+      return;
+    }
+    if (
+      profileId === undefined ||
+      current.session.gameMode.disabled?.[forcedGameId] !== undefined ||
+      !knownGames(current).some((game) => game.id === forcedGameId) ||
+      discoveryByGame(current, forcedGameId)?.path === undefined
+    ) {
+      try {
+        const results = await api.emitAndAwait("manage-game-for-install", forcedGameId);
+        if (results.includes(true) && archiveIsCurrent(api.getState())) {
+          api.sendNotification({
+            id: `ready-to-install-${downloadId}`,
+            type: "info",
+            title: "Mod downloaded",
+            message: "After game setup finishes, choose Install for {{archive}} in Downloads.",
+            replace: { archive: download.localPath },
+            actions: [
+              {
+                title: "Open Downloads",
+                action: (dismiss) => {
+                  store.dispatch(setDownloadGameFilter(null));
+                  api.events.emit("show-main-page", "Downloads");
+                  dismiss();
+                },
+              },
+            ],
+          });
+        }
+      } catch (err) {
+        api.showErrorNotification("Failed to manage game", err, { allowReport: false });
+        callback?.(unknownToError(err), undefined);
+        return;
+      }
+      callback?.(new UserCanceled(), undefined);
+      return;
+    }
+  }
+
   const allowAutoDeploy = options.allowAutoEnable !== false;
-  const { enable } = state.settings.automation;
+  const { enable } = current.settings.automation;
+  const gamePath = nexusMod ? discoveryByGame(current, forcedGameId)?.path : undefined;
+  const isCurrentAttempt = nexusMod
+    ? () => {
+        const live = api.getState();
+        return (
+          archiveIsCurrent(live) &&
+          profileIsCurrent(live) &&
+          live.session.gameMode.disabled?.[forcedGameId] === undefined &&
+          knownGames(live).some((game) => game.id === forcedGameId) &&
+          discoveryByGame(live, forcedGameId)?.path === gamePath
+        );
+      }
+    : undefined;
   installManager.install(
     downloadId,
     fullPath,
-    download.game,
+    downloadGames,
     api,
-    { download, choices: options.choices, profileId: options.profileId },
+    { download, choices: options.choices, profileId: options.profileId, downloadProfileId },
     true,
     enable && allowAutoDeploy,
     callback,
@@ -1092,6 +1270,9 @@ export async function onStartInstallDownload(
     options.unattended,
     options.forceInstaller,
     allowAutoDeploy,
+    undefined,
+    undefined,
+    isCurrentAttempt,
   );
   return;
 }

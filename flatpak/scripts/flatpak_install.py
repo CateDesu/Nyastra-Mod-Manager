@@ -17,7 +17,6 @@ from _flatpak_workflow import (
     reset_user_remote,
     run_flatpak_builder,
     sync_flatpak_build_inputs,
-    uninstall_user_app,
     update_user_appstream,
 )
 
@@ -102,11 +101,6 @@ def main() -> None:
             build_dir=paths.build_dir,
         )
 
-    # Uninstall if reinstalling (keep user data for development)
-    if args.reinstall and already_installed:
-        print(f"Uninstalling existing {DEFAULT_APP_ID}...")
-        uninstall_user_app(DEFAULT_APP_ID)
-
     # Update appstream metadata from remotes to pick up changes
     print("Updating AppStream metadata...")
     update_user_appstream()
@@ -121,6 +115,7 @@ def main() -> None:
         root=paths.root,
         remote_name=DEFAULT_REMOTE_NAME,
         app_id=DEFAULT_APP_ID,
+        reinstall=args.reinstall,
     )
     print(f"\n{DEFAULT_APP_ID} installed successfully!")
     print(f"\nThe app will now appear in software centers like KDE Discover.")

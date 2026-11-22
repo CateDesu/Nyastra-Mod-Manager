@@ -32,21 +32,28 @@ function createPersist() {
 }
 
 describe("LevelPersist.setItem", () => {
-  it("issues a single INSERT (no SELECT-then-branch)", async () => {
+  it("checks ancestors and replaces descendants with one INSERT in a transaction", async () => {
     const { persist, connection } = createPersist();
 
     await persist.setItem(["settings", "window", "x"], "42");
 
-    expect(connection.runAndReadAll).not.toHaveBeenCalled();
-    expect(connection.run).toHaveBeenCalledTimes(1);
+    expect(connection.runAndReadAll).toHaveBeenCalledTimes(1);
+    expect(connection.run.mock.calls.map((call) => call[0])).toEqual([
+      "BEGIN TRANSACTION",
+      expect.stringMatching(/^DELETE/),
+      "INSERT INTO db.kv VALUES ($1, $2)",
+      "COMMIT",
+    ]);
     expect(connection.run).toHaveBeenCalledWith("INSERT INTO db.kv VALUES ($1, $2)", [
       `settings${SEPARATOR}window${SEPARATOR}x`,
       "42",
     ]);
   });
 
-  it("does not begin or commit a transaction internally", async () => {
+  it("uses an existing explicit transaction without nesting", async () => {
     const { persist, connection } = createPersist();
+    await persist.beginTransaction();
+    connection.run.mockClear();
 
     await persist.setItem(["a"], "v");
 
@@ -64,12 +71,12 @@ describe("LevelPersist.setItem", () => {
 });
 
 describe("LevelPersist.removeItem", () => {
-  it("issues a single DELETE that matches the exact key and any descendants", async () => {
+  it("deletes the exact key and descendants inside a transaction", async () => {
     const { persist, connection } = createPersist();
 
     await persist.removeItem(["settings", "window", "x"]);
 
-    expect(connection.run).toHaveBeenCalledTimes(1);
+    expect(connection.run).toHaveBeenCalledTimes(3);
     const exact = `settings${SEPARATOR}window${SEPARATOR}x`;
     expect(connection.run).toHaveBeenCalledWith(
       "DELETE FROM db.kv WHERE key = $1 OR starts_with(key, $2)",
@@ -96,8 +103,7 @@ describe("LevelPersist.bulkSetItem", () => {
       { key: ["c"], value: "3" },
     ]);
 
-    expect(connection.run).toHaveBeenCalledTimes(1);
-    const [sql, params] = connection.run.mock.calls[0]!;
+    const [sql, params] = connection.run.mock.calls.find((call) => call[0].startsWith("INSERT"))!;
     expect(sql).toBe("INSERT INTO db.kv VALUES ($1, $2), ($3, $4), ($5, $6)");
     expect(params).toEqual(["a", "1", "b", "2", "c", "3"]);
   });
@@ -107,7 +113,9 @@ describe("LevelPersist.bulkSetItem", () => {
 
     await persist.bulkSetItem([{ key: ["settings", "window", "x"], value: "42" }]);
 
-    const params = connection.run.mock.calls[0]![1] as string[];
+    const params = connection.run.mock.calls.find((call) =>
+      call[0].startsWith("INSERT"),
+    )![1] as string[];
     expect(params[0]).toBe(`settings${SEPARATOR}window${SEPARATOR}x`);
   });
 
@@ -120,11 +128,12 @@ describe("LevelPersist.bulkSetItem", () => {
     }));
     await persist.bulkSetItem(items);
 
-    const sql = connection.run.mock.calls[0]![0];
+    const insert = connection.run.mock.calls.find((call) => call[0].startsWith("INSERT"))!;
+    const sql = insert[0];
     const placeholders = sql.match(/\$\d+/g) ?? [];
     expect(placeholders.length).toBe(200); // 2 per item
 
-    const params = connection.run.mock.calls[0]![1] as string[];
+    const params = insert[1] as string[];
     expect(params.length).toBe(200);
     expect(params[0]).toBe("k0");
     expect(params[1]).toBe("v0");
@@ -147,8 +156,7 @@ describe("LevelPersist.bulkRemoveItem", () => {
 
     await persist.bulkRemoveItem([["a"], ["b"], ["c"]]);
 
-    expect(connection.run).toHaveBeenCalledTimes(1);
-    const [sql, params] = connection.run.mock.calls[0]!;
+    const [sql, params] = connection.run.mock.calls.find((call) => call[0].startsWith("DELETE"))!;
     expect(sql).toBe(
       "DELETE FROM db.kv WHERE key = $1 OR starts_with(key, $2) " +
         "OR key = $3 OR starts_with(key, $4) " +
@@ -162,7 +170,9 @@ describe("LevelPersist.bulkRemoveItem", () => {
 
     await persist.bulkRemoveItem([["settings", "window"]]);
 
-    const params = connection.run.mock.calls[0]![1] as string[];
+    const params = connection.run.mock.calls.find((call) =>
+      call[0].startsWith("DELETE"),
+    )![1] as string[];
     expect(params).toEqual([
       `settings${SEPARATOR}window`,
       `settings${SEPARATOR}window${SEPARATOR}`,

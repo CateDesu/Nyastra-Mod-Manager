@@ -113,18 +113,17 @@ describe("LevelPersist corrupt-key removal (LAZ-788)", () => {
     expect(corrupt!.key[3]).toContain("�");
   });
 
-  it("does NOT remove the corrupt key via key-based removeItem (repro)", async () => {
+  it("refuses a lossy key removal and preserves the corrupt row", async () => {
     await injectRawKeys(dbPath);
     const persist = await openPersist();
 
     const corrupt = fileEntries(await persist.getAllKVs()).find((kv) => kv.key[3] !== HEALTHY_ID);
     expect(corrupt).toBeDefined();
 
-    // Vortex's repair path: read the key back, then removeItem(it).
-    await persist.removeItem(corrupt!.key);
+    await expect(persist.removeItem(corrupt!.key)).rejects.toThrow("unreadable keys");
 
     const afterFiles = fileEntries(await persist.getAllKVs());
-    // BUG: the corrupt row survives — its stored bytes don't match the re-encoded key.
+    // Healing still owns removal through a clean prefix.
     expect(afterFiles.some((kv) => kv.key[3] !== HEALTHY_ID)).toBe(true);
     // Control: a healthy key IS removable via the same path.
     await persist.removeItem([...FILES_PREFIX.split("###").filter(Boolean), HEALTHY_ID, "size"]);
@@ -133,7 +132,5 @@ describe("LevelPersist corrupt-key removal (LAZ-788)", () => {
     );
   });
 
-  // The raw key-based delete inherently cannot remove this key (its bytes don't
-  // round-trip). The fix does not change removeItem — it heals at a clean prefix
-  // in the main process before hydration; see healInvalidKeys.test.integration.ts.
+  // Lossy keys still require healing at a clean prefix before hydration.
 });

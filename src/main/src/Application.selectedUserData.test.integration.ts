@@ -1,9 +1,13 @@
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 
 import type { IParameters } from "@vortex/shared/cli";
+import type { DiffOperation } from "@vortex/shared/ipc";
 import { currentStatePath } from "@vortex/shared/state";
+import { applyMiddleware, createStore, type Middleware, type Reducer } from "redux";
 import { expect, it, vi } from "vitest";
 
 const fixture = vi.hoisted(() => ({
@@ -97,6 +101,8 @@ import LevelPersist from "./store/LevelPersist";
 import {
   closeMainPersistence,
   getMainPersistor,
+  getDatabase,
+  readHiveData,
   readPersistedValue,
   writePersistedValue,
 } from "./store/mainPersistence";
@@ -109,6 +115,101 @@ type PersistenceApplication = {
   mAppMetadata: { instanceId: string; commandLine: IParameters };
   setupPersistence(repair?: boolean): Promise<void>;
 };
+
+it.each([true, false])(
+  "main window read before renderer write stays committed, rollback %s",
+  async (rollback) => {
+    const root = await mkdtemp(path.join(tmpdir(), "window-reader-"));
+    const dataPath = path.join(root, "user-data");
+    fixture.userData = dataPath;
+    fixture.appData = path.join(root, "config");
+    fixture.mainBase = path.resolve(import.meta.dirname, "../build");
+    const done = Promise.withResolvers<void>();
+    fixture.queryDone = () => done.resolve();
+    const resume = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    let write: Promise<void> | undefined;
+    try {
+      await mkdir(dataPath, { recursive: true });
+      const startup = path.join(fixture.appData, "Nyastra fixture");
+      await mkdir(startup, { recursive: true });
+      await writeFile(path.join(startup, "startup.json"), "{}");
+      const seeded = await LevelPersist.create(path.join(dataPath, currentStatePath));
+      await seeded.setItem(
+        ["settings", "window"],
+        JSON.stringify({
+          width: 1280,
+          height: 720,
+          maximized: false,
+          "display###name": "Desk",
+        }),
+      );
+      await seeded.setItem(["app", "instanceId"], '"synthetic"');
+      await seeded.close();
+      const application = Object.assign(Object.create(Application.prototype), {
+        mArgs: parseCommandline(["/fixture/program", "--user-data", dataPath], false),
+        mBasePath: dataPath,
+        mLevelPersistors: [],
+      }) as PersistenceApplication;
+      await application.setupPersistence(false);
+      await done.promise;
+      const persist = application.mLevelPersistors[0]!;
+      expect(await readPersistedValue("settings", ["window", "maximized"])).toBe(false);
+      const captured = Promise.withResolvers<void>();
+      const beforeCommit = Promise.withResolvers<void>();
+      const nativeRead = persist.connection.runAndReadAll.bind(persist.connection);
+      let paused = false;
+      vi.spyOn(persist.connection, "runAndReadAll").mockImplementation(async (sql, ...args) => {
+        const reader = await nativeRead(sql, ...args);
+        if (!paused && sql.includes("WHERE key IN")) {
+          paused = true;
+          captured.resolve();
+          await resume.promise;
+        }
+        return reader;
+      });
+      const nativeRun = persist.connection.run.bind(persist.connection);
+      vi.spyOn(persist.connection, "run").mockImplementation(async (sql, ...args) => {
+        if (sql === "COMMIT") {
+          beforeCommit.resolve();
+          await finish.promise;
+          if (rollback) throw new Error("fixture commit failure");
+        }
+        return nativeRun(sql, ...args);
+      });
+      const read = readPersistedValue("settings", ["window", "maximized"]);
+      await captured.promise;
+      const ipc = getMainPersistor()!;
+      ipc.applyDiffOperations("settings", [
+        { type: "set", path: ["window", "maximized"], value: true },
+      ]);
+      write = ipc.finalizeWrite();
+      await Promise.race([beforeCommit.promise, delay(100)]);
+      resume.resolve();
+      const observed = await read;
+      finish.resolve();
+      await write;
+      vi.restoreAllMocks();
+      expect(await readPersistedValue("settings", ["window", "maximized"])).toBe(!rollback);
+      expect(await readPersistedValue("settings", ["window", "display###name"])).toBe("Desk");
+      await closeMainPersistence();
+      DuckDBSingleton.getInstance().close();
+      const reopened = await LevelPersist.create(path.join(dataPath, currentStatePath));
+      expect(await reopened.readStateValue(["settings", "window", "maximized"])).toBe(!rollback);
+      await reopened.close();
+      expect(observed).toBe(false);
+    } finally {
+      resume.resolve();
+      finish.resolve();
+      await write;
+      vi.restoreAllMocks();
+      await closeMainPersistence();
+      DuckDBSingleton.getInstance().close();
+      fixture.queryDone = undefined;
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
 
 const scenarios = [
   { name: "implicit default", option: "none", invalidDefault: false },
@@ -407,3 +508,389 @@ it.each(["restore", "merge"] as const)(
     }
   },
 );
+
+it("normalizes existing object rows before startup hydration and descendant persistence", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "startup-object-rows-"));
+  const dataPath = path.join(root, "user-data");
+  fixture.userData = dataPath;
+  fixture.appData = path.join(root, "config");
+  fixture.mainBase = path.resolve(import.meta.dirname, "../build");
+  fixture.queryTerminals = [];
+  const queryDone = Promise.withResolvers<void>();
+  fixture.queryDone = () => queryDone.resolve();
+  let application: PersistenceApplication | undefined;
+  try {
+    await mkdir(dataPath, { recursive: true });
+    const startup = path.join(fixture.appData, "Nyastra fixture");
+    await mkdir(startup, { recursive: true });
+    await writeFile(path.join(startup, "startup.json"), "{}");
+    const seeded = await LevelPersist.create(path.join(dataPath, currentStatePath));
+    await seeded.setItem(
+      ["persistent", "mods", "skyrimse"],
+      '{"retained":{"id":"retained","attributes":{"name":"parent"}}}',
+    );
+    await seeded.setItem(
+      ["persistent", "mods", "skyrimse", "retained", "attributes", "name"],
+      '"child override"',
+    );
+    await seeded.close();
+    application = Object.assign(Object.create(Application.prototype), {
+      mArgs: parseCommandline(["/fixture/nyastra-mod-manager", "--user-data", dataPath], false),
+      mBasePath: dataPath,
+      mLevelPersistors: [],
+    }) as PersistenceApplication;
+    await application.setupPersistence();
+    await queryDone.promise;
+    expect(fixture.queryTerminals).toEqual(["Query system initialized"]);
+    expect(await readPersistedValue("persistent", ["mods", "skyrimse", "retained", "id"])).toBe(
+      "retained",
+    );
+    expect(
+      await readPersistedValue("persistent", [
+        "mods",
+        "skyrimse",
+        "retained",
+        "attributes",
+        "name",
+      ]),
+    ).toBe("child override");
+    const ipc = getMainPersistor()!;
+    ipc.applyDiffOperations("persistent", [
+      { type: "remove", path: ["mods", "skyrimse", "retained"] },
+    ]);
+    await ipc.finalizeWrite();
+    await closeMainPersistence();
+    const reopened = await LevelPersist.create(path.join(dataPath, currentStatePath));
+    try {
+      expect(await reopened.getAllKVs()).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ key: ["persistent", "mods", "skyrimse"] }),
+          expect.objectContaining({ key: ["persistent", "mods", "skyrimse", "retained", "id"] }),
+        ]),
+      );
+      expect(
+        (await reopened.getAllKeys()).some((key) => key[0] === "persistent" && key[1] === "mods"),
+      ).toBe(false);
+    } finally {
+      await reopened.close();
+    }
+  } finally {
+    if (getMainPersistor() !== undefined) await queryDone.promise;
+    await closeMainPersistence();
+    for (const persist of application?.mLevelPersistors ?? []) await persist.close();
+    DuckDBSingleton.getInstance().close();
+    fixture.queryDone = undefined;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+vi.mock("../../renderer/src/logging", () => ({ log: vi.fn() }));
+vi.mock("../../renderer/src/extensions/mod_management/util/testModReference", () => ({
+  referenceEqual: () => false,
+}));
+
+for (const shape of [
+  "normal-mixed",
+  "embedded-separator",
+  "array-property",
+  "bad\uFFFDname",
+  "bad\u0001name",
+  "bad\ud800name",
+]) {
+  for (const action of [
+    "REMOVE_MOD",
+    "UPDATE_ATTRIBUTE",
+    "REMOVE_ATTRIBUTE",
+    "UPDATE_QUERY_ATTRIBUTE",
+    "REPAIR_STARTUP",
+    ...(shape === "array-property" ? ["REPLACE_ARRAY"] : []),
+  ]) {
+    it(`compatible startup ${JSON.stringify(shape)}: ${action}, flush, reopen and second startup`, async () => {
+      const root = await mkdtemp(path.join(tmpdir(), "startup-compatibility-"));
+      const dataPath = path.join(root, "user-data");
+      fixture.userData = dataPath;
+      fixture.appData = path.join(root, "config");
+      fixture.mainBase = path.resolve(import.meta.dirname, "../build");
+      let application: PersistenceApplication | undefined;
+      let queryDone: Promise<void> | undefined;
+      const attribute =
+        shape === "embedded-separator"
+          ? "embedded###name"
+          : shape.startsWith("bad")
+            ? shape
+            : "obsolete";
+      const retained = {
+        id: "retained",
+        installationPath: "retained",
+        state: "installed",
+        type: "",
+        attributes: {
+          name: "parent",
+          source: "nexus",
+          modId: 10,
+          fileId: 20,
+          [attribute]: "keep",
+          nil: null,
+          empty: {},
+          tags: ["one", null],
+        },
+      };
+      const sibling = {
+        ...retained,
+        id: "sibling",
+        installationPath: "sibling",
+        attributes: { name: "sibling", source: "nexus", modId: 11, fileId: 21 },
+      };
+      type Mods = Record<string, Record<string, typeof retained>>;
+      const modsKey = ["persistent", "mods", "skyrimse"];
+      const rows: Array<[string[], string]> = [
+        [modsKey, JSON.stringify({ retained, sibling })],
+        [[...modsKey, "retained", "attributes", "name"], '"child override"'],
+        [["app", "instanceId"], '"synthetic-instance"'],
+        [["persistent", "profiles", "p", "gameId"], '"skyrimse"'],
+        [["settings", "profiles", "activeProfileId"], '"p"'],
+        [["settings", "window", "width"], " 800 "],
+        [["persistent", "mods", "skyrimse2", "unrelated"], " [1,null,{}] "],
+        [["persistent"], ' {"ignoredHiveRow":true} '],
+      ];
+      if (shape === "array-property")
+        rows.push([[...modsKey, "retained", "attributes", "tags", "custom"], '"extra"']);
+      const start = async (repair: boolean) => {
+        fixture.queryTerminals = [];
+        const done = Promise.withResolvers<void>();
+        queryDone = done.promise;
+        fixture.queryDone = () => done.resolve();
+        application = Object.assign(Object.create(Application.prototype), {
+          mArgs: parseCommandline(["/fixture/nyastra-mod-manager", "--user-data", dataPath], false),
+          mBasePath: dataPath,
+          mLevelPersistors: [],
+        }) as PersistenceApplication;
+        await application.setupPersistence(repair);
+        await queryDone;
+        expect(fixture.queryTerminals).toEqual(["Query system initialized"]);
+        return application.mLevelPersistors[0]!;
+      };
+      const stop = async () => {
+        await closeMainPersistence();
+        for (const persist of application?.mLevelPersistors ?? []) await persist.close();
+        application = undefined;
+        DuckDBSingleton.getInstance().close();
+      };
+      try {
+        await mkdir(dataPath, { recursive: true });
+        const startup = path.join(fixture.appData, "Nyastra fixture");
+        await mkdir(startup, { recursive: true });
+        await writeFile(path.join(startup, "startup.json"), "{}");
+        // Raw rows keep the fixture independent of current write behavior.
+        const leveldown = createRequire(import.meta.url)("leveldown") as (directory: string) => {
+          open(options: { createIfMissing: boolean }, callback: (error?: Error) => void): void;
+          put(key: Buffer, value: Buffer, callback: (error?: Error) => void): void;
+          close(callback: (error?: Error) => void): void;
+        };
+        const raw = leveldown(path.join(dataPath, currentStatePath));
+        await new Promise<void>((resolve, reject) =>
+          raw.open({ createIfMissing: true }, (error?: Error) =>
+            error ? reject(error) : resolve(),
+          ),
+        );
+        try {
+          for (const [key, value] of rows)
+            await new Promise<void>((resolve, reject) =>
+              raw.put(Buffer.from(key.join("###")), Buffer.from(value), (error?: Error) =>
+                error ? reject(error) : resolve(),
+              ),
+            );
+        } finally {
+          await new Promise<void>((resolve, reject) =>
+            raw.close((error?: Error) => (error ? reject(error) : resolve())),
+          );
+        }
+        let persist = await start(action === "REPAIR_STARTUP");
+        const renderer = path.resolve(import.meta.dirname, "../../renderer/src");
+        type RendererPersistence = {
+          createPersistDiffMiddleware(
+            getApi: () => { sendDiff: (hive: string, operations: DiffOperation[]) => void },
+          ): Middleware;
+          flushPendingDiffsSync(): void;
+        };
+        const middleware = (await import(
+          path.join(renderer, "store/persistDiffMiddleware.ts")
+        )) as RendererPersistence;
+        const { modsReducer } = (await import(
+          path.join(renderer, "extensions/mod_management/reducers/mods.ts")
+        )) as {
+          modsReducer: { reducers: Record<string, (state: unknown, payload: unknown) => unknown> };
+        };
+        const hydrated = await readHiveData("persistent");
+        const expectedInitial = {
+          ...retained,
+          attributes: { ...retained.attributes, name: "child override" },
+        };
+        if (shape === "array-property")
+          Object.defineProperty(expectedInitial.attributes.tags, "custom", {
+            value: "extra",
+            enumerable: true,
+            writable: true,
+            configurable: true,
+          });
+        expect((hydrated.mods as Mods).skyrimse!.retained).toEqual(expectedInitial);
+        expect(
+          await readPersistedValue("persistent", [
+            "mods",
+            "skyrimse",
+            "retained",
+            "attributes",
+            attribute,
+          ]),
+        ).toBe("keep");
+        const query = async () => {
+          const sql = (await import("./store/queryParser"))
+            .parseAllQueries(path.join(fixture.mainBase, "queries"), persist.alias)
+            .find((q) => q.name === "active_profile_nexus_files")!.sql;
+          return getDatabase()!.query<{ vortex_mod_id: string; file_id: string }>(sql);
+        };
+        expect((await query()).map((row) => row.vortex_mod_id).sort()).toEqual([
+          "retained",
+          "sibling",
+        ]);
+        const ipc = getMainPersistor()!;
+        const reducer: Reducer<{ persistent: Record<string, unknown> }, { type: string }> = (
+          state = { persistent: hydrated },
+          input,
+        ) => {
+          const type =
+            input.type === "REMOVE_MOD"
+              ? "REMOVE_MOD"
+              : [
+                    "UPDATE_ATTRIBUTE",
+                    "REMOVE_ATTRIBUTE",
+                    "UPDATE_QUERY_ATTRIBUTE",
+                    "REPLACE_ARRAY",
+                  ].includes(input.type)
+                ? "SET_MOD_ATTRIBUTE"
+                : undefined;
+          if (!type) return state;
+          return {
+            persistent: {
+              ...state.persistent,
+              mods: modsReducer.reducers[type]!(state.persistent.mods, {
+                gameId: "skyrimse",
+                modId: "retained",
+                attribute:
+                  input.type === "UPDATE_QUERY_ATTRIBUTE"
+                    ? "fileId"
+                    : input.type === "REPLACE_ARRAY"
+                      ? "tags"
+                      : attribute,
+                value:
+                  input.type === "REMOVE_ATTRIBUTE"
+                    ? undefined
+                    : input.type === "UPDATE_QUERY_ATTRIBUTE"
+                      ? 24
+                      : input.type === "REPLACE_ARRAY"
+                        ? ["two"]
+                        : "updated",
+              }),
+            },
+          };
+        };
+        const store = createStore(
+          reducer,
+          applyMiddleware(
+            middleware.createPersistDiffMiddleware(() => ({
+              sendDiff: (hive, operations) => ipc.applyDiffOperations(hive, operations),
+            })),
+          ),
+        );
+        store.dispatch({ type: "INIT" });
+        store.dispatch({ type: action });
+        middleware.flushPendingDiffsSync();
+        await ipc.finalizeWrite();
+        const expected = store.getState().persistent;
+        expect(await readHiveData("persistent")).toEqual(expected);
+        expect((await query()).map((row) => row.vortex_mod_id).sort()).toEqual(
+          action === "REMOVE_MOD" ? ["sibling"] : ["retained", "sibling"],
+        );
+        if (action === "UPDATE_QUERY_ATTRIBUTE")
+          expect((await query()).find((row) => row.vortex_mod_id === "retained")!.file_id).toBe(
+            "24",
+          );
+        await stop();
+        const reopened = await LevelPersist.create(path.join(dataPath, currentStatePath));
+        try {
+          expect(await reopened.getItem(["settings", "window", "width"])).toBe(" 800 ");
+          expect(await reopened.getItem(["persistent", "mods", "skyrimse2", "unrelated"])).toBe(
+            " [1,null,{}] ",
+          );
+          expect(await reopened.getItem(["persistent"])).toBe(' {"ignoredHiveRow":true} ');
+        } finally {
+          await reopened.close();
+        }
+        persist = await start(true);
+        expect(await readHiveData("persistent")).toEqual(expected);
+        // A second update exercises the representation produced by the first write.
+        await writePersistedValue(
+          "persistent",
+          ["mods", "skyrimse", "sibling", "attributes", "fileId"],
+          22,
+        );
+        const expectedSecond = {
+          ...expected,
+          mods: {
+            ...(expected.mods as Mods),
+            skyrimse: {
+              ...(expected.mods as Mods).skyrimse,
+              sibling: { ...sibling, attributes: { ...sibling.attributes, fileId: 22 } },
+            },
+          },
+        };
+        expect(await readHiveData("persistent")).toEqual(expectedSecond);
+        expect((await query()).find((row) => row.vortex_mod_id === "sibling")!.file_id).toBe("22");
+        await stop();
+        await start(false);
+        expect(await readHiveData("persistent")).toEqual(expectedSecond);
+      } finally {
+        if (getMainPersistor() !== undefined) await queryDone;
+        await stop();
+        fixture.queryDone = undefined;
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+  }
+}
+
+it("command-line reads and removals reach values held only in ancestor JSON rows", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "ancestor-cli-"));
+  const dbPath = path.join(root, currentStatePath);
+  fixture.mainBase = path.resolve(import.meta.dirname, "../build");
+  const output = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  const errors = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+  const application = Object.create(Application.prototype) as {
+    handleGet(paths: string[], directory: string): Promise<void>;
+    handleDel(paths: string[], directory: string): Promise<void>;
+  };
+  try {
+    const persist = await LevelPersist.create(dbPath);
+    await persist.setItem(
+      ["persistent", "mods", "skyrimse"],
+      '{"retained":{"id":"retained"},"healthy":{"id":"healthy"}}',
+    );
+    await persist.close();
+    await application.handleGet(["persistent.mods.skyrimse.retained"], dbPath);
+    expect(output).toHaveBeenCalledWith('persistent.mods.skyrimse.retained = {"id":"retained"}\n');
+    await application.handleDel(["persistent.mods.skyrimse.retained"], dbPath);
+    expect(errors).not.toHaveBeenCalled();
+    const reopened = await LevelPersist.create(dbPath);
+    try {
+      expect(await reopened.readStateValue(["persistent", "mods", "skyrimse"])).toEqual({
+        healthy: { id: "healthy" },
+      });
+    } finally {
+      await reopened.close();
+    }
+  } finally {
+    vi.restoreAllMocks();
+    DuckDBSingleton.getInstance().close();
+    await rm(root, { recursive: true, force: true });
+  }
+});

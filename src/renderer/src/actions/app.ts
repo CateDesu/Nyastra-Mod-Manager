@@ -15,6 +15,11 @@ export const addExtension = createAction("ADD_EXTENSION", (extension: IExtension
   extension,
 }));
 
+export const replaceExtension = createAction(
+  "REPLACE_EXTENSION",
+  (extension: IExtensionState, replaceKeys: string[]) => ({ extension, replaceKeys }),
+);
+
 export const setExtensionEnabled = createAction(
   "SET_EXTENSION_ENABLED",
   (extensionId: string, enabled: boolean) => ({ extensionId, enabled }),

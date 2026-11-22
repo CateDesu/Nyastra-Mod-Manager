@@ -16,7 +16,6 @@ from _flatpak_workflow import (
     resolve_flatpak_paths,
     run_flatpak_builder,
     sync_flatpak_build_inputs,
-    uninstall_user_app,
 )
 
 
@@ -73,8 +72,6 @@ def main() -> None:
     else:
         if args.reinstall and already_installed:
             print(f"Reinstalling {DEFAULT_APP_ID}...")
-            uninstall_user_app(DEFAULT_APP_ID)
-            already_installed = False
 
         should_build = args.reinstall or not build_exists
 
@@ -101,6 +98,7 @@ def main() -> None:
                 repo_dir=paths.repo_dir,
                 remote_name=DEFAULT_REMOTE_NAME,
                 app_id=DEFAULT_APP_ID,
+                reinstall=args.reinstall,
             )
             print(f"\n{DEFAULT_APP_ID} installed successfully!")
         elif not already_installed:
@@ -122,8 +120,10 @@ def main() -> None:
     if args.log:
         run_cmd.append("--env=VORTEX_ENABLE_LOGGING=1")
     run_cmd.append(DEFAULT_APP_ID)
-    if args.command_args:
-        run_cmd.extend(args.command_args)
+    command_args = args.command_args
+    if command_args[:1] == ["--"]:
+        command_args = command_args[1:]
+    run_cmd.extend(command_args)
 
     run_command(run_cmd, cwd=paths.root)
 

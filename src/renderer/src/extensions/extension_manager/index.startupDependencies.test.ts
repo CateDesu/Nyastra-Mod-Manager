@@ -39,7 +39,9 @@ vi.mock("node:fs/promises", async (importOriginal) => {
     rm: (...args: Parameters<typeof original.rm>) =>
       fixture.native("remove", String(args[0]), original.rm(...args)),
     rename: (...args: Parameters<typeof original.rename>) =>
-      fixture.native("rename", String(args[1]), original.rename(...args)),
+      path.basename(String(args[1])).startsWith(".extension.bak-")
+        ? fixture.native("remove", String(args[0]), original.rename(...args))
+        : fixture.native("rename", String(args[1]), original.rename(...args)),
   };
   return { ...wrapped, default: wrapped };
 });

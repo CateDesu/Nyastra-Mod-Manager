@@ -572,7 +572,12 @@ export class NxmProtocol {
   #throwDownloadError(err: unknown): never {
     if (isRateLimited(err)) {
       notifyRateLimited(this.#api);
-      throw err;
+      if (err instanceof HTTPError) throw err;
+      const url =
+        err instanceof NexusHTTPError ? err.url : err instanceof NexusError ? err.request : "";
+      const error = new HTTPError(429, getErrorMessageOrDefault(err), url);
+      if (err instanceof Error) error.stack = err.stack;
+      throw error;
     }
 
     let error = err;

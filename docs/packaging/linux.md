@@ -82,7 +82,7 @@ predate it. These constraints follow GitHub's
 and [workflow token behavior](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow).
 
 Local packaging cleanup runs when rebuilding from a clone. Installed ZIP updates
-remove the previous runtime and abandoned installer build directories only after
+remove the previous runtime and owned abandoned installer build directories only after
 installation succeeds, while still holding the install lock. AppImages and
 downloaded archives outside the build directory remain under the user's control.
 
@@ -99,6 +99,17 @@ Extract the ZIP and run `./install.sh`. The installer copies the runtime into
 `io.github.CateDesu.NyastraModManager.desktop` menu entry. The extracted directory
 can then be removed. A flock prevents concurrent installs, and desktop
 registration failures restore the previous runtime and launcher state.
+The installer recovers journaled interrupted runtime swaps before retrying.
+If an older unjournaled swap left the launcher broken, the installer lists the
+saved runtime paths. Inspect them and select the previous runtime explicitly:
+
+```bash
+./install.sh --recover-runtime /absolute/path/to/.app-previous-PID
+```
+
+This restores only the selected runtime to an absent `app` directory without
+desktop registration. Run the normal installer afterward. Other saved runtimes
+remain untouched, and an existing `app` entry prevents recovery.
 
 Close the program before replacing its runtime. Settings are stored separately
 under `$XDG_CONFIG_HOME/NyastraModManager`. To import an existing Linux profile:
@@ -115,6 +126,20 @@ The import does not read or migrate a Lutris or Wine Windows profile. Copied gam
 extensions use their paths in the Nyastra profile. Earlier imports repair these
 paths on startup while preserving current credentials, staging paths and mod
 enabled states.
+
+Failed imports retain claimed Fluffy files under `.fluffy-rollback-*` because
+another editor may still have the file open. A retry restores a single journaled
+claim only when its directory and file identities still match. Older claims or
+ambiguous copies require an explicit choice before importing older settings.
+Inspect the listed files and restore the one you want:
+
+```bash
+./install.sh --recover-fluffy /absolute/path/to/.fluffy-rollback-XXXXXX/fluffy.json
+```
+
+Recovery refuses an existing destination and keeps the saved file linked for
+late edits. Then retry the import. Reconcile retained copies deliberately after
+closing other editors.
 
 For hardlink deployment, staging and game or mod output must share a filesystem.
 The portable [Linux extension recipe](linux-extensions.md) adapts supported

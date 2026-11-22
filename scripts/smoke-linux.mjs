@@ -89,5 +89,7 @@ try {
       await new Promise((resolve) => child.once("exit", resolve));
     }
   }
+  // Helpers can outlive the launcher and ignore SIGTERM.
+  if (process.platform === "linux") stop("SIGKILL");
   await rm(directory, { recursive: true, force: true });
 }

@@ -48,6 +48,7 @@ vi.mock("@nexusmods/vortex-api", async () => {
   );
   temporal.install();
   const native = rendererRequire("fs-extra");
+  const files = await import("node:fs/promises");
   const { default: PromiseBB } = await import("bluebird");
   const filesystem = {
     copyAsync: (source: string, destination: string, options: any) =>
@@ -61,6 +62,9 @@ vi.mock("@nexusmods/vortex-api", async () => {
   const errors = await vi.importActual<any>("../../../src/shared/src/api/errors");
   return {
     fs: {
+      openAsync: (file: string, flags: string) => PromiseBB.resolve(files.open(file, flags)),
+      fsyncAsync: (handle: any) => PromiseBB.resolve(handle.sync()),
+      closeAsync: (handle: any) => PromiseBB.resolve(handle.close()),
       ...filesystem,
       unlinkAsync: (file: string) => {
         const original = fixture.unlinkError
@@ -241,7 +245,8 @@ it.each([
       events: {
         on: (name: string, handler: (...args: any[]) => unknown) => handlers.set(name, handler),
       },
-      emitAndAwait: vi.fn<() => Promise<void>>(async () => undefined),
+      emitAndAwait: vi.fn<() => Promise<unknown[]>>(async () => [{ settingsBaked: true }]),
+      onStateChange: vi.fn(),
       showErrorNotification: vi.fn<(...args: unknown[]) => void>(),
     },
     registerProfileFeature: vi.fn<(...args: unknown[]) => void>(),
@@ -259,9 +264,9 @@ it.each([
   await operation;
   await drain();
   expect(queue).toEqual([]);
-  expect(context.api.emitAndAwait).toHaveBeenCalledTimes(1);
-  expect(context.api.showErrorNotification).not.toHaveBeenCalled();
   const failed = mode !== "normal" && mode !== "first-use";
+  expect(context.api.emitAndAwait).toHaveBeenCalledTimes(failed ? 0 : 1);
+  expect(context.api.showErrorNotification).not.toHaveBeenCalled();
   expect.soft(util.showError).toHaveBeenCalledTimes(failed ? 1 : 0);
   if (mode.startsWith("denied")) {
     expect(fixture.copies.some((entry) => entry.error?.code === "EACCES")).toBe(true);
@@ -331,7 +336,8 @@ it.each(["missing", "denied"])("preserves outgoing global backups when %s", asyn
       events: {
         on: (name: string, handler: (...args: any[]) => unknown) => handlers.set(name, handler),
       },
-      emitAndAwait: vi.fn<() => Promise<void>>(async () => undefined),
+      emitAndAwait: vi.fn<() => Promise<unknown[]>>(async () => [{ settingsBaked: true }]),
+      onStateChange: vi.fn(),
       showErrorNotification: vi.fn<(...args: unknown[]) => void>(),
     },
     registerProfileFeature: vi.fn<(...args: unknown[]) => void>(),
@@ -349,7 +355,7 @@ it.each(["missing", "denied"])("preserves outgoing global backups when %s", asyn
   await operation;
   await drain();
   expect(queue).toEqual([]);
-  expect(context.api.emitAndAwait).toHaveBeenCalledTimes(2);
+  expect(context.api.emitAndAwait).toHaveBeenCalledTimes(mode === "denied" ? 1 : 2);
   expect(context.api.showErrorNotification).not.toHaveBeenCalled();
   expect.soft(util.showError).toHaveBeenCalledTimes(mode === "denied" ? 1 : 0);
   expect(fixture.copies.some((entry) => entry.error?.code === "EACCES")).toBe(mode === "denied");
@@ -433,7 +439,8 @@ it("drains a held native sibling stat error before public failure", async () => 
       events: {
         on: (name: string, handler: (...args: any[]) => unknown) => handlers.set(name, handler),
       },
-      emitAndAwait: vi.fn<() => Promise<void>>(async () => undefined),
+      emitAndAwait: vi.fn<() => Promise<unknown[]>>(async () => [{ settingsBaked: true }]),
+      onStateChange: vi.fn(),
       showErrorNotification: vi.fn<(...args: unknown[]) => void>(),
     },
     registerProfileFeature: vi.fn<(...args: unknown[]) => void>(),
@@ -501,7 +508,7 @@ it("drains a held native sibling stat error before public failure", async () => 
   expect(
     Object.getOwnPropertyDescriptor(vi.mocked(util.showError).mock.calls[0][2], "error")?.value,
   ).toBe(firstDenied);
-  expect(context.api.emitAndAwait).toHaveBeenCalledTimes(1);
+  expect(context.api.emitAndAwait).not.toHaveBeenCalled();
   expect(context.api.showErrorNotification).not.toHaveBeenCalled();
   expect(callbacks).toBe(1);
   expect(queue).toEqual([]);
@@ -623,7 +630,10 @@ it.each([
         on: (name: string, callback: (...args: unknown[]) => unknown) =>
           handlers.set(name, callback),
       },
-      emitAndAwait: vi.fn<(...args: unknown[]) => Promise<void>>(async () => undefined),
+      emitAndAwait: vi.fn<(...args: unknown[]) => Promise<unknown[]>>(async () => [
+        { settingsBaked: true },
+      ]),
+      onStateChange: vi.fn(),
       showErrorNotification: vi.fn<(...args: unknown[]) => void>(),
     },
     registerProfileFeature: vi.fn<(...args: unknown[]) => void>(),
@@ -644,7 +654,7 @@ it.each([
   expect(fixture.native.size).toBe(0);
   expect(fixture.callbacks.size).toBe(0);
   expect(context.api.showErrorNotification).not.toHaveBeenCalled();
-  expect(context.api.emitAndAwait).toHaveBeenCalledTimes(2);
+  expect(context.api.emitAndAwait).toHaveBeenCalledTimes(scenario.denied ? 1 : 2);
   expect(await readSettingsBytes(path.join(old, optional))).toBe(
     scenario.privatePresent ? privateBytes : null,
   );
@@ -678,4 +688,63 @@ it.each([
   expect(
     errors.map((call) => Object.getOwnPropertyDescriptor(call[2], "error")?.value === denied),
   ).toEqual(scenario.denied ? [true] : []);
+});
+
+it("preserves private settings when leaving a profile using global settings", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "nyastra-settings-global-"));
+  roots.push(root);
+  fixture.documents = path.join(root, "documents");
+  fixture.userData = path.join(root, "data");
+  const game = path.join(fixture.documents, "My Games", "Skyrim Special Edition");
+  const profile = path.join(fixture.userData, "skyrimse", "profiles", "old");
+  await Promise.all([game, profile].map((dir) => mkdir(dir, { recursive: true })));
+  const files = ["Skyrim.ini", "SkyrimPrefs.ini", "SkyrimCustom.ini"];
+  for (const file of files) {
+    await writeFile(path.join(game, file), "live global");
+    await writeFile(path.join(game, file + ".base"), "base global");
+    await writeFile(path.join(profile, file), "saved private");
+  }
+  const state = {
+    settings: {
+      profiles: { activeProfileId: "old" },
+      gameMode: { discovered: { skyrimse: { store: "steam" } } },
+    },
+    persistent: {
+      profiles: {
+        old: { id: "old", gameId: "skyrimse", features: { local_game_settings: false } },
+        target: { id: "target", gameId: "other" },
+      },
+      mods: { skyrimse: {}, other: {} },
+    },
+  };
+  let handler: (...args: any[]) => unknown;
+  init({
+    api: {
+      store: { getState: () => state, dispatch: vi.fn() },
+      getState: () => state,
+      events: {
+        on: (_name: string, callback: typeof handler) => {
+          handler = callback;
+        },
+      },
+      emitAndAwait: async () => [{ settingsBaked: true }],
+      onStateChange: vi.fn(),
+      showErrorNotification: vi.fn(),
+    },
+    registerProfileFeature: () => undefined,
+    registerTest: () => undefined,
+    once: (callback: () => void) => callback(),
+  } as unknown as types.IExtensionContext);
+  const queue: Array<() => PromiseLike<unknown>> = [];
+  handler("target", (callback: () => PromiseLike<unknown>) => queue.push(callback));
+  expect(queue).toHaveLength(1);
+  const operation = queue.shift()();
+  fixture.work.push(operation);
+  await operation;
+  await drain();
+  for (const file of files) {
+    expect.soft(await readFile(path.join(profile, file), "utf8")).toBe("saved private");
+    expect.soft(await readFile(path.join(game, file), "utf8")).toBe("live global");
+  }
+  expect(fixture.copies).toEqual([]);
 });

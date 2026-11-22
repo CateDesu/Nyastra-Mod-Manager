@@ -27,7 +27,7 @@ import type { IDialogResult } from "../../actions/notifications";
 import { addNotification, showDialog } from "../../actions/notifications";
 import { clearUIBlocker, setProgress, setUIBlocker } from "../../actions/session";
 import { log } from "../../logging";
-import type { IExtensionDownloadInfo, IRegisteredExtension } from "../../types/extensions";
+import type { IAvailableExtension, IRegisteredExtension } from "../../types/extensions";
 import type { IExtensionApi, IExtensionContext, ThunkStore } from "../../types/IExtensionContext";
 import type { IGameStored, IState } from "../../types/IState";
 import { relaunch } from "../../util/commandLine";
@@ -52,10 +52,12 @@ import {
 import { getSafe } from "../../util/storeHelper";
 import { truthy } from "../../util/util";
 import { emitGameManaged, emitGameUnmanaged } from "../analytics/mixpanel/gameManageAnalytics";
+import { fetchAvailableExtensions } from "../extension_manager/util";
 import { getGame, getGameStubDownloadInfo } from "../gamemode_management/util/getGame";
 import { ensureStagingDirectory } from "../mod_management/stagingDirectory";
 import { purgeMods } from "../mod_management/util/deploy";
 import { NoDeployment } from "../mod_management/util/exceptions";
+import { nexusGameId } from "../nexus_integration/util/convertGameId";
 import {
   removeProfile,
   setProfile,
@@ -82,6 +84,12 @@ const profileFiles: {
 } = {};
 
 const profileFeatures: IProfileFeature[] = [];
+
+declare module "../../types/IExtensionContext" {
+  interface ApiEvents {
+    "manage-game-for-install": (gameId: string) => boolean;
+  }
+}
 
 function profilePath(profile: IProfile): string {
   return path.join(getVortexPath("userData"), profile.gameId, "profiles", profile.id);
@@ -174,10 +182,10 @@ function activateGame(store: ThunkStore<IState>, gameId: string): PromiseBB<void
     undefined,
   );
   const profile = getSafe(state, ["persistent", "profiles", profileId], undefined);
-  if (profileId === undefined || profile === undefined) {
+  if (profile?.gameId !== gameId || profile.pendingRemove) {
     const profiles = getSafe(state, ["persistent", "profiles"], []);
     const gameProfiles: IProfile[] = Object.keys(profiles)
-      .filter((id: string) => profiles[id].gameId === gameId)
+      .filter((id: string) => profiles[id].gameId === gameId && !profiles[id].pendingRemove)
       .map((id: string) => profiles[id]);
     return store
       .dispatch(
@@ -200,6 +208,8 @@ function activateGame(store: ThunkStore<IState>, gameId: string): PromiseBB<void
           const selectedId = Object.keys(dialogResult.input).find(
             (id: string) => dialogResult.input[id],
           );
+          const selected = profileById(store.getState(), selectedId);
+          if (selected?.gameId !== gameId || selected.pendingRemove) return;
           log("info", "user selected profile", { selectedId });
           store.dispatch(setNextProfile(selectedId));
         }
@@ -541,6 +551,7 @@ function genOnProfileChange(
 }
 
 function manageGameDiscovered(api: IExtensionApi, gameId: string) {
+  const gamePath = discoveryByGame(api.getState(), gameId)?.path;
   const profileId = shortid();
   // initialize the staging directory.
   // It's not great that this is here, the code would better fit into mod_management
@@ -549,6 +560,13 @@ function manageGameDiscovered(api: IExtensionApi, gameId: string) {
   // to access it.
   return ensureStagingDirectory(api, undefined, gameId)
     .then(() => {
+      const state = api.getState();
+      if (
+        !gamePath ||
+        discoveryByGame(state, gameId)?.path !== gamePath ||
+        state.session.gameMode.disabled?.[gameId] !== undefined
+      )
+        return false;
       log("info", "user managing game for the first time", { gameId });
       api.store.dispatch(
         setProfile({
@@ -561,6 +579,7 @@ function manageGameDiscovered(api: IExtensionApi, gameId: string) {
       );
       api.store.dispatch(setNextProfile(profileId));
       emitGameManaged(api, gameId);
+      return true;
     })
     .catch((err) => {
       const instPath = installPathForGame(api.store.getState(), gameId);
@@ -568,146 +587,134 @@ function manageGameDiscovered(api: IExtensionApi, gameId: string) {
         allowReport: false,
         message: instPath,
       });
+      return false;
     });
 }
 
-function manageGameUndiscovered(api: IExtensionApi, gameId: string): PromiseBB<void> {
-  let state: IState = api.store.getState();
-  const knownGames = state.session.gameMode.known;
-  const gameStored = knownGames.find((game) => game.id === gameId);
-
-  if (gameStored === undefined) {
-    const stubDownloadInfo = getGameStubDownloadInfo(gameId);
-    let extension: IExtensionDownloadInfo;
-    if (stubDownloadInfo !== undefined) {
-      extension = stubDownloadInfo;
-    } else {
-      extension = state.session.extensions.available.find(
-        (ext) => ext?.gameDomain === gameId || ext.name === gameId,
-      );
-    }
-    if (extension === undefined) {
-      throw new ProcessCanceled(`Invalid game id "${gameId}"`);
-    }
-
-    return api
-      .showDialog(
-        "question",
-        "Game support not installed",
-        {
-          text:
-            "Support for this game is provided through an extension. To use it you have to " +
-            "download that extension and restart Vortex.",
-        },
-        [
-          { label: "Cancel" },
-          {
-            label: "Download",
-            action: () => {
-              api.store.dispatch(
-                setUIBlocker(
-                  "installing-game",
-                  "download",
-                  "Installing Game, Vortex will restart upon completion.",
-                  true,
-                ),
-              );
-
-              api.ext
-                .ensureLoggedIn()
-                .then(() => api.emitAndAwait("install-extension", extension))
-                .then((results: boolean[]) => {
-                  if (results.includes(true)) {
-                    relaunch(["--game", extension.name]);
-                  }
-                })
-                .finally(() => {
-                  api.store.dispatch(clearUIBlocker("installing-game"));
-                })
-                .catch((err) => {
-                  if (err instanceof UserCanceled) {
-                    return PromiseBB.resolve();
-                  }
-
-                  const allowReport =
-                    !(err instanceof ProcessCanceled) &&
-                    !(err instanceof ServiceTemporarilyUnavailable);
-                  api.showErrorNotification("Log-in failed", err, {
-                    id: "failed-get-nexus-key",
-                    allowReport,
-                  });
-                });
-            },
-          },
-        ],
-      )
-      .then(() => PromiseBB.resolve());
+async function offerGameExtension(api: IExtensionApi, gameId: string, forInstall: boolean) {
+  const stub = getGameStubDownloadInfo(gameId);
+  const game = getGame(gameId);
+  const domain = nexusGameId(game, gameId);
+  const match = (catalog: IAvailableExtension[]) => {
+    const games = catalog.filter((ext) => ext?.type === "game" && ext.modId > 0 && ext.fileId > 0);
+    return (
+      games.find((ext) => ext.gameDomain === gameId) ??
+      games.find((ext) => ext.gameDomain === domain) ??
+      catalog.find(
+        (ext) =>
+          stub &&
+          ext?.modId === stub.modId &&
+          ext.fileId > 0 &&
+          ext.type == null &&
+          (ext.gameDomain == null || ext.gameDomain === domain),
+      ) ??
+      games.find((ext) => ext.modId === stub?.modId && ext.gameDomain == null) ??
+      games.find((ext) => ext.gameDomain === undefined && ext.name === gameId)
+    );
+  };
+  const stubProvider = stub?.modId > 0 && stub.fileId > 0 ? stub : undefined;
+  const catalogEntry =
+    match(api.getState().session.extensions.available) ??
+    (await fetchAvailableExtensions(api, true).then(match, (err) => {
+      if (stubProvider === undefined) throw err;
+      return undefined;
+    }));
+  const extension = catalogEntry ?? stubProvider;
+  if (extension === undefined) {
+    throw new ProcessCanceled(
+      `No game support extension is available for "${game?.name ?? gameId}".`,
+    );
   }
 
-  return api
-    .showDialog(
+  const result = await api.showDialog(
+    "question",
+    "Game support not installed",
+    {
+      text:
+        'To manage "{{gameName}}", download its game support extension and restart Vortex.' +
+        (forInstall
+          ? " After game setup, open All downloads and choose Install for the downloaded archive."
+          : ""),
+      parameters: { gameName: game?.name ?? catalogEntry?.gameName ?? extension.name },
+    },
+    [{ label: "Cancel" }, { label: "Download" }],
+  );
+  if (result.action !== "Download") return;
+
+  api.store.dispatch(
+    setUIBlocker(
+      "installing-game",
+      "download",
+      "Installing Game, Vortex will restart upon completion.",
+      true,
+    ),
+  );
+  try {
+    await api.ext.ensureLoggedIn();
+    const results = await api.emitAndAwait("install-extension", extension);
+    if (results.includes(true)) {
+      relaunch(["--game", stub !== undefined ? gameId : extension.name]);
+    }
+  } finally {
+    api.store.dispatch(clearUIBlocker("installing-game"));
+  }
+}
+
+async function manageGame(
+  api: IExtensionApi,
+  gameId: string,
+  forInstall: boolean,
+): Promise<boolean> {
+  await checkOverridden(api, gameId);
+  const game = gameById(api.getState(), gameId);
+  if (game === undefined) {
+    await offerGameExtension(api, gameId, forInstall);
+    return false;
+  }
+
+  await api.emitAndAwait("discover-game", gameId);
+  await checkOverridden(api, gameId);
+  if (discoveryByGame(api.getState(), gameId)?.path === undefined) {
+    const result = await api.showDialog(
       "question",
       "Game not discovered",
       {
-        text:
-          '"{{gameName}}" hasn\'t been automatically discovered, you will have to set the game ' +
-          "folder manually.",
-        parameters: {
-          gameName: gameStored.name,
-        },
+        text: '"{{gameName}}" was not discovered. Select its game folder to continue.',
+        parameters: { gameName: game.name },
       },
-      [{ label: "Continue" }],
-    )
-    .then(
-      () =>
-        new PromiseBB((resolve, reject) => {
-          api.events.emit("manually-set-game-location", gameId, (err: Error) => {
-            if (err !== null) {
-              return reject(err);
-            }
-            return resolve();
-          });
-        }),
-    )
-    .then(() => {
-      state = api.store.getState();
-
-      const discovered = state.settings.gameMode.discovered[gameId];
-      if (discovered?.path === undefined) {
-        // this probably means the "manually set location" was canceled
-        return PromiseBB.resolve();
-      }
-
-      return manageGameDiscovered(api, gameId);
-    })
-    .catch((err) => {
-      if (!(err instanceof UserCanceled) && !(err instanceof ProcessCanceled)) {
-        api.showErrorNotification("Failed to manage game", err);
-      }
-      return;
+      [{ label: "Cancel" }, { label: "Continue" }],
+    );
+    if (result.action !== "Continue") return false;
+    await new Promise<void>((resolve, reject) => {
+      api.events.emit("manually-set-game-location", gameId, (err: Error) => {
+        if (err != null) reject(err);
+        else resolve();
+      });
     });
-}
-
-function manageGame(api: IExtensionApi, gameId: string): PromiseLike<void> {
-  const state = api.store.getState() as IState;
-  const profiles = state.persistent.profiles || {};
-
-  // Discovery state outlives the registering extension. If the extension
-  // didn't load (missing dependency, exception, disabled) getGame is
-  // undefined and activating would create an orphan profile.
-  if (
-    state.settings.gameMode?.discovered?.[gameId]?.path !== undefined &&
-    getGame(gameId) !== undefined
-  ) {
-    const profile = Object.values(profiles).find((prof) => prof.gameId === gameId);
-    if (profile !== undefined) {
-      return activateGame(api.store, gameId);
-    } else {
-      return manageGameDiscovered(api, gameId);
-    }
-  } else {
-    return manageGameUndiscovered(api, gameId);
+    if (discoveryByGame(api.getState(), gameId)?.path === undefined) return false;
+  } else if (forInstall) {
+    const result = await api.showDialog(
+      "question",
+      "Manage game",
+      {
+        text: 'Switch to "{{gameName}}" to finish setup? Your downloaded archive will be available in Downloads.',
+        parameters: { gameName: game.name },
+      },
+      [{ label: "Cancel" }, { label: "Manage" }],
+    );
+    if (result.action !== "Manage") return false;
   }
+
+  const profiles = api.getState().persistent.profiles;
+  if (
+    !Object.values(profiles).some((profile) => profile.gameId === gameId && !profile.pendingRemove)
+  ) {
+    return manageGameDiscovered(api, gameId);
+  }
+  await activateGame(api.store, gameId);
+  const current = api.getState();
+  const nextProfile = profileById(current, current.settings.profiles.nextProfileId);
+  return nextProfile?.gameId === gameId && !nextProfile.pendingRemove;
 }
 
 function removeProfileImpl(api: IExtensionApi, profileId: string) {
@@ -865,7 +872,7 @@ function checkOverridden(api: IExtensionApi, gameId: string): PromiseBB<void> {
   const state = api.getState();
   const { disabled } = state.session.gameMode;
 
-  if (disabled[gameId] === undefined) {
+  if (disabled?.[gameId] === undefined) {
     return PromiseBB.resolve();
   }
 
@@ -875,7 +882,7 @@ function checkOverridden(api: IExtensionApi, gameId: string): PromiseBB<void> {
       "Game disabled",
       {
         text: "A different game extension is currently managing that game directory.",
-        message: gameById(state, disabled[gameId]).name,
+        message: gameById(state, disabled[gameId])?.name ?? disabled[gameId],
       },
       [{ label: "Cancel" }],
     )
@@ -883,6 +890,25 @@ function checkOverridden(api: IExtensionApi, gameId: string): PromiseBB<void> {
 }
 
 function init(context: IExtensionContext): boolean {
+  const managingGames = new Map<string, Promise<boolean>>();
+  const startManaging = (gameId: string, forInstall = false): Promise<boolean> => {
+    const pending = managingGames.get(gameId);
+    if (pending !== undefined) return pending;
+
+    const operation = manageGame(context.api, gameId, forInstall)
+      .catch((err) => {
+        if (!(err instanceof UserCanceled)) {
+          const allowReport =
+            !(err instanceof ProcessCanceled) && !(err instanceof ServiceTemporarilyUnavailable);
+          context.api.showErrorNotification("Failed to manage game", err, { allowReport });
+        }
+        return false;
+      })
+      .finally(() => managingGames.delete(gameId));
+    managingGames.set(gameId, operation);
+    return operation;
+  };
+
   context.registerReducer(["persistent", "profiles"], profilesReducer);
   context.registerReducer(["settings", "profiles"], settingsReducer);
   context.registerReducer(["session", "profileTransfer"], transferSetupReducer);
@@ -922,26 +948,7 @@ function init(context: IExtensionContext): boolean {
 
       context.api.events.emit("analytics-track-event", "Games", "Start managing", gameId);
 
-      context.api
-        .emitAndAwait("discover-game", gameId)
-        .then(() => checkOverridden(context.api, gameId))
-        .then(() => {
-          const state = context.api.getState();
-          // Mirrors the guard in manageGame: discovery can outlive the
-          // registering extension.
-          const manageFunc =
-            state.settings.gameMode.discovered[gameId]?.path !== undefined &&
-            getGame(gameId) !== undefined
-              ? manageGameDiscovered
-              : manageGameUndiscovered;
-
-          manageFunc(context.api, gameId);
-        })
-        .catch((err) => {
-          if (!(err instanceof UserCanceled)) {
-            context.api.showErrorNotification("Failed to manage game", err);
-          }
-        });
+      void startManaging(gameId);
     },
   );
 
@@ -1080,6 +1087,8 @@ function init(context: IExtensionContext): boolean {
     const store = context.api.store;
 
     addDescriptionFeature();
+
+    context.api.onAsync("manage-game-for-install", (gameId) => startManaging(gameId, true));
 
     context.api.events.on("activate-game", (gameId: string) => {
       activateGame(store, gameId);
@@ -1271,7 +1280,7 @@ function init(context: IExtensionContext): boolean {
             commandLine.profile,
           );
         }
-      } else if (commandLine.game !== undefined && known.length > 0) {
+      } else if (commandLine.game !== undefined) {
         // the game specified on the command line may be a game id or an extension
         // name, because at the time we download an extension we don't actually know
         // the game id yet.
@@ -1282,10 +1291,18 @@ function init(context: IExtensionContext): boolean {
           return prevExt;
         }, {});
 
-        const game = known.find(
-          (iter) =>
-            iter.id === commandLine.game || extPathLookup[iter.extensionPath] === commandLine.game,
+        const providers = known.filter(
+          (iter) => extPathLookup[iter.extensionPath] === commandLine.game,
         );
+        const aliases = known.filter(
+          (iter) =>
+            iter.details?.nexusPageId === commandLine.game ||
+            iter.details?.nxmLinkId === commandLine.game,
+        );
+        const game =
+          known.find((iter) => iter.id === commandLine.game) ??
+          (aliases.length === 1 ? aliases[0] : undefined) ??
+          (providers.length === 1 ? providers[0] : undefined);
 
         if (game !== undefined) {
           // Wait for discovery to populate before deciding undiscovered vs
@@ -1293,11 +1310,16 @@ function init(context: IExtensionContext): boolean {
           // startQuickDiscovery in gamemode_management.once() and pops the
           // "Game not discovered" dialog even though discovery would have
           // succeeded.
-          context.api
-            .emitAndAwait("discover-game", game.id)
-            .then(() => manageGame(context.api, game.id));
+          void startManaging(game.id);
         } else {
-          log("warn", "game specified on command line not found", {
+          context.api.sendNotification({
+            type: "warning",
+            title: "Game setup incomplete",
+            message:
+              'Open Games and select Manage for the intended game. The requested game "{{game}}" could not be identified.',
+            replace: { game: commandLine.game },
+          });
+          log("warn", "game specified on command line could not be identified", {
             game: commandLine.game,
           });
         }

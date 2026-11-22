@@ -99,14 +99,15 @@ export function rendererCallback<C extends keyof CallbackChannels>(
     collationId: number,
     ...args: Parameters<CallbackChannels[C]>
   ) => {
-    handler(collationId, ...args)
+    Promise.resolve()
+      .then(() => handler(collationId, ...args))
       .then((value) => {
         const reply: WireReply<typeof value> = { data: value };
         ipcRenderer.send(`callback:${channel}`, collationId, reply);
         return undefined;
       })
       .catch((err: unknown) => {
-        const reply: WireReply<unknown> = { error: toWireError(err) };
+        const reply: WireReply<unknown> = { error: toWireError(err, errorOriginTracker) };
         ipcRenderer.send(`callback:${channel}`, collationId, reply);
       });
   };

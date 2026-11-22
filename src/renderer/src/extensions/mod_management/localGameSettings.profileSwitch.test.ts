@@ -90,9 +90,17 @@ test("a failed profile switch drains every INI chain before the core advances", 
   const nativeErrors: NodeJS.ErrnoException[] = [];
   const pending: PromiseLike<unknown>[] = [];
   let first = true;
-  const api = { ...h.api, store: h.api.store, getState: h.getState };
+  const api = {
+    ...h.api,
+    store: h.api.store,
+    getState: h.getState,
+    emitAndAwait: async () => [{ settingsBaked: true }],
+  };
   const vortex = {
     fs: {
+      openAsync: (file, flags) => Bluebird.resolve(fs.promises.open(file, flags)),
+      fsyncAsync: (handle) => Bluebird.resolve(handle.sync()),
+      closeAsync: (handle) => Bluebird.resolve(handle.close()),
       copyAsync: (src: string, dst: string, opts: any) =>
         Bluebird.resolve(native.copy(src, dst, opts)).catch((e) => {
           nativeErrors.push(e);

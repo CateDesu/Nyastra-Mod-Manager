@@ -16,10 +16,11 @@ type MockLevelPersist = {
     run: ReturnType<typeof vi.fn>;
     runAndReadAll: ReturnType<typeof vi.fn>;
   };
-  beginTransaction: ReturnType<typeof vi.fn>;
-  commitTransaction: ReturnType<typeof vi.fn>;
-  rollbackTransaction: ReturnType<typeof vi.fn>;
+  beginTransaction: ReturnType<typeof vi.fn<() => Promise<void>>>;
+  commitTransaction: ReturnType<typeof vi.fn<() => Promise<void>>>;
+  rollbackTransaction: ReturnType<typeof vi.fn<() => Promise<void>>>;
   getDirtyTables: ReturnType<typeof vi.fn>;
+  withTransaction<T>(fn: () => Promise<T>): Promise<T>;
 };
 
 function createMockLevelPersist(): MockLevelPersist & LevelPersist {
@@ -34,6 +35,17 @@ function createMockLevelPersist(): MockLevelPersist & LevelPersist {
     commitTransaction: vi.fn().mockResolvedValue(undefined),
     rollbackTransaction: vi.fn().mockResolvedValue(undefined),
     getDirtyTables: vi.fn().mockResolvedValue([]),
+    withTransaction: async <T>(fn: () => Promise<T>): Promise<T> => {
+      await mock.beginTransaction();
+      try {
+        const result = await fn();
+        await mock.commitTransaction();
+        return result;
+      } catch (error) {
+        await mock.rollbackTransaction();
+        throw error;
+      }
+    },
   };
   return mock as unknown as MockLevelPersist & LevelPersist;
 }

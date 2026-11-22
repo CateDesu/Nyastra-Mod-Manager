@@ -40,8 +40,16 @@ import { suppressNotification } from "./actions/notificationSettings";
 import { setExtensionLoadFailures } from "./actions/session";
 import { setOptionalExtensions } from "./extensions/extension_manager/actions";
 import { parseExtensionInfo } from "./extensions/extension_manager/extensionInfo";
+import {
+  canonicalDestination,
+  hasUnresolvedExtensionImport,
+  isLinkedImportDirectory,
+  isImportedProfile,
+  isProfileExtensionPath,
+} from "./extensions/extension_manager/importedExtensionPaths";
 import { extensionStateFromScan, findInstalled } from "./extensions/extension_manager/queries";
 import _sessionReducer from "./extensions/extension_manager/reducers";
+import { recoverReplacements } from "./extensions/extension_manager/replacementRecovery";
 import type { IModReference, IModRepoId } from "./extensions/mod_management/types/IMod";
 import { IPCDownloadAdapter } from "./IPCDownloadAdapter";
 import { log } from "./logging";
@@ -879,37 +887,7 @@ class ExtensionManager {
       }
     }
 
-    // Check for extensions marked for removal
-    this.mPendingRemoves = [];
-    Object.entries(this.mExtensionState)
-      .filter(([_, entry]) => entry.remove)
-      .forEach(([extId, entry]) => {
-        const extPath = entry.path;
-        if (extPath === undefined) {
-          // Corrupted/legacy entry with no path (only `remove: true` was set,
-          // typically by the now-fixed outdated-extension path writing under
-          // the folder basename). Nothing to delete on disk — just queue
-          // forgetExtension so the entry stops tripping this branch on every
-          // boot and the state self-heals.
-          log("info", "removing orphaned remove-flagged extension entry", { extId });
-          this.mPendingRemoves.push(extId);
-          return;
-        }
-        log("info", "removing", extPath);
-        try {
-          fs.removeSync(extPath);
-          this.mPendingRemoves.push(extId);
-        } catch (err) {
-          // On Windows the previous renderer process may not have fully released
-          // file handles yet despite waitForRendererExit in the main process.
-          // Log and continue — the remove flag stays in state so it retries on
-          // next startup.
-          log("warn", "failed to remove extension, will retry on next startup", {
-            extId,
-            error: getErrorMessageOrDefault(err),
-          });
-        }
-      });
+    this.removePendingExtensions();
 
     // Dynamic require to prevent TypeScript from analyzing StyleManager during api build
     this.mStyleManager = new StyleManager();
@@ -964,6 +942,51 @@ class ExtensionManager {
     }
 
     this.initExtensions();
+  }
+
+  private removePendingExtensions(): void {
+    const recoveryBlocked = recoverReplacements(
+      path.join(getVortexPath("userData"), "plugins"),
+      this.mExtensionState,
+    );
+
+    // Check for extensions marked for removal
+    this.mPendingRemoves = [];
+    Object.entries(this.mExtensionState)
+      .filter(([_, entry]) => entry.remove)
+      .forEach(([extId, entry]) => {
+        const extPath = entry.path;
+        if (extPath === undefined) {
+          // Corrupted/legacy entry with no path (only `remove: true` was set,
+          // typically by the now-fixed outdated-extension path writing under
+          // the folder basename). Nothing to delete on disk — just queue
+          // forgetExtension so the entry stops tripping this branch on every
+          // boot and the state self-heals.
+          log("info", "removing orphaned remove-flagged extension entry", { extId });
+          this.mPendingRemoves.push(extId);
+          return;
+        }
+        if (recoveryBlocked.size > 0 && recoveryBlocked.has(canonicalDestination(extPath))) return;
+        if (
+          isImportedProfile(getVortexPath("userData")) &&
+          !isProfileExtensionPath(getVortexPath("userData"), extPath)
+        )
+          return;
+        log("info", "removing", extPath);
+        try {
+          fs.removeSync(extPath);
+          this.mPendingRemoves.push(extId);
+        } catch (err) {
+          // On Windows the previous renderer process may not have fully released
+          // file handles yet despite waitForRendererExit in the main process.
+          // Log and continue — the remove flag stays in state so it retries on
+          // next startup.
+          log("warn", "failed to remove extension, will retry on next startup", {
+            extId,
+            error: getErrorMessageOrDefault(err),
+          });
+        }
+      });
   }
 
   /** Write app-hive operations directly, for repairs whose dispatch does not reach disk. */
@@ -2809,9 +2832,21 @@ class ExtensionManager {
       return [];
     }
 
+    if (!extension.bundled && isLinkedImportDirectory(extension.path)) return [];
+    const unresolvedImport =
+      !extension.bundled && hasUnresolvedExtensionImport(getVortexPath("userData"));
+    const blocked = extension.bundled
+      ? new Set<string>()
+      : recoverReplacements(extension.path, this.mExtensionState);
     const res = fs
       .readdirSync(extension.path)
-      .filter((name) => fs.statSync(path.join(extension.path, name)).isDirectory())
+      .filter(
+        (name) =>
+          blocked.size === 0 || !blocked.has(canonicalDestination(path.join(extension.path, name))),
+      )
+      .filter((name) =>
+        fs.statSync(path.join(extension.path, name), { throwIfNoEntry: false })?.isDirectory(),
+      )
       .filter((name) => {
         // Skip transient directories left behind by the extension installer/updater:
         // `*.installing` / `*.7z.installing` are in-progress installs, `*.bak-*` are
@@ -2826,6 +2861,7 @@ class ExtensionManager {
       .reduce((prev: Record<string, IRegisteredExtension>, directoryName: string) => {
         const extensionPath = path.join(extension.path, directoryName);
         const installedExtension = findInstalled(this.mExtensionState, { path: extensionPath });
+        if (unresolvedImport && installedExtension === undefined) return prev;
 
         if (installedExtension && !installedExtension.extension.enabled) {
           log("debug", "extension disabled", { name: directoryName });
@@ -3021,11 +3057,20 @@ class ExtensionManager {
   ): IRegisteredExtension[] {
     const userPath = path.join(getVortexPath("userData"), "plugins");
 
+    const blocked = recoverReplacements(userPath, this.mExtensionState);
+    const unresolvedImport = hasUnresolvedExtensionImport(getVortexPath("userData"));
+
     // 1. Load from persisted state by path (primary source)
     const result: IRegisteredExtension[] = [];
     const loadedFromState = new Set<string>();
     for (const [extId, state] of Object.entries(this.mExtensionState)) {
-      if (state.remove) continue;
+      if (
+        state.remove ||
+        (state.path !== undefined &&
+          blocked.size > 0 &&
+          blocked.has(canonicalDestination(state.path)))
+      )
+        continue;
       // no lookup matches a path-less entry; a scan replaces it, or it goes
       if (state.path === undefined) {
         this.mPendingRemoves.push(extId);
@@ -3033,6 +3078,7 @@ class ExtensionManager {
       }
       // ahead of the skips below, so a gone folder is cleaned up either way
       if (!fs.existsSync(state.path)) {
+        if (unresolvedImport) continue;
         this.mPendingRemoves.push(extId);
         continue;
       }

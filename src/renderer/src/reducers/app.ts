@@ -33,24 +33,28 @@ function updateExtension(
   };
 }
 
+function storeExtension(state: IApp, extension: IExtensionState, replaceKeys: string[] = []): IApp {
+  const id = shortid();
+  return {
+    ...state,
+    extensions: {
+      ...Object.fromEntries(
+        Object.entries(state.extensions).filter(([key]) => !replaceKeys.includes(key)),
+      ),
+      [id]: extension,
+    },
+  };
+}
+
 export const appReducer = actionsToReducerSpec(
   defaultState,
   actions,
   {
     setStateVersion: (state, payload) => ({ ...state, version: payload }),
     setApplicationVersion: (state, payload) => ({ ...state, appVersion: payload }),
-    addExtension: (state, payload) => {
-      const { extension } = payload;
-      const id = shortid();
-
-      return {
-        ...state,
-        extensions: {
-          ...state.extensions,
-          [id]: extension,
-        },
-      };
-    },
+    addExtension: (state, payload) => storeExtension(state, payload.extension),
+    replaceExtension: (state, payload) =>
+      storeExtension(state, payload.extension, payload.replaceKeys),
     setExtensionEnabled: (state, payload) =>
       updateExtension(state, payload.extensionId, { enabled: payload.enabled }),
     setExtensionVersion: (state, payload) =>
