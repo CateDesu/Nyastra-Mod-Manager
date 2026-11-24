@@ -1,21 +1,25 @@
 # Nyastra's Mod Manager Linux testing preview
 
-Version v1.02. This is an independent Linux-only Vortex fork.
+Version v1.03. This is an independent Linux-only Vortex fork.
 
-This preview updates the bundled archive tool to 7-Zip 26.05, Electron to 44.9.3
-and affected runtime dependencies. AppImage startup keeps the current directory
-out of its default library search path. Electron still awaits the Node 24.22.1
-security fixes. The separate build runtime already uses Node 24.22.1.
+This preview improves game setup, mod deployment, Nexus downloads and Linux
+profile recovery. Installer recovery preserves the saved runtime if another
+directory appears at the destination. The translation update preserves legacy
+plurals in bundled translations and extension packs.
+
+The preview bundles 7-Zip 26.05 and Electron 44.9.3. The AppImage launcher keeps
+the current directory out of its default library search path. The bundled
+Electron runtime still awaits the Node 24.22.1 security fixes.
 
 Source for these binaries:
-https://github.com/CateDesu/Nyastra-Mod-Manager/tree/v2.9.2
+https://github.com/CateDesu/Nyastra-Mod-Manager/tree/v2.9.3
 
 Download the ZIP, extract it and run `./install.sh`. The user installer copies the
 runtime to `~/.local/share/nyastra-mod-manager/app` and registers the menu entry
 and Nexus Mods `nxm:` download links. No separate Node installation is needed.
 AppImage and Debian packages are also provided as testing artifacts.
 
-Both ZIP downloads contain the same v1.02 program. The ZIP named `2.9.2` keeps
+Both ZIP downloads contain the same v1.03 program. The ZIP named `2.9.3` keeps
 update checks working in earlier `linux.3` installations. Earlier `linux.2`
 installations need to install this release to receive update notifications.
 
