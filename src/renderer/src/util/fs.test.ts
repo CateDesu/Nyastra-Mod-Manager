@@ -1,4 +1,5 @@
 import PromiseBB from "bluebird";
+import type { TFunction } from "i18next";
 import { describe, it, expect, vi } from "vitest";
 
 let mockData: Buffer;
@@ -73,10 +74,7 @@ describe("forcePerm", () => {
       path: "/nonexistent/vortex-test",
     });
     await expect(
-      fs.forcePerm(
-        (input: string) => input,
-        () => PromiseBB.reject(denied),
-      ),
+      fs.forcePerm(((input: string) => input) as TFunction, () => PromiseBB.reject(denied)),
     ).rejects.toThrow("canceled by user");
     expect(showMessageBox.mock.calls[0][0].buttons).toEqual(["Cancel", "Retry"]);
     vi.unstubAllGlobals();

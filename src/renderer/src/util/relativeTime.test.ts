@@ -1,8 +1,9 @@
+import type { TFunction } from "i18next";
 import { describe, it, expect } from "vitest";
 
 import relativeTime from "./relativeTime";
 
-const t = (key: unknown) => key;
+const t = ((key: string) => key) as TFunction;
 
 describe("relativeTime", () => {
   it("returns a time value", function () {

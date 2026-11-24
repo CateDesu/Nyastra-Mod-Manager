@@ -1,5 +1,10 @@
 # How to Properly Use i18n in Vortex
 
+## TypeScript imports
+
+Import `TFunction` from `i18next`. Import React hooks and components from
+`react-i18next`.
+
 ## The Right Way
 
 ### 1. Determine the Namespace

@@ -1,4 +1,5 @@
 import { render } from "@testing-library/react";
+import type { TFunction } from "i18next";
 import * as PropTypes from "prop-types";
 import * as React from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -43,7 +44,7 @@ function renderWith(locale: string, value: string = "") {
       <DateTimeFilterComponent
         filter={{ comparison: "eq", value }}
         attributeId="installed"
-        t={(input: string) => input}
+        t={((input: string) => input) as TFunction}
         onSetFilter={vi.fn()}
         domRef={() => undefined}
       />

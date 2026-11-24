@@ -1,6 +1,6 @@
 import { mdiFolderPlus, mdiUpdate } from "@mdi/js";
+import type { TFunction } from "i18next";
 import React from "react";
-import type { TFunction } from "react-i18next";
 
 import { Button } from "@/ui/components/button/Button";
 import { Typography } from "@/ui/components/typography/Typography";

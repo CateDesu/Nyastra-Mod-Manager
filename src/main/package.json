@@ -284,6 +284,7 @@
     "graphlib": "catalog:",
     "i18next": "catalog:",
     "i18next-fs-backend": "catalog:",
+    "i18next-v4-format-converter": "catalog:",
     "icon-extract": "workspace:*",
     "iconv-lite": "catalog:",
     "immutability-helper": "catalog:",

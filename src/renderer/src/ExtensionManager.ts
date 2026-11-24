@@ -12,6 +12,7 @@ import PromiseBB from "bluebird";
 import type { OpenDialogOptions, SaveDialogOptions } from "electron";
 import * as fs from "fs-extra";
 import * as fuzz from "fuzzball";
+import type { TOptions } from "i18next";
 import JsonSocket from "json-socket";
 import * as _ from "lodash";
 import type { IHashResult, ILookupResult, IModInfo } from "modmeta-db";
@@ -108,8 +109,7 @@ import {
 import { disableErrorReport, isOutdated, recordErrorSpan } from "./util/errorHandling";
 import * as fsVortex from "./util/fs";
 import getVortexPath from "./util/getVortexPath";
-import type { i18n } from "./util/i18n";
-import { TString } from "./util/i18n";
+import { laterT, TString, type i18n, type TFunction } from "./util/i18n";
 import lazyRequire from "./util/lazyRequire";
 import { showError } from "./util/message";
 import { deregisterProtocolHandler, registerProtocolHandler } from "./util/protocolRegistration";
@@ -791,12 +791,12 @@ class ExtensionManager {
       selectExecutable: this.selectExecutable,
       selectDir: this.selectDir,
       events: this.mEventEmitter,
-      translate: (input, options?) => {
+      translate: ((input: string | string[], options?: TOptions | string) => {
         if (this.mTranslator == null) {
           return Array.isArray(input) ? input[0].toString() : input.toString();
         }
-        if (options == null) {
-          options = {};
+        if (typeof options === "string") {
+          return this.mTranslator.t(input, options);
         }
         // This is a namespace key, use new separators.
         if (options?.isNamespaceKey) {
@@ -808,8 +808,8 @@ class ExtensionManager {
         }
         // Not a namespace key, use old separators.
         return this.mTranslator.t(input, options);
-      },
-      laterT: (input, options?) => new TString(input, options, "common"),
+      }) as TFunction,
+      laterT,
       locale: () => this.mTranslator.language,
       getI18n: () => this.mTranslator,
       getPath: this.getPath,

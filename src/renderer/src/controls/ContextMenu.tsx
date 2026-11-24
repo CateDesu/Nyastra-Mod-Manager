@@ -280,7 +280,7 @@ class ContextMenu extends ComponentEx<IProps, IComponentState> {
 
     const id = `${instanceId || "1"}_${index}`;
 
-    const tf = t ?? ((input) => input);
+    const tf = t ?? (((input: string) => input) as TFunction);
 
     if (action.icon === null && action.component === undefined && action.action === undefined) {
       return (

@@ -35,4 +35,6 @@ class FeedbackView extends ComponentEx<{}, {}> {
   }
 }
 
-export default withTranslation(["common"])(FeedbackView);
+const TranslatedFeedbackView: React.ComponentType = withTranslation(["common"])(FeedbackView);
+
+export default TranslatedFeedbackView;

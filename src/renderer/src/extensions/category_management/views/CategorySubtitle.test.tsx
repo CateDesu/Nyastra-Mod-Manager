@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
+import type { TFunction } from "i18next";
 import React from "react";
-import type { TFunction } from "react-i18next";
 import { describe, expect, it } from "vitest";
 
 import CategorySubtitle from "./CategorySubtitle";

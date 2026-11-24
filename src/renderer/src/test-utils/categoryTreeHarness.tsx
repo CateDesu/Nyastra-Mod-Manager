@@ -9,6 +9,7 @@
  * broken (cycle, dangling parent) stays in state but can never be displayed.
  */
 import { render } from "@testing-library/react";
+import type { TFunction } from "i18next";
 import React from "react";
 import { Provider } from "react-redux";
 import { createStore } from "redux";
@@ -69,7 +70,7 @@ export function makeCategoryTreeActionsHarness(
       setIsFetchError: () => undefined,
       setFetchError: () => undefined,
       setIsFetching: () => undefined,
-      t: (k: string) => k,
+      t: ((key: string) => key) as TFunction,
     });
     return null;
   };

@@ -5,7 +5,8 @@ export const branding: PostProcessorModule = {
   name: "nyastraBranding",
   type: "postProcessor",
   process(value, keys, options) {
-    const templates = [options.i18nResolved?.res, options.defaultValue, ...keys];
+    const resolved = options.i18nResolved as { res?: unknown } | undefined;
+    const templates = [resolved?.res, options.defaultValue, ...keys];
     const data = options.replace ?? options;
     const protectedValues: string[] = [];
 

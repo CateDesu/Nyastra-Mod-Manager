@@ -104,7 +104,7 @@ export interface IRemoveFileOptions {
   showDialogCallback?: () => boolean;
 }
 
-let tFunction: TFunction = (input: string) => input;
+let tFunction = ((input: string) => input) as TFunction;
 
 export function setTFunction(tFunc: TFunction) {
   tFunction = tFunc;

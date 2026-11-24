@@ -37,7 +37,7 @@ test("restores a saved API key before the first download after startup", async (
   harness.api.registerProtocol = vi.fn().mockResolvedValue(false);
   harness.api.registerRepositoryLookup = vi.fn();
   harness.api.addMetaServer = vi.fn();
-  harness.api.laterT = (text) => text;
+  harness.api.laterT = ((text: string) => text) as typeof harness.api.laterT;
 
   // Exercise real credential headers without network requests.
   vi.spyOn(Quota.prototype, "wait").mockResolvedValue(undefined);

@@ -193,6 +193,7 @@ function PathInput(props: IPathInputProps) {
   );
 }
 
-export default withTranslation("default")(
-  connect(mapStateToProps, mapDispatchToProps)(GameSelectionDialog),
-);
+const ConnectedGameSelectionDialog: React.ComponentType<IGameSelectionDialogProps> =
+  withTranslation("default")(connect(mapStateToProps, mapDispatchToProps)(GameSelectionDialog));
+
+export default ConnectedGameSelectionDialog;

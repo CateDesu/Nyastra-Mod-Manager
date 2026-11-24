@@ -4602,7 +4602,7 @@ type RegisterSettings = (title: string, element: React$2.ComponentClass<any> | R
 // Warning: (ae-forgotten-export) The symbol "ToDoType" needs to be exported by the entry point api.d.ts
 //
 // @public (undocumented)
-type RegisterToDo = (id: string, type: ToDoType, props: (state: any) => any, icon: ((props: any) => JSX.Element) | string, text: ((t: TFunction$1, props: any) => JSX.Element) | string, action: (props: any) => void, condition: (props: any) => boolean, value: ((t: TFunction$1, props: any) => JSX.Element) | string, priority: number) => void;
+type RegisterToDo = (id: string, type: ToDoType, props: (state: any) => any, icon: ((props: any) => JSX.Element) | string, text: ((t: TFunction$1, props: any) => JSX.Element | string) | string, action: (props: any) => void, condition: (props: any) => boolean, value: ((t: TFunction$1, props: any) => JSX.Element | string) | string, priority: number) => void;
 
 // @public
 type Revertability = "yes" | "never" | "invalid";

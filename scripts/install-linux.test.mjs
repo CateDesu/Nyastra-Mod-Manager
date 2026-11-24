@@ -1180,36 +1180,39 @@ test("legacy runtime recovery restores the chosen backup before a failed registr
   }
 });
 
-test("legacy runtime recovery preserves a destination created just before publication", () => {
-  const f = fixture();
-  try {
-    assert.equal(f.run().status, 0);
-    const previous = path.join(path.dirname(f.app), ".app-previous-12345");
-    renameSync(f.app, previous);
-    const mv = path.join(f.bin, "mv");
-    writeFileSync(
-      mv,
-      `#!/bin/sh
-mkdir "$RECOVERY_APP"
-exec /usr/bin/mv "$@"
+for (const moveFails of [false, true]) {
+  test(`legacy runtime recovery preserves a destination created just before publication, move fails=${moveFails}`, () => {
+    const f = fixture();
+    try {
+      assert.equal(f.run().status, 0);
+      const previous = path.join(path.dirname(f.app), ".app-previous-12345");
+      renameSync(f.app, previous);
+      const mv = path.join(f.bin, "mv");
+      writeFileSync(
+        mv,
+        `#!/bin/sh
+mkdir "$RECOVERY_APP" || exit 1
+/usr/bin/mv "$@"
+${moveFails ? 'echo "mv: not replacing destination" >&2; exit 1' : "exit 0"}
 `,
-    );
-    chmodSync(mv, 0o755);
-    const result = spawnSync(process.execPath, [installer, "--recover-runtime", previous], {
-      env: { ...f.env, RECOVERY_APP: f.app },
-      encoding: "utf8",
-    });
-    assert.equal(result.status, 1, result.stderr);
-    assert.match(result.stderr, /did not publish/);
-    assert.deepEqual(readdirSync(f.app), []);
-    assert.equal(readFileSync(path.join(previous, "version"), "utf8"), "one");
-    const outside = spawnSync(process.execPath, [installer, "--recover-runtime", f.source], {
-      env: f.env,
-      encoding: "utf8",
-    });
-    assert.equal(outside.status, 1);
-    assert.match(outside.stderr, /Choose an absolute/);
-  } finally {
-    f.clean();
-  }
-});
+      );
+      chmodSync(mv, 0o755);
+      const result = spawnSync(process.execPath, [installer, "--recover-runtime", previous], {
+        env: { ...f.env, RECOVERY_APP: f.app },
+        encoding: "utf8",
+      });
+      assert.equal(result.status, 1, result.stderr);
+      assert.match(result.stderr, /did not publish/);
+      assert.deepEqual(readdirSync(f.app), []);
+      assert.equal(readFileSync(path.join(previous, "version"), "utf8"), "one");
+      const outside = spawnSync(process.execPath, [installer, "--recover-runtime", f.source], {
+        env: f.env,
+        encoding: "utf8",
+      });
+      assert.equal(outside.status, 1);
+      assert.match(outside.stderr, /Choose an absolute/);
+    } finally {
+      f.clean();
+    }
+  });
+}

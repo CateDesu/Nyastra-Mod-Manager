@@ -271,10 +271,10 @@ export type RegisterToDo = (
   type: ToDoType,
   props: (state: any) => any,
   icon: ((props: any) => JSX.Element) | string,
-  text: ((t: TFunction, props: any) => JSX.Element) | string,
+  text: ((t: TFunction, props: any) => JSX.Element | string) | string,
   action: (props: any) => void,
   condition: (props: any) => boolean,
-  value: ((t: TFunction, props: any) => JSX.Element) | string,
+  value: ((t: TFunction, props: any) => JSX.Element | string) | string,
   priority: number,
 ) => void;
 

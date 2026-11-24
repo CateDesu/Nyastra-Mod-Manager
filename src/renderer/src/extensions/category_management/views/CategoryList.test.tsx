@@ -1,5 +1,6 @@
 import { screen, render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { TFunction } from "i18next";
 import React, { useState } from "react";
 import { describe, it, expect, vi } from "vitest";
 
@@ -48,7 +49,7 @@ const mockData = [
 ];
 
 const baseHookProps: UseCategoryTreeResult = {
-  t: (k: string) => k,
+  t: ((key: string) => key) as TFunction<"common">,
   filteredTreeData: mockData,
   searchString: "",
   setSearchString: vi.fn(),

@@ -151,7 +151,7 @@ function todos(api: IExtensionApi): IToDo[] {
         discoveryRunning: state.session.discovery.running,
       }),
       condition: (props) => props.searchPaths !== undefined,
-      text: (t: TFunction, props: any): JSX.Element =>
+      text: (t: TFunction, props: any) =>
         props.discoveryRunning ? t("Discovery running") : t("Scan for missing games"),
       action: startManualSearch,
     },

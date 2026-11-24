@@ -434,11 +434,14 @@ catalogs:
       specifier: 9.1.7
       version: 9.1.7
     i18next:
-      specifier: 21.10.0
-      version: 21.10.0
+      specifier: 26.3.4
+      version: 26.3.4
     i18next-fs-backend:
       specifier: 2.6.6
       version: 2.6.6
+    i18next-v4-format-converter:
+      specifier: 1.1.2
+      version: 1.1.2
     iconv-lite:
       specifier: 0.5.2
       version: 0.5.2
@@ -584,8 +587,8 @@ catalogs:
       specifier: 2.6.0
       version: 2.6.0
     react-i18next:
-      specifier: 11.18.6
-      version: 11.18.6
+      specifier: 16.6.6
+      version: 16.6.6
     react-markdown:
       specifier: 6.0.3
       version: 6.0.3
@@ -973,7 +976,7 @@ importers:
         version: 4.18.1
       react-i18next:
         specifier: 'catalog:'
-        version: 11.18.6(i18next@21.10.0)(react-dom@18.3.1)(react@18.3.1)
+        version: 16.6.6(i18next@26.3.4)(react-dom@18.3.1)(react@18.3.1)(typescript@6.0.3)
       react-markdown:
         specifier: 'catalog:'
         version: 6.0.3(@types/react@18.3.31)(react@18.3.1)(supports-color@10.2.2)
@@ -1045,7 +1048,7 @@ importers:
         version: 2.4.1
       i18next:
         specifier: 'catalog:'
-        version: 21.10.0
+        version: 26.3.4(typescript@6.0.3)
       lodash:
         specifier: 'catalog:'
         version: 4.18.1
@@ -1057,7 +1060,7 @@ importers:
         version: 18.3.1(react@18.3.1)
       react-i18next:
         specifier: 'catalog:'
-        version: 11.18.6(i18next@21.10.0)(react-dom@18.3.1)(react@18.3.1)
+        version: 16.6.6(i18next@26.3.4)(react-dom@18.3.1)(react@18.3.1)(typescript@6.0.3)
       redux:
         specifier: 'catalog:'
         version: 4.2.1
@@ -1087,13 +1090,13 @@ importers:
         version: 2.4.1
       i18next:
         specifier: 'catalog:'
-        version: 21.10.0
+        version: 26.3.4(typescript@6.0.3)
       memoize-one:
         specifier: 'catalog:'
         version: 5.2.1
       react-i18next:
         specifier: 'catalog:'
-        version: 11.18.6(i18next@21.10.0)(react-dom@18.3.1)(react@18.3.1)
+        version: 16.6.6(i18next@26.3.4)(react-dom@18.3.1)(react@18.3.1)(typescript@6.0.3)
       redux:
         specifier: 'catalog:'
         version: 4.2.1
@@ -1150,7 +1153,7 @@ importers:
         version: 0.33.1(react-dom@18.3.1)(react@18.3.1)
       react-i18next:
         specifier: 'catalog:'
-        version: 11.18.6(i18next@21.10.0)(react-dom@18.3.1)(react@18.3.1)
+        version: 16.6.6(i18next@26.3.4)(react-dom@18.3.1)(react@18.3.1)(typescript@6.0.3)
       redux:
         specifier: 'catalog:'
         version: 4.2.1
@@ -1204,7 +1207,7 @@ importers:
         version: link:../../packages/exe-version
       i18next:
         specifier: 'catalog:'
-        version: 21.10.0
+        version: 26.3.4(typescript@6.0.3)
       modmeta-db:
         specifier: 'catalog:'
         version: https://codeload.github.com/Nexus-Mods/modmeta-db/tar.gz/daa8935b6e38e255ec192c908adfce35d47c0336(commander@14.0.3)(encoding-down@6.3.0)(express@4.22.1)(leveldown@5.6.0)(levelup@4.4.0)
@@ -1216,7 +1219,7 @@ importers:
         version: 18.3.1(react@18.3.1)
       react-i18next:
         specifier: 'catalog:'
-        version: 11.18.6(i18next@21.10.0)(react-dom@18.3.1)(react@18.3.1)
+        version: 16.6.6(i18next@26.3.4)(react-dom@18.3.1)(react@18.3.1)(typescript@6.0.3)
       react-redux:
         specifier: 'catalog:'
         version: 7.2.9(react-dom@18.3.1)(react@18.3.1)
@@ -1270,7 +1273,7 @@ importers:
         version: 2.4.1
       i18next:
         specifier: 'catalog:'
-        version: 21.10.0
+        version: 26.3.4(typescript@6.0.3)
       json-loader:
         specifier: 'catalog:'
         version: 0.5.7
@@ -1285,7 +1288,7 @@ importers:
         version: 18.3.1(react@18.3.1)
       react-i18next:
         specifier: 'catalog:'
-        version: 11.18.6(i18next@21.10.0)(react-dom@18.3.1)(react@18.3.1)
+        version: 16.6.6(i18next@26.3.4)(react-dom@18.3.1)(react@18.3.1)(typescript@6.0.3)
       redux:
         specifier: 'catalog:'
         version: 4.2.1
@@ -1361,7 +1364,7 @@ importers:
         version: 2.4.1
       i18next:
         specifier: 'catalog:'
-        version: 21.10.0
+        version: 26.3.4(typescript@6.0.3)
       immutability-helper:
         specifier: 'catalog:'
         version: 3.1.1
@@ -1379,7 +1382,7 @@ importers:
         version: 18.3.1(react@18.3.1)
       react-i18next:
         specifier: 'catalog:'
-        version: 11.18.6(i18next@21.10.0)(react-dom@18.3.1)(react@18.3.1)
+        version: 16.6.6(i18next@26.3.4)(react-dom@18.3.1)(react@18.3.1)(typescript@6.0.3)
       react-redux:
         specifier: 'catalog:'
         version: 7.2.9(react-dom@18.3.1)(react@18.3.1)
@@ -1415,7 +1418,7 @@ importers:
         version: 2.4.1
       i18next:
         specifier: 'catalog:'
-        version: 21.10.0
+        version: 26.3.4(typescript@6.0.3)
       immutability-helper:
         specifier: 'catalog:'
         version: 3.1.1
@@ -1433,7 +1436,7 @@ importers:
         version: 18.3.1(react@18.3.1)
       react-i18next:
         specifier: 'catalog:'
-        version: 11.18.6(i18next@21.10.0)(react-dom@18.3.1)(react@18.3.1)
+        version: 16.6.6(i18next@26.3.4)(react-dom@18.3.1)(react@18.3.1)(typescript@6.0.3)
       redux:
         specifier: 'catalog:'
         version: 4.2.1
@@ -1472,7 +1475,7 @@ importers:
         version: 0.33.1(react-dom@18.3.1)(react@18.3.1)
       react-i18next:
         specifier: 'catalog:'
-        version: 11.18.6(i18next@21.10.0)(react-dom@18.3.1)(react@18.3.1)
+        version: 16.6.6(i18next@26.3.4)(react-dom@18.3.1)(react@18.3.1)(typescript@6.0.3)
       react-redux:
         specifier: 'catalog:'
         version: 7.2.9(react-dom@18.3.1)(react@18.3.1)
@@ -1533,7 +1536,7 @@ importers:
         version: 0.33.1(react-dom@18.3.1)(react@18.3.1)
       react-i18next:
         specifier: 'catalog:'
-        version: 11.18.6(i18next@21.10.0)(react-dom@18.3.1)(react@18.3.1)
+        version: 16.6.6(i18next@26.3.4)(react-dom@18.3.1)(react@18.3.1)(typescript@6.0.3)
       react-redux:
         specifier: 'catalog:'
         version: 7.2.9(react-dom@18.3.1)(react@18.3.1)
@@ -1812,7 +1815,7 @@ importers:
         version: 0.33.1(react-dom@18.3.1)(react@18.3.1)
       react-i18next:
         specifier: 'catalog:'
-        version: 11.18.6(i18next@21.10.0)(react-dom@18.3.1)(react@18.3.1)
+        version: 16.6.6(i18next@26.3.4)(react-dom@18.3.1)(react@18.3.1)(typescript@6.0.3)
       react-redux:
         specifier: 'catalog:'
         version: 7.2.9(react-dom@18.3.1)(react@18.3.1)
@@ -1866,7 +1869,7 @@ importers:
         version: 0.33.1(react-dom@18.3.1)(react@18.3.1)
       react-i18next:
         specifier: 'catalog:'
-        version: 11.18.6(i18next@21.10.0)(react-dom@18.3.1)(react@18.3.1)
+        version: 16.6.6(i18next@26.3.4)(react-dom@18.3.1)(react@18.3.1)(typescript@6.0.3)
       react-redux:
         specifier: 'catalog:'
         version: 7.2.9(react-dom@18.3.1)(react@18.3.1)
@@ -1986,7 +1989,7 @@ importers:
         version: 14.0.5(@types/hoist-non-react-statics@3.3.7)(@types/node@24.12.2)(@types/react@18.3.31)(react@18.3.1)
       react-i18next:
         specifier: 'catalog:'
-        version: 11.18.6(i18next@21.10.0)(react-dom@18.3.1)(react@18.3.1)
+        version: 16.6.6(i18next@26.3.4)(react-dom@18.3.1)(react@18.3.1)(typescript@6.0.3)
       react-redux:
         specifier: 'catalog:'
         version: 7.2.9(react-dom@18.3.1)(react@18.3.1)
@@ -2100,7 +2103,7 @@ importers:
         version: 0.33.1(react-dom@18.3.1)(react@18.3.1)
       react-i18next:
         specifier: 'catalog:'
-        version: 11.18.6(i18next@21.10.0)(react-dom@18.3.1)(react@18.3.1)
+        version: 16.6.6(i18next@26.3.4)(react-dom@18.3.1)(react@18.3.1)(typescript@6.0.3)
       react-redux:
         specifier: 'catalog:'
         version: 7.2.9(react-dom@18.3.1)(react@18.3.1)
@@ -2309,7 +2312,7 @@ importers:
         version: 0.33.1(react-dom@18.3.1)(react@18.3.1)
       react-i18next:
         specifier: 'catalog:'
-        version: 11.18.6(i18next@21.10.0)(react-dom@18.3.1)(react@18.3.1)
+        version: 16.6.6(i18next@26.3.4)(react-dom@18.3.1)(react@18.3.1)(typescript@6.0.3)
       react-redux:
         specifier: 'catalog:'
         version: 7.2.9(react-dom@18.3.1)(react@18.3.1)
@@ -2409,7 +2412,7 @@ importers:
         version: 4.18.1
       react-i18next:
         specifier: 'catalog:'
-        version: 11.18.6(i18next@21.10.0)(react-dom@18.3.1)(react@18.3.1)
+        version: 16.6.6(i18next@26.3.4)(react-dom@18.3.1)(react@18.3.1)(typescript@6.0.3)
       react-markdown:
         specifier: 'catalog:'
         version: 6.0.3(@types/react@18.3.31)(react@18.3.1)
@@ -2442,7 +2445,7 @@ importers:
         version: 2.4.1
       i18next:
         specifier: 'catalog:'
-        version: 21.10.0
+        version: 26.3.4(typescript@6.0.3)
       immutability-helper:
         specifier: 'catalog:'
         version: 3.1.1
@@ -2460,7 +2463,7 @@ importers:
         version: 18.3.1(react@18.3.1)
       react-i18next:
         specifier: 'catalog:'
-        version: 11.18.6(i18next@21.10.0)(react-dom@18.3.1)(react@18.3.1)
+        version: 16.6.6(i18next@26.3.4)(react-dom@18.3.1)(react@18.3.1)(typescript@6.0.3)
       redux:
         specifier: 'catalog:'
         version: 4.2.1
@@ -2502,7 +2505,7 @@ importers:
         version: 2.4.1
       i18next:
         specifier: 'catalog:'
-        version: 21.10.0
+        version: 26.3.4(typescript@6.0.3)
       immutability-helper:
         specifier: 'catalog:'
         version: 3.1.1
@@ -2517,7 +2520,7 @@ importers:
         version: 18.3.1
       react-i18next:
         specifier: 'catalog:'
-        version: 11.18.6(i18next@21.10.0)(react-dom@18.3.1)(react@18.3.1)
+        version: 16.6.6(i18next@26.3.4)(react-dom@18.3.1)(react@18.3.1)(typescript@6.0.3)
       redux-act:
         specifier: 'catalog:'
         version: 1.8.0
@@ -2556,7 +2559,7 @@ importers:
         version: 2.4.1
       i18next:
         specifier: 'catalog:'
-        version: 21.10.0
+        version: 26.3.4(typescript@6.0.3)
       immutability-helper:
         specifier: 'catalog:'
         version: 3.1.1
@@ -2577,7 +2580,7 @@ importers:
         version: 18.3.1(react@18.3.1)
       react-i18next:
         specifier: 'catalog:'
-        version: 11.18.6(i18next@21.10.0)(react-dom@18.3.1)(react@18.3.1)
+        version: 16.6.6(i18next@26.3.4)(react-dom@18.3.1)(react@18.3.1)(typescript@6.0.3)
       redux:
         specifier: 'catalog:'
         version: 4.2.1
@@ -2625,7 +2628,7 @@ importers:
         version: 2.4.1
       i18next:
         specifier: 'catalog:'
-        version: 21.10.0
+        version: 26.3.4(typescript@6.0.3)
       react:
         specifier: 'catalog:'
         version: 18.3.1
@@ -2688,7 +2691,7 @@ importers:
         version: 3.6.0(cytoscape@3.33.1)
       i18next:
         specifier: 'catalog:'
-        version: 21.10.0
+        version: 26.3.4(typescript@6.0.3)
       immutability-helper:
         specifier: 'catalog:'
         version: 3.1.1
@@ -2724,7 +2727,7 @@ importers:
         version: 18.3.1(react@18.3.1)
       react-i18next:
         specifier: 'catalog:'
-        version: 11.18.6(i18next@21.10.0)(react-dom@18.3.1)(react@18.3.1)
+        version: 16.6.6(i18next@26.3.4)(react-dom@18.3.1)(react@18.3.1)(typescript@6.0.3)
       react-redux:
         specifier: 'catalog:'
         version: 7.2.9(react-dom@18.3.1)(react@18.3.1)
@@ -2781,7 +2784,7 @@ importers:
         version: 18.3.1(react@18.3.1)
       react-i18next:
         specifier: 'catalog:'
-        version: 11.18.6(i18next@21.10.0)(react-dom@18.3.1)(react@18.3.1)
+        version: 16.6.6(i18next@26.3.4)(react-dom@18.3.1)(react@18.3.1)(typescript@6.0.3)
       redux-act:
         specifier: 'catalog:'
         version: 1.8.0
@@ -2839,7 +2842,7 @@ importers:
         version: 2.4.1
       i18next:
         specifier: 'catalog:'
-        version: 21.10.0
+        version: 26.3.4(typescript@6.0.3)
       lodash:
         specifier: 'catalog:'
         version: 4.18.1
@@ -2848,7 +2851,7 @@ importers:
         version: 18.3.1
       react-i18next:
         specifier: 'catalog:'
-        version: 11.18.6(i18next@21.10.0)(react-dom@18.3.1)(react@18.3.1)
+        version: 16.6.6(i18next@26.3.4)(react-dom@18.3.1)(react@18.3.1)(typescript@6.0.3)
       semver:
         specifier: 'catalog:'
         version: 7.7.4
@@ -2875,7 +2878,7 @@ importers:
         version: 2.4.1
       i18next:
         specifier: 'catalog:'
-        version: 21.10.0
+        version: 26.3.4(typescript@6.0.3)
       semver:
         specifier: 'catalog:'
         version: 7.7.4
@@ -2945,13 +2948,13 @@ importers:
         version: 2.4.1
       i18next:
         specifier: 'catalog:'
-        version: 21.10.0
+        version: 26.3.4(typescript@6.0.3)
       react:
         specifier: 'catalog:'
         version: 18.3.1
       react-i18next:
         specifier: 'catalog:'
-        version: 11.18.6(i18next@21.10.0)(react-dom@18.3.1)(react@18.3.1)
+        version: 16.6.6(i18next@26.3.4)(react-dom@18.3.1)(react@18.3.1)(typescript@6.0.3)
       redux:
         specifier: 'catalog:'
         version: 4.2.1
@@ -2993,7 +2996,7 @@ importers:
         version: 2.4.1
       i18next:
         specifier: 'catalog:'
-        version: 21.10.0
+        version: 26.3.4(typescript@6.0.3)
       immutability-helper:
         specifier: 'catalog:'
         version: 3.1.1
@@ -3002,7 +3005,7 @@ importers:
         version: 14.0.5(@types/hoist-non-react-statics@3.3.7)(@types/node@24.12.2)(@types/react@18.3.31)(react@18.3.1)
       react-i18next:
         specifier: 'catalog:'
-        version: 11.18.6(i18next@21.10.0)(react-dom@18.3.1)(react@18.3.1)
+        version: 16.6.6(i18next@26.3.4)(react-dom@18.3.1)(react@18.3.1)(typescript@6.0.3)
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
@@ -3035,7 +3038,7 @@ importers:
         version: 18.3.1
       react-i18next:
         specifier: 'catalog:'
-        version: 11.18.6(i18next@21.10.0)(react-dom@18.3.1)(react@18.3.1)
+        version: 16.6.6(i18next@26.3.4)(react-dom@18.3.1)(react@18.3.1)(typescript@6.0.3)
       shortid:
         specifier: 'catalog:'
         version: 2.2.17
@@ -3086,7 +3089,7 @@ importers:
         version: 2.4.1
       i18next:
         specifier: 'catalog:'
-        version: 21.10.0
+        version: 26.3.4(typescript@6.0.3)
       redux:
         specifier: 'catalog:'
         version: 4.2.1
@@ -3119,7 +3122,7 @@ importers:
         version: 3.2.0
       i18next:
         specifier: 'catalog:'
-        version: 21.10.0
+        version: 26.3.4(typescript@6.0.3)
       node-7z:
         specifier: 'catalog:'
         version: https://codeload.github.com/Nexus-Mods/node-7z/tar.gz/b75def8d0d7d81a03f4526c52b8ada9a34a06479
@@ -3128,7 +3131,7 @@ importers:
         version: 18.3.1
       react-i18next:
         specifier: 'catalog:'
-        version: 11.18.6(i18next@21.10.0)(react-dom@18.3.1)(react@18.3.1)
+        version: 16.6.6(i18next@26.3.4)(react-dom@18.3.1)(react@18.3.1)(typescript@6.0.3)
 
   extensions/script-extender-error-check:
     devDependencies:
@@ -3158,7 +3161,7 @@ importers:
         version: 2.4.1
       i18next:
         specifier: 'catalog:'
-        version: 21.10.0
+        version: 26.3.4(typescript@6.0.3)
       react:
         specifier: 'catalog:'
         version: 18.3.1
@@ -3243,7 +3246,7 @@ importers:
         version: link:../../packages/exe-version
       i18next:
         specifier: 'catalog:'
-        version: 21.10.0
+        version: 26.3.4(typescript@6.0.3)
       immutability-helper:
         specifier: 'catalog:'
         version: 3.1.1
@@ -3261,7 +3264,7 @@ importers:
         version: 18.3.1(react@18.3.1)
       react-i18next:
         specifier: 'catalog:'
-        version: 11.18.6(i18next@21.10.0)(react-dom@18.3.1)(react@18.3.1)
+        version: 16.6.6(i18next@26.3.4)(react-dom@18.3.1)(react@18.3.1)(typescript@6.0.3)
       redux-act:
         specifier: 'catalog:'
         version: 1.8.0
@@ -3312,7 +3315,7 @@ importers:
         version: 0.2.1
       i18next:
         specifier: 'catalog:'
-        version: 21.10.0
+        version: 26.3.4(typescript@6.0.3)
       prop-types:
         specifier: 'catalog:'
         version: 15.8.1
@@ -3330,7 +3333,7 @@ importers:
         version: 18.3.1(react@18.3.1)
       react-i18next:
         specifier: 'catalog:'
-        version: 11.18.6(i18next@21.10.0)(react-dom@18.3.1)(react@18.3.1)
+        version: 16.6.6(i18next@26.3.4)(react-dom@18.3.1)(react@18.3.1)(typescript@6.0.3)
       redux:
         specifier: 'catalog:'
         version: 4.2.1
@@ -3366,7 +3369,7 @@ importers:
         version: 5.2.1
       react-i18next:
         specifier: 'catalog:'
-        version: 11.18.6(i18next@21.10.0)(react-dom@18.3.1)(react@18.3.1)
+        version: 16.6.6(i18next@26.3.4)(react-dom@18.3.1)(react@18.3.1)(typescript@6.0.3)
       react-redux:
         specifier: 'catalog:'
         version: 7.2.9(react-dom@18.3.1)(react@18.3.1)
@@ -3509,7 +3512,7 @@ importers:
         version: 18.3.1(react@18.3.1)
       react-i18next:
         specifier: 'catalog:'
-        version: 11.18.6(i18next@21.10.0)(react-dom@18.3.1)(react@18.3.1)
+        version: 16.6.6(i18next@26.3.4)(react-dom@18.3.1)(react@18.3.1)(typescript@6.0.3)
       react-redux:
         specifier: 'catalog:'
         version: 7.2.9(react-dom@18.3.1)(react@18.3.1)
@@ -3558,7 +3561,7 @@ importers:
         version: 44.9.3
       i18next:
         specifier: 'catalog:'
-        version: 21.10.0
+        version: 26.3.4(typescript@6.0.3)
       modmeta-db:
         specifier: 'catalog:'
         version: https://codeload.github.com/Nexus-Mods/modmeta-db/tar.gz/daa8935b6e38e255ec192c908adfce35d47c0336(commander@14.0.3)(encoding-down@6.3.0)(express@4.22.1)(leveldown@5.6.0)(levelup@4.4.0)
@@ -3750,10 +3753,13 @@ importers:
         version: 2.1.8
       i18next:
         specifier: 'catalog:'
-        version: 21.10.0
+        version: 26.3.4(typescript@6.0.3)
       i18next-fs-backend:
         specifier: 'catalog:'
         version: 2.6.6
+      i18next-v4-format-converter:
+        specifier: 'catalog:'
+        version: 1.1.2
       icon-extract:
         specifier: workspace:*
         version: link:../../packages/icon-extract
@@ -3861,7 +3867,7 @@ importers:
         version: 2.6.0(react-dom@18.3.1)(react@18.3.1)
       react-i18next:
         specifier: 'catalog:'
-        version: 11.18.6(i18next@21.10.0)(react-dom@18.3.1)(react@18.3.1)
+        version: 16.6.6(i18next@26.3.4)(react-dom@18.3.1)(react@18.3.1)(typescript@6.0.3)
       react-markdown:
         specifier: 'catalog:'
         version: 6.0.3(@types/react@18.3.31)(react@18.3.1)
@@ -4415,10 +4421,13 @@ importers:
         version: 21.0.4
       i18next:
         specifier: 'catalog:'
-        version: 21.10.0
+        version: 26.3.4(typescript@6.0.3)
       i18next-fs-backend:
         specifier: 'catalog:'
         version: 2.6.6
+      i18next-v4-format-converter:
+        specifier: 'catalog:'
+        version: 1.1.2
       icon-extract:
         specifier: workspace:*
         version: link:../../packages/icon-extract
@@ -4517,7 +4526,7 @@ importers:
         version: 2.6.0(react-dom@18.3.1)(react@18.3.1)
       react-i18next:
         specifier: 'catalog:'
-        version: 11.18.6(i18next@21.10.0)(react-dom@18.3.1)(react@18.3.1)
+        version: 16.6.6(i18next@26.3.4)(react-dom@18.3.1)(react@18.3.1)(typescript@6.0.3)
       react-markdown:
         specifier: 'catalog:'
         version: 6.0.3(@types/react@18.3.31)(react@18.3.1)
@@ -5254,6 +5263,10 @@ packages:
 
   '@babel/runtime@7.29.2':
     resolution: {integrity: sha512-JiDShH45zKHWyGe4ZNVRrCjBz8Nh9TMmZG1kh4QTK8hCBTWBi8Da+i7s1fJw7/lYpM4ccepSNfqzZ/QvABBi5g==}
+    engines: {node: '>=6.9.0'}
+
+  '@babel/runtime@7.29.7':
+    resolution: {integrity: sha512-Nq8OhGWiZIZGV6hLHoyAKLLcJihP/xFeBMGJoUrxTX2psI8dCifzLhZISFb+VWS3wFMRDmCGw5R+dOySCqPLhw==}
     engines: {node: '>=6.9.0'}
 
   '@babel/template@7.29.7':
@@ -9350,8 +9363,17 @@ packages:
   i18next-fs-backend@2.6.6:
     resolution: {integrity: sha512-mYGu6Nt8RIp3X/U8Y+Gej1wo5xmYWmGKLqBGMCC2OCAou5rW5epeHgHmVcw20mJs9Z9+DAPHIxQPNCgFyPRMeg==}
 
-  i18next@21.10.0:
-    resolution: {integrity: sha512-YeuIBmFsGjUfO3qBmMOc0rQaun4mIpGKET5WDwvu8lU7gvwpcariZLNtL0Fzj+zazcHUrlXHiptcFhBMFaxzfg==}
+  i18next-v4-format-converter@1.1.2:
+    resolution: {integrity: sha512-BZIWTeSSmCoPMw2EnExm/2Q4tYRW/t1NlmlEEam46PSiz3BOThdBgFZeDbqJf/ZXcAr+L/1jS3Us9tYumUubsg==}
+    hasBin: true
+
+  i18next@26.3.4:
+    resolution: {integrity: sha512-pa7m0d7pBDqGHZxljT+WPFeyFgQ7P7SciPPo1tTqYuO0z4sqADYhwnBESmmGp/wEof1inwdls/k8ZgTg8rxFHA==}
+    peerDependencies:
+      typescript: ^5 || ^6
+    peerDependenciesMeta:
+      typescript:
+        optional: true
 
   iconv-corefoundation@1.1.7:
     resolution: {integrity: sha512-T10qvkw0zz4wnm560lOEg0PovVqUXuOFhhHAkixw8/sycy7TJt7v/RrkEKEQnAw2viPSJu6iAkErxnzR0g8PpQ==}
@@ -10883,17 +10905,20 @@ packages:
       react: '>=16'
       react-dom: '>=16'
 
-  react-i18next@11.18.6:
-    resolution: {integrity: sha512-yHb2F9BiT0lqoQDt8loZ5gWP331GwctHz9tYQ8A2EIEUu+CcEdjBLQWli1USG3RdWQt3W+jqQLg/d4rrQR96LA==}
+  react-i18next@16.6.6:
+    resolution: {integrity: sha512-ZgL2HUoW34UKUkOV7uSQFE1CDnRPD+tCR3ywSuWH7u2iapnz86U8Bi3Vrs620qNDzCf1F47NxglCEkchCTDOHw==}
     peerDependencies:
-      i18next: '>= 19.0.0'
+      i18next: '>= 25.10.9'
       react: '>= 16.8.0'
       react-dom: '*'
       react-native: '*'
+      typescript: ^5 || ^6
     peerDependenciesMeta:
       react-dom:
         optional: true
       react-native:
+        optional: true
+      typescript:
         optional: true
 
   react-input-autosize@2.2.2:
@@ -13176,6 +13201,8 @@ snapshots:
       core-js: 2.6.12
 
   '@babel/runtime@7.29.2': {}
+
+  '@babel/runtime@7.29.7': {}
 
   '@babel/template@7.29.7':
     dependencies:
@@ -16192,7 +16219,7 @@ snapshots:
 
   date-fns@2.30.0:
     dependencies:
-      '@babel/runtime': 7.29.2
+      '@babel/runtime': 7.29.7
 
   dayjs@1.11.20: {}
 
@@ -16344,11 +16371,11 @@ snapshots:
 
   dom-helpers@3.4.0:
     dependencies:
-      '@babel/runtime': 7.29.2
+      '@babel/runtime': 7.29.7
 
   dom-helpers@5.2.1:
     dependencies:
-      '@babel/runtime': 7.29.2
+      '@babel/runtime': 7.29.7
       csstype: 3.2.3
 
   dompurify@3.4.17:
@@ -17259,9 +17286,13 @@ snapshots:
 
   i18next-fs-backend@2.6.6: {}
 
-  i18next@21.10.0:
+  i18next-v4-format-converter@1.1.2:
     dependencies:
-      '@babel/runtime': 7.29.2
+      '@babel/runtime': 7.29.7
+
+  i18next@26.3.4(typescript@6.0.3):
+    optionalDependencies:
+      typescript: 6.0.3
 
   iconv-corefoundation@1.1.7:
     dependencies:
@@ -18748,14 +18779,16 @@ snapshots:
       react: 18.3.1
       react-dom: 18.3.1(react@18.3.1)
 
-  react-i18next@11.18.6(i18next@21.10.0)(react-dom@18.3.1)(react@18.3.1):
+  react-i18next@16.6.6(i18next@26.3.4)(react-dom@18.3.1)(react@18.3.1)(typescript@6.0.3):
     dependencies:
       '@babel/runtime': 7.29.2
       html-parse-stringify: 3.0.1
-      i18next: 21.10.0
+      i18next: 26.3.4(typescript@6.0.3)
       react: 18.3.1
+      use-sync-external-store: 1.6.0(react@18.3.1)
     optionalDependencies:
       react-dom: 18.3.1(react@18.3.1)
+      typescript: 6.0.3
 
   react-input-autosize@2.2.2(react@18.3.1):
     dependencies:
@@ -18841,7 +18874,7 @@ snapshots:
 
   react-popper@1.3.11(react@18.3.1):
     dependencies:
-      '@babel/runtime': 7.29.2
+      '@babel/runtime': 7.29.7
       '@hypnosphi/create-react-context': 0.3.1(prop-types@15.8.1)(react@18.3.1)
       deep-equal: 1.1.2
       popper.js: 1.16.1
@@ -18906,7 +18939,7 @@ snapshots:
 
   react-transition-group@4.4.5(react-dom@18.3.1)(react@18.3.1):
     dependencies:
-      '@babel/runtime': 7.29.2
+      '@babel/runtime': 7.29.7
       dom-helpers: 5.2.1
       loose-envify: 1.4.0
       prop-types: 15.8.1
@@ -19812,13 +19845,13 @@ snapshots:
 
   uncontrollable@6.2.3(react@18.3.1):
     dependencies:
-      '@babel/runtime': 7.29.2
+      '@babel/runtime': 7.29.7
       invariant: 2.2.4
       react: 18.3.1
 
   uncontrollable@7.2.1(react@18.3.1):
     dependencies:
-      '@babel/runtime': 7.29.2
+      '@babel/runtime': 7.29.7
       '@types/react': 18.3.31
       invariant: 2.2.4
       react: 18.3.1

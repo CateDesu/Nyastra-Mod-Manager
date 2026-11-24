@@ -61,8 +61,9 @@ This is a list of all modules leaked by Vortex to extensions. Any module listed 
 | glob | 14.0.3 |
 | got | 15.0.5 |
 | graphlib | 2.1.8 |
-| i18next | 21.10.0 |
+| i18next | 26.3.4 |
 | i18next-fs-backend | 2.6.6 |
+| i18next-v4-format-converter | 1.1.2 |
 | icon-extract | link:../../packages/icon-extract |
 | iconv-lite | 0.5.2 |
 | immutability-helper | 3.1.1 |
@@ -98,7 +99,7 @@ This is a list of all modules leaked by Vortex to extensions. Any module listed 
 | react-dnd-html5-backend | 14.1.0 |
 | react-dom | 18.3.1 |
 | react-hot-toast | 2.6.0 |
-| react-i18next | 11.18.6 |
+| react-i18next | 16.6.6 |
 | react-markdown | 6.0.3 |
 | react-overlays | 1.2.0 |
 | react-redux | 7.2.9 |

@@ -614,12 +614,13 @@ it("serializes concurrent ancestor writers and rolls back only the failed transa
   const order: string[] = [];
   const startLater = Promise.withResolvers<void>();
   let second: Promise<void>;
-  await persist.withTransaction(async () => {
+  await persist.withTransaction(() => {
     // The callback inherits this completed transaction's async context.
     second = startLater.promise.then(async () => {
       await persist.setItem([...prefix, "sibling", "attributes", "name"], '"committed"');
       order.push("commit");
     });
+    return Promise.resolve();
   });
   const first = persist.withTransaction(async () => {
     await persist.setItem([...prefix, "retained", "attributes", "name"], '"discarded"');

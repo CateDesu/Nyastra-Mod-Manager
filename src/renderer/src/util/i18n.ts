@@ -18,14 +18,14 @@ export type { i18n };
 /** @public */
 export type TFunction = typeof I18next.t;
 
-export const fallbackTFunc: TFunction = (str: string | string[]) => {
-  return brandText(String(Array.isArray(str) ? str[0] : str));
-};
+export const fallbackTFunc = ((str: string | string[]) =>
+  brandText(String(Array.isArray(str) ? str[0] : str))) as TFunction;
 
 let debugging = false;
 let currentLanguage = "en";
 let actualT: TFunction = fallbackTFunc;
 let missingKeys: Record<string, Record<string, string>> = { common: {} };
+let legacyPluralSetup: Promise<i18n> | undefined;
 
 type BackendType = "bundled" | "custom" | "extension";
 
@@ -34,6 +34,58 @@ type BackendOptions = {
   user: string;
   translationExts: () => IExtension[];
 };
+
+const legacyPluralSuffixes = ["_plural", "_0", "_1", "_2", "_3", "_4", "_5"];
+const pluralKey = /^(.+?)(_zero|_one|_two|_few|_many|_other)$/s;
+
+async function installLegacyPluralLookup(host: i18n) {
+  const { transformKey } = await import("i18next-v4-format-converter");
+
+  return host.use({
+    type: "3rdParty",
+    init(instance: i18n) {
+      const store = instance.store as i18n["store"] & Pick<i18n, "getResource">;
+      const getResource = store.getResource.bind(store);
+      const suffixesByLanguage = new Map<string, Map<string, string>>();
+
+      function legacySuffix(language: string, suffix: string) {
+        let suffixes = suffixesByLanguage.get(language);
+        if (suffixes === undefined) {
+          suffixes = new Map();
+          const rules = new Intl.PluralRules(language);
+          const { locale, pluralCategories } = rules.resolvedOptions();
+          for (const legacy of legacyPluralSuffixes) {
+            const modern = transformKey(locale, `key${legacy}`).slice(3);
+            if (modern !== legacy && !suffixes.has(modern)) suffixes.set(modern, legacy);
+          }
+          if (pluralCategories.includes("many") && suffixes.get("_other") === "_plural") {
+            if (!suffixes.has("_many")) suffixes.set("_many", "_plural");
+          }
+          suffixesByLanguage.set(language, suffixes);
+        }
+        return suffixes.get(suffix);
+      }
+
+      // Resolve legacy plurals from the current translations.
+      store.getResource = (language, namespace, key, options) => {
+        const value = getResource(language, namespace, key, options);
+        if (value !== undefined || typeof key !== "string") return value;
+        const match = pluralKey.exec(key);
+        if (match === null || match[1].endsWith("_ordinal")) return undefined;
+        const [, base, suffix] = match;
+        let legacy: string | undefined;
+        try {
+          legacy = legacySuffix(language, suffix);
+        } catch {
+          return undefined;
+        }
+        if (legacy === undefined) return undefined;
+        const fallback: unknown = getResource(language, namespace, base + legacy, options);
+        return typeof fallback === "string" ? fallback : undefined;
+      };
+    },
+  });
+}
 
 class MultiBackend implements BackendModule<BackendOptions> {
   #backendOptions: BackendOptions;
@@ -159,10 +211,8 @@ export async function init(
   i18nObj.use(branding).use(MultiBackend).use(initReactI18next);
 
   try {
+    await (legacyPluralSetup ??= installLegacyPluralLookup(i18nObj));
     const tFunc = await i18nObj.init({
-      // TODO: Remove for i18next version 24
-      compatibilityJSON: "v3",
-
       lng: language,
       fallbackLng: "en",
       fallbackNS: "common",
@@ -292,7 +342,7 @@ export class TString implements ITString {
   }
 }
 
-export const laterT: TFunction = (
+export const laterT = ((
   key: string,
   optionsOrDefault?: TOptions | string,
   options?: TOptions,
@@ -302,7 +352,7 @@ export const laterT: TFunction = (
   } else {
     return new TString(key, optionsOrDefault, "common");
   }
-};
+}) as unknown as TFunction;
 
 /**
  * translate an input string. If key is a string or string array, this just

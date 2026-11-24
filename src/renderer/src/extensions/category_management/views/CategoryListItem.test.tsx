@@ -1,5 +1,6 @@
 import { screen, render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { TFunction } from "i18next";
 import React from "react";
 import { describe, it, expect, vi } from "vitest";
 
@@ -33,7 +34,7 @@ const renderComponent = (props: Partial<React.ComponentProps<typeof CategoryList
   const moveCategory = vi.fn();
 
   const allProps: React.ComponentProps<typeof CategoryListItem> = {
-    t,
+    t: t as unknown as TFunction,
     category: mockCategory,
     expand,
     remove,

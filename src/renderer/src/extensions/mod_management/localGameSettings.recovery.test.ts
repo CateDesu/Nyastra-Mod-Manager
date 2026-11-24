@@ -571,7 +571,10 @@ async function recoveryFixture(
       );
       const values = new Map(entries.map(({ key, value }) => [key.join("###"), value]));
       let transaction: Map<string, string>;
-      const { finishProfileImport } = load(path.join(repo, "src/main/src/profileImport.ts"), {});
+      const { finishProfileImport } = load(path.join(repo, "src/main/src/profileImport.ts"), {
+        "@vortex/shared/errors": { DataInvalid },
+        "@vortex/shared/state": sharedState,
+      });
       await finishProfileImport(
         {
           getAllKVs: async () =>

@@ -66,6 +66,9 @@ function mapDispatchToProps(dispatch: ThunkDispatch<any, null, Redux.Action>): I
   };
 }
 
-export default withTranslation(["default", "gamebryo-savegames"])(
-  connect(mapStateToProps, mapDispatchToProps)(Settings) as any,
-);
+const ConnectedSettings: React.ComponentType<IBaseProps> = withTranslation([
+  "default",
+  "gamebryo-savegames",
+])(connect(mapStateToProps, mapDispatchToProps)(Settings));
+
+export default ConnectedSettings;

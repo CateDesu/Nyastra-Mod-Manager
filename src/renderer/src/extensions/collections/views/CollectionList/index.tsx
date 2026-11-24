@@ -544,7 +544,9 @@ function mapDispatchToProps(dispatch: ThunkDispatch<any, null, Redux.Action>): I
   };
 }
 
-export default connect(
+const ConnectedCollectionsMainPage: React.ComponentType<ICollectionsMainPageBaseProps> = connect(
   mapStateToProps,
   mapDispatchToProps,
 )(withTranslation([NAMESPACE, "common"])(CollectionsMainPage));
+
+export default ConnectedCollectionsMainPage;

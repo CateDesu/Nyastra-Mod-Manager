@@ -130,4 +130,7 @@ function mapPropsToState(state: IState) {
   };
 }
 
-export default connect(mapPropsToState)(withTranslation(["common"])(HistoryDialog as any));
+const ConnectedHistoryDialog: React.ComponentType<Omit<IDialogProps, "stackToShow" | "events">> =
+  connect(mapPropsToState)(withTranslation(["common"])(HistoryDialog));
+
+export default ConnectedHistoryDialog;

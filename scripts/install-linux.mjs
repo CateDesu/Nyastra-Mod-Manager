@@ -85,10 +85,16 @@ function recoverLegacyRuntime(installRoot, installedApp, selected) {
 
 function restoreRuntime(previous, installedApp, identity) {
   if (!sameDirectory(previous, identity)) throw new Error(`Saved runtime changed: ${previous}`);
+  const notPublished = `Runtime recovery did not publish the selected directory: ${previous}`;
   // Both directories share a filesystem. mv refuses an entry created after our check.
-  command("mv", ["--no-clobber", "--no-target-directory", "--", previous, installedApp]);
+  try {
+    command("mv", ["--no-clobber", "--no-target-directory", "--", previous, installedApp]);
+  } catch (error) {
+    if (!entryExists(installedApp) || !sameDirectory(previous, identity)) throw error;
+    throw new Error(notPublished, { cause: error });
+  }
   if (entryExists(previous) || !sameDirectory(installedApp, identity)) {
-    throw new Error(`Runtime recovery did not publish the selected directory: ${previous}`);
+    throw new Error(notPublished);
   }
 }
 

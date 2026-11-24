@@ -50,7 +50,7 @@ test.for([
     harness.api.registerProtocol = vi.fn().mockResolvedValue(false);
     harness.api.registerRepositoryLookup = vi.fn();
     harness.api.addMetaServer = vi.fn();
-    harness.api.laterT = (text) => text;
+    harness.api.laterT = ((text: string) => text) as typeof harness.api.laterT;
 
     const writes: string[] = [];
     vi.spyOn(fs, "writeFileAsync").mockImplementation((_filename, contents) => {

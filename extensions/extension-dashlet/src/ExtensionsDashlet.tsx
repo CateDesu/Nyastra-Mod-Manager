@@ -258,6 +258,8 @@ function mapDispatchToProps(dispatch: DispatchT): IActionProps {
   };
 }
 
-export default withTranslation([NAMESPACE, "common"])(
+const ConnectedExtensionsDashlet: React.ComponentType = withTranslation([NAMESPACE, "common"])(
   connect(mapStateToProps, mapDispatchToProps)(ExtensionsDashlet) as any,
 );
+
+export default ConnectedExtensionsDashlet;
